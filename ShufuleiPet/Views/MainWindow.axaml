@@ -1,0 +1,15 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ShufuleiPet.Views.MainWindow"
+        Title="舒芙蕾桌宠"
+        Width="480" Height="680"
+        MinWidth="200" MinHeight="200"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        WindowDecorations="None"
+        Topmost="True"
+        ShowInTaskbar="False"
+        WindowStartupLocation="Manual">
+    <NativeWebView x:Name="WebView"
+                   Background="Transparent" />
+</Window>

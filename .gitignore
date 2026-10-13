@@ -1,0 +1,6 @@
+.idea
+obj
+bin
+wwwroot
+*.DotSettings.user
+*.Vulkan*
