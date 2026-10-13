@@ -14,6 +14,7 @@ namespace ShufuleiPet.Views;
 public interface IPetWindow
 {
     void ToggleVisible();
+    void ResetModel();
     void ExitForShutdown();
 }
 
@@ -242,6 +243,12 @@ public class NativePetWindow : Window, IPetWindow
     {
         if (IsVisible) Hide();
         else { Show(); Activate(); }
+    }
+
+    /// <summary>托盘菜单：重置模型大小与位置。</summary>
+    public void ResetModel()
+    {
+        _control.ResetModel();
     }
 
     /// <summary>托盘菜单：退出（原生窗口不劫持关闭行为）。</summary>

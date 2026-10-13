@@ -63,6 +63,8 @@ public partial class App : Application
             var menu = new NativeMenu();
             var toggleItem = new NativeMenuItem("显示 / 隐藏");
             toggleItem.Click += (_, _) => petOps.ToggleVisible();
+            var resetItem = new NativeMenuItem("重置模型");
+            resetItem.Click += (_, _) => petOps.ResetModel();
             var exitItem = new NativeMenuItem("退出");
             exitItem.Click += (_, _) =>
             {
@@ -70,6 +72,7 @@ public partial class App : Application
                 desktop.Shutdown();
             };
             menu.Items.Add(toggleItem);
+            menu.Items.Add(resetItem);
             menu.Items.Add(new NativeMenuItemSeparator());
             menu.Items.Add(exitItem);
 
@@ -80,7 +83,7 @@ public partial class App : Application
                 ToolTipText = "舒芙蕾桌宠",
                 Menu = menu,
             };
-            _trayIcons = new TrayIcons { trayIcon };
+            _trayIcons = [trayIcon];
             TrayIcon.SetIcons(this, _trayIcons);
             Logger.Information("Tray icon set, initialization completed");
         }

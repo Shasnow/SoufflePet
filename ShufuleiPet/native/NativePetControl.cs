@@ -138,6 +138,12 @@ public class NativePetControl : OpenGlControlBase
         _lapp.View.AdjustTranslate(2f * dx / h, -2f * dy / h);
     }
 
+    /// <summary>托盘菜单：重置模型大小与位置（恢复初始缩放与居中位置）。</summary>
+    public void ResetModel()
+    {
+        _lapp?.View.ResetView();
+    }
+
     /// <summary>左键单击：随机切换一个表情。</summary>
     public void TapRandomExpression() => _model?.SetRandomExpression();
 

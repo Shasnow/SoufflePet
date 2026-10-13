@@ -128,6 +128,20 @@ public abstract class LAppView(LAppDelegate lapp)
     }
 
     /// <summary>
+    /// 将视图矩阵恢复到初始状态（重置缩放与位移）。
+    /// </summary>
+    /// <remarks>
+    /// AdjustScale / AdjustTranslate 都是对现有矩阵做乘法，仅重新调用
+    /// Initialize() 并不会清除已累积的缩放和位移；这里先 LoadIdentity()
+    /// 再 Initialize()，即可回到与首次初始化一致的状态。
+    /// </remarks>
+    public void ResetView()
+    {
+        _viewMatrix.LoadIdentity();
+        Initialize();
+    }
+
+    /// <summary>
     /// タッチされたときに呼ばれる。
     /// </summary>
     /// <param name="pointX">スクリーンX座標</param>

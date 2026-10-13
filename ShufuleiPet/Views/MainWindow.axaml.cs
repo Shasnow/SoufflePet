@@ -13,7 +13,7 @@ namespace ShufuleiPet.Views;
 
 public partial class MainWindow : Window, IPetWindow
 {
-    private static readonly string WWWRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+    private static readonly string WwwRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
     public const int Port = 18923;
 
     private HttpListener? _server;
@@ -66,6 +66,19 @@ public partial class MainWindow : Window, IPetWindow
     {
         if (IsVisible) Hide();
         else { Show(); Activate(); }
+    }
+
+    /// <summary>托盘菜单：重置模型大小与位置（转发给页面执行）。</summary>
+    public void ResetModel()
+    {
+        try
+        {
+            _ = WebView.InvokeScript("window.onHostResetModel && window.onHostResetModel();");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略
+        }
     }
 
     /// <summary>托盘菜单：真正退出（解除 Closing 劫持并停掉本地服务器）。</summary>
@@ -179,8 +192,8 @@ public partial class MainWindow : Window, IPetWindow
                 // 模型文件名是中文，URL 中被百分号编码，必须解码；根路径回退到 index.html
                 var rel = Uri.UnescapeDataString(ctx.Request.Url!.AbsolutePath.TrimStart('/'));
                 if (rel.Length == 0) rel = "index.html";
-                var file = Path.GetFullPath(Path.Combine(WWWRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
-                var root = Path.GetFullPath(WWWRoot);
+                var file = Path.GetFullPath(Path.Combine(WwwRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
+                var root = Path.GetFullPath(WwwRoot);
                 if (!file.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
                 {
                     ctx.Response.StatusCode = 404;

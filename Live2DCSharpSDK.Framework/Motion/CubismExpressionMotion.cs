@@ -148,8 +148,8 @@ public class CubismExpressionMotion : ACubismMotion
             return;
         }
 
-        // フェードのウェイトは呼び出し元（CubismExpressionMotionManager）から
-        // fadeWeight 引数で渡されるため、ここでは再計算しない。
+        // 淡入淡出权重由调用方（CubismExpressionMotionManager）经 fadeWeight
+        // 参数传入，此处不再重复计算。
 
         // モデルに適用する値を計算
         for (int i = 0; i < expressionParameterValues.Count; ++i)

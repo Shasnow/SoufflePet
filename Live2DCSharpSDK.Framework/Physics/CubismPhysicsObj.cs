@@ -3,8 +3,8 @@ using System.Numerics;
 namespace Live2DCSharpSDK.Framework.Physics;
 
 /// <summary>
-/// physics3.json のデシリアライズ用 DTO。値は JsonSerializer が設定するため、
-/// 宣言時は null! で初期化しておく（CS8618 対策）。
+/// physics3.json 反序列化 DTO。字段值由 JsonSerializer 填充，
+/// 故声明时用 null! 初始化（消除 CS8618 警告）。
 /// </summary>
 public record CubismPhysicsObj
 {
