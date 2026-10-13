@@ -65,6 +65,23 @@ public class LAppLive2DManager(LAppDelegate lapp) : IDisposable
     }
 
     /// <summary>
+    /// 将模型坐标换算到裁剪坐标（即窗口的 [-1,1] 归一化坐标）。
+    /// </summary>
+    /// <remarks>
+    /// 使用最近一帧累积出的投影矩阵（Model-View-Projection），因此必须在
+    /// OnUpdate（渲染）之后调用，才能反映当前帧的缩放与位移。
+    /// </remarks>
+    /// <param name="modelX">模型坐标系下的 X</param>
+    /// <param name="modelY">模型坐标系下的 Y</param>
+    /// <param name="clipX">输出的裁剪坐标 X</param>
+    /// <param name="clipY">输出的裁剪坐标 Y</param>
+    public void ModelToClip(float modelX, float modelY, out float clipX, out float clipY)
+    {
+        clipX = _projection.TransformX(modelX);
+        clipY = _projection.TransformY(modelY);
+    }
+
+    /// <summary>
     /// 画面をタップしたときの処理
     /// </summary>
     /// <param name="x">画面のX座標</param>

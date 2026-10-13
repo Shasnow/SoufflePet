@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using Avalonia;
@@ -24,9 +25,14 @@ public class NativePetControl : OpenGlControlBase
     private LAppDelegateOpenGL? _lapp;
     private AvaloniaApi? _glApi;
     private LAppModel? _model;
+    private string? _modelDir;
     private DateTime _last;
     private bool _inited;
     private IntPtr _hwnd;
+
+    /// <summary>模型双眼中心的模型坐标（加载后测一次并缓存），作为目光跟随的基准点。</summary>
+    private System.Numerics.Vector2? _eyeModel;
+    private bool _eyeMeasured;
 
     /// <summary>光标下是否有模型的可见像素（每帧渲染后读取 1 像素 alpha 判定，供点击穿透用）。</summary>
     public bool IsPointerOverModel { get; private set; }
@@ -73,6 +79,7 @@ public class NativePetControl : OpenGlControlBase
             Logger.Debug("LAppDelegateOpenGL ok");
 
             var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "舒芙蕾");
+            _modelDir = modelDir;
             _model = _lapp.Live2dManager.LoadModel(modelDir, "舒芙蕾");
             Logger.Debug("LoadModel ok textures={TextureCount}", _model.Textures.Count);
 
@@ -147,10 +154,119 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>左键单击：随机切换一个表情。</summary>
     public void TapRandomExpression() => _model?.SetRandomExpression();
 
-    /// <summary>目光跟随：传 [-1,1] 视图坐标（中心原点、y 向上），驱动转头角度和眼球参数。</summary>
-    public void OnDrag(float x, float y)
+    /// <summary>
+    /// 目光跟随：传入光标在窗口裁剪空间中的坐标（中心原点、y 向上，范围约 [-1,1]），
+    /// 内部换算成"以模型双眼中心为基准"的视线方向后再驱动转头与眼球参数。
+    /// </summary>
+    /// <remarks>
+    /// 基准点由模型双眼中心投影到裁剪空间得到，因此滚轮缩放、中键拖动模型后，
+    /// 基准点会随模型一起移动，视线始终朝向光标。
+    /// </remarks>
+    public void OnDrag(float clipX, float clipY)
     {
-        _lapp?.Live2dManager.OnDrag(x, y);
+        var manager = _lapp?.Live2dManager;
+        if (manager == null) return;
+
+        // 基准点：模型双眼中心在裁剪空间的位置；尚未测到时退化为视图中心 (0,0)
+        float baseX = 0f, baseY = 0f;
+        if (_eyeModel is { } eye)
+            manager.ModelToClip(eye.X, eye.Y, out baseX, out baseY);
+
+        manager.OnDrag(
+            Math.Clamp(clipX - baseX, -1f, 1f),
+            Math.Clamp(clipY - baseY, -1f, 1f));
+    }
+
+    /// <summary>
+    /// 测量模型双眼中心的模型坐标，作为目光跟随的基准点（只测一次并缓存）。
+    /// </summary>
+    /// <remarks>
+    /// 眼睛部件通过 cdi3.json 的部件显示名定位（"L眼"、"R眼"），分别取其所有顶点的
+    /// 均值再对两眼取平均，即"双眼之间"的中点。只测一次可避免 idle 动作使基准漂移。
+    /// 找不到眼睛部件时基准点保持为视图中心，行为与改动前一致。
+    /// </remarks>
+    private void MeasureEyeCenter()
+    {
+        _eyeMeasured = true;
+        var model = _model?.Model;
+        if (model == null) return;
+
+        // cdi3.json 的 Parts[].{Id,Name} 提供部件 ID 到显示名的映射
+        var partNames = new Dictionary<string, string>();
+        try
+        {
+            if (_modelDir != null)
+            {
+                var files = Directory.GetFiles(_modelDir, "*.cdi3.json");
+                if (files.Length > 0)
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(files[0]));
+                    if (doc.RootElement.TryGetProperty("Parts", out var parts))
+                    {
+                        foreach (var part in parts.EnumerateArray())
+                        {
+                            var id = part.GetProperty("Id").GetString();
+                            var name = part.GetProperty("Name").GetString();
+                            if (id != null && name != null) partNames[id] = name;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "read cdi3.json failed");
+        }
+
+        // 眼睛部件按显示名识别：名称含"眼"即可（本模型为 "←眼"/"→眼"），
+        // 但排除"眼镜"/"眼罩"/"眼泪"等干扰项。
+        // 先对每个眼睛部件求顶点均值，再对这些部件中心取平均 = 双眼之间的中点。
+        var eyeParts = new Dictionary<string, (double SumX, double SumY, int Drawables)>();
+        unsafe
+        {
+            for (int i = 0; i < model.GetDrawableCount(); i++)
+            {
+                var partIndex = model.GetDrawableParentPartIndex(i);
+                if (partIndex < 0 || partIndex >= model.PartIds.Count) continue;
+                if (!partNames.TryGetValue(model.PartIds[partIndex], out var name)) continue;
+                if (!name.Contains('眼') || name.Contains('镜') || name.Contains('罩') || name.Contains('泪')) continue;
+
+                var count = model.GetDrawableVertexCount(i);
+                var vertices = model.GetDrawableVertexPositions(i);
+                if (count <= 0 || vertices == null) continue;
+
+                double cx = 0, cy = 0;
+                for (int k = 0; k < count; k++)
+                {
+                    cx += vertices[k].X;
+                    cy += vertices[k].Y;
+                }
+                var acc = eyeParts.TryGetValue(name, out var v) ? v : (SumX: 0d, SumY: 0d, Drawables: 0);
+                eyeParts[name] = (acc.SumX + cx / count, acc.SumY + cy / count, acc.Drawables + 1);
+            }
+        }
+
+        if (eyeParts.Count == 0)
+        {
+            Logger.Warning("eye parts not found, gaze falls back to view center");
+            return;
+        }
+
+        double sumX = 0, sumY = 0;
+        foreach (var (_, acc) in eyeParts)
+        {
+            sumX += acc.SumX / acc.Drawables;
+            sumY += acc.SumY / acc.Drawables;
+        }
+
+        _eyeModel = new System.Numerics.Vector2((float)(sumX / eyeParts.Count), (float)(sumY / eyeParts.Count));
+        float baseX = 0f, baseY = 0f;
+        if (_lapp is { } app)
+            app.Live2dManager.ModelToClip(_eyeModel.Value.X, _eyeModel.Value.Y, out baseX, out baseY);
+        Logger.Debug(
+            "eye center model=({X:F4},{Y:F4}) clip=({BX:F4},{BY:F4}) parts={Count} canvas={W:F3}x{H:F3}",
+            _eyeModel.Value.X, _eyeModel.Value.Y, baseX, baseY, eyeParts.Count,
+            model.GetCanvasWidth(), model.GetCanvasHeight());
     }
 
     /// <summary>右键单击：重播 Idle 动作（该模型只带 Idle 这一个动作组）。</summary>
@@ -181,6 +297,10 @@ public class NativePetControl : OpenGlControlBase
                 _model?.Model.SetPartOpacity("Part13", 0f);
 
             _lapp.Run(span);
+
+            // 顶点数据在 UpdateModel 之后才有效，故在第一帧渲染后再测量双眼中心
+            if (!_eyeMeasured && _model != null) MeasureEyeCenter();
+
             ProbeCursorPixel(fb, vpW, vpH);
             _frames++;
             if (_frames == 1 || _frames % 300 == 0)

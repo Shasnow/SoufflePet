@@ -190,7 +190,8 @@ public class NativePetWindow : Window, IPetWindow
         var x = (float)((cursor.X - origin.X) / scaling / Bounds.Width * 2 - 1);
         var y = (float)((cursor.Y - origin.Y) / scaling / Bounds.Height * 2 - 1);
 
-        // 视图坐标：中心原点、y 向上；窗口外光标夹到边界，视线始终朝向鼠标
+        // 裁剪坐标：中心原点、y 向上；窗口外光标夹到边界。
+        // 基准点（模型双眼中心）的换算在 NativePetControl.OnDrag 内完成。
         _control.OnDrag(Math.Clamp(x, -1f, 1f), -Math.Clamp(y, -1f, 1f));
     }
 
