@@ -150,12 +150,8 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>目光跟随：传 [-1,1] 视图坐标（中心原点、y 向上），驱动转头角度和眼球参数。</summary>
     public void OnDrag(float x, float y)
     {
-        _lastDragX = x; _lastDragY = y;
-        _dragCalls++;
         _lapp?.Live2dManager.OnDrag(x, y);
     }
-    private float _lastDragX, _lastDragY;
-    private int _dragCalls;
 
     /// <summary>右键单击：重播 Idle 动作（该模型只带 Idle 这一个动作组）。</summary>
     public void ReplayMotion()
