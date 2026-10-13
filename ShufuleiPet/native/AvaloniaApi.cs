@@ -134,7 +134,7 @@ public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
     {
         GLDisableVertexAttribArray(index);
     }
-    public override unsafe void DrawElements(int type, int count, int type1, nint arry)
+    public override void DrawElements(int type, int count, int type1, nint arry)
     {
         gl.DrawElements(type, count, type1, arry);
     }
@@ -265,7 +265,7 @@ public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
     {
         gl.UseProgram(index);
     }
-    public override unsafe void VertexAttribPointer(int index, int length, int type, bool b, int size, nint arr)
+    public override void VertexAttribPointer(int index, int length, int type, bool b, int size, nint arr)
     {
         gl.VertexAttribPointer(index, length, type, b ? 1 : 0, size, arr);
     }
