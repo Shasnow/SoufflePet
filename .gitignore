@@ -1,6 +1,7 @@
 .idea
 obj
 bin
-wwwroot
+**/wwwroot/*
+!**/wwwroot/index.html
 *.DotSettings.user
 *.Vulkan*

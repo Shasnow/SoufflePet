@@ -364,9 +364,6 @@ public class LAppModel : CubismUserModel
         _dragX = _dragManager.FaceX;
         _dragY = _dragManager.FaceY;
 
-        // モーションによるパラメータ更新の有無
-        bool motionUpdated = false;
-
         //-----------------------------------------------------------------
         Model.LoadParameters(); // 前回セーブされた状態をロード
         if (_motionManager.IsFinished() && RandomMotion)
@@ -376,7 +373,7 @@ public class LAppModel : CubismUserModel
         }
         else
         {
-            motionUpdated = _motionManager.UpdateMotion(Model, deltaTimeSeconds); // モーションを更新
+            _motionManager.UpdateMotion(Model, deltaTimeSeconds); // モーションを更新
         }
         Model.SaveParameters(); // 状態を保存
 
@@ -385,12 +382,10 @@ public class LAppModel : CubismUserModel
         // 不透明度
         Opacity = Model.GetModelOpacity();
 
-        // まばたき
-        if (!motionUpdated)
-        {
-            // メインモーションの更新がないとき
-            //_eyeBlink?.UpdateParameters(Model, deltaTimeSeconds); // 目パチ
-        }
+        // 自动眨眼：待机动作是循环动作（Loop=true），每帧都会更新参数，
+        // 因此不能照搬官方示例的 !motionUpdated 门控，否则永远不会眨眼。
+        // 动作已通过 SetEffectIds 排除眨眼参数，这里直接叠加眨眼值即可。
+        _eyeBlink?.UpdateParameters(Model, deltaTimeSeconds); // 目パチ
 
         _expressionManager?.UpdateMotion(Model, deltaTimeSeconds); // 表情でパラメータ更新（相対変化）
 

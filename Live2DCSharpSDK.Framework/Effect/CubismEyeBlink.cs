@@ -1,4 +1,4 @@
-﻿//IDで指定された目のパラメータが、0のときに閉じるなら true 、1の時に閉じるなら false 。
+//IDで指定された目のパラメータが、0のときに閉じるなら true 、1の時に閉じるなら false 。
 //#define CloseIfZero
 
 using Live2DCSharpSDK.Framework.Model;
@@ -184,7 +184,9 @@ public class CubismEyeBlink
     /// <returns>次のまばたきを行う時刻[秒]</returns>
     private float DetermineNextBlinkingTiming()
     {
-        float r = _random.Next() / int.MaxValue;
+        // 原写法 _random.Next() / int.MaxValue 是整数除法，结果恒为 0，
+        // 导致眨眼间隔固定为 0（每约 0.3 秒连眨一次）。改用浮点随机数得到 [0,1)。
+        float r = (float)_random.NextDouble();
 
         return _userTimeSeconds + (r * (2.0f * _blinkingIntervalSeconds - 1.0f));
     }
