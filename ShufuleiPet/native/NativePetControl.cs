@@ -125,6 +125,19 @@ public class NativePetControl : OpenGlControlBase
         _lapp?.View.AdjustScale(0f, 0f, factor);
     }
 
+    /// <summary>中键拖拽：按 DIP 增量移动模型在窗口内的显示位置（窗口本身不动）。</summary>
+    /// <remarks>
+    /// 换算推导：投影 = Scale(h/w,1)·ViewMatrix，clip.x = (h/w)(s·mx+tx)、clip.w=1，
+    /// 屏幕像素 px = (vpH·(s·mx+tx) + vpW)/2（DIP 表示同理），因此 Δtx = 2·Δpx/vpH，
+    /// x、y 两轴都除以高度。AdjustTranslate 平移在裁剪空间直接叠加，与当前缩放无关。
+    /// </remarks>
+    public void MoveModelBy(float dx, float dy)
+    {
+        if (_lapp == null || Bounds.Height <= 0) return;
+        var h = (float)Bounds.Height;
+        _lapp.View.AdjustTranslate(2f * dx / h, -2f * dy / h);
+    }
+
     /// <summary>左键单击：随机切换一个表情。</summary>
     public void TapRandomExpression() => _model?.SetRandomExpression();
 

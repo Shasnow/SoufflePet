@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 
 namespace Live2DCSharpSDK.Framework.Physics;
 
@@ -247,7 +247,7 @@ public record CubismPhysicsInput
     /// <summary>
     /// 正規化されたパラメータ値の取得関数
     /// </summary>
-    public NormalizedPhysicsParameterValueGetter GetNormalizedParameterValue;
+    public NormalizedPhysicsParameterValueGetter GetNormalizedParameterValue = null!;
 }
 
 /// <summary>
@@ -298,11 +298,11 @@ public record CubismPhysicsOutput
     /// <summary>
     /// 物理演算の値の取得関数
     /// </summary>
-    public PhysicsValueGetter GetValue;
+    public PhysicsValueGetter GetValue = null!;
     /// <summary>
     /// 物理演算のスケール値の取得関数
     /// </summary>
-    public PhysicsScaleGetter GetScale;
+    public PhysicsScaleGetter GetScale = null!;
 }
 
 /// <summary>

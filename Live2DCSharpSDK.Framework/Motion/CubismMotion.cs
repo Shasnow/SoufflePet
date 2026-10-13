@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Live2DCSharpSDK.Framework.Math;
 using Live2DCSharpSDK.Framework.Model;
 
@@ -47,24 +47,24 @@ public class CubismMotion : ACubismMotion
     /// <summary>
     /// 自動まばたきを適用するパラメータIDハンドルのリスト。  モデル（モデルセッティング）とパラメータを対応付ける。
     /// </summary>
-    private List<string> _eyeBlinkParameterIds;
+    private List<string> _eyeBlinkParameterIds = null!;
     /// <summary>
     /// リップシンクを適用するパラメータIDハンドルのリスト。  モデル（モデルセッティング）とパラメータを対応付ける。
     /// </summary>
-    private List<string> _lipSyncParameterIds;
+    private List<string> _lipSyncParameterIds = null!;
 
     /// <summary>
     /// モデルが持つ自動まばたき用パラメータIDのハンドル。  モデルとモーションを対応付ける。
     /// </summary>
-    private string _modelCurveIdEyeBlink;
+    private string _modelCurveIdEyeBlink = null!;
     /// <summary>
     /// モデルが持つリップシンク用パラメータIDのハンドル。  モデルとモーションを対応付ける。
     /// </summary>
-    private string _modelCurveIdLipSync;
+    private string _modelCurveIdLipSync = null!;
     /// <summary>
     /// モデルが持つ不透明度用パラメータIDのハンドル。  モデルとモーションを対応付ける。
     /// </summary>
-    private string _modelCurveIdOpacity;
+    private string _modelCurveIdOpacity = null!;
 
     /// <summary>
     /// モーションから取得した不透明度

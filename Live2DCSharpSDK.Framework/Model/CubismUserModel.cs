@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework.Effect;
+using Live2DCSharpSDK.Framework.Effect;
 using Live2DCSharpSDK.Framework.Math;
 using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Physics;
@@ -18,7 +18,7 @@ public abstract class CubismUserModel : IDisposable
     /// <summary>
     /// モデル行列
     /// </summary>
-    public CubismModelMatrix ModelMatrix { get; protected set; }
+    public CubismModelMatrix ModelMatrix { get; protected set; } = null!;
     /// <summary>
     /// Modelインスタンス
     /// </summary>
@@ -39,7 +39,7 @@ public abstract class CubismUserModel : IDisposable
     /// <summary>
     /// Mocデータ
     /// </summary>
-    protected CubismMoc _moc;
+    protected CubismMoc _moc = null!;
 
     /// <summary>
     /// モーション管理
@@ -56,7 +56,7 @@ public abstract class CubismUserModel : IDisposable
     /// <summary>
     /// 呼吸
     /// </summary>
-    protected CubismBreath _breath;
+    protected CubismBreath _breath = null!;
     /// <summary>
     /// ポーズ管理
     /// </summary>

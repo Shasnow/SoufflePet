@@ -47,6 +47,7 @@ public class NativePetWindow : Window, IPetWindow
     private const uint LwaAlpha = 0x2;
     private const int VkLbutton = 0x01;
     private const int VkRbutton = 0x02;
+    private const int VkMbutton = 0x04;
     private bool _clickThrough;
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
@@ -82,21 +83,41 @@ public class NativePetWindow : Window, IPetWindow
         _renderTimer.Start();
 
         // 交互：
-        // - 按住拖动（位移 > 6px）→ 系统级拖拽窗口
+        // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
         // - 左键单击 → 随机切换表情
         // - 右键单击 → 重播 Idle 动作
         // - 滚轮 → 缩放模型
+        // - 中键按住拖动 → 移动模型在窗口内的位置（不移动窗口）
         Point? pressPoint = null;
+        Point? modelDragPoint = null;
         PointerPressed += (_, e) =>
         {
-            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            var props = e.GetCurrentPoint(this).Properties;
+            if (props.IsLeftButtonPressed)
+            {
                 pressPoint = e.GetPosition(this);
+            }
+            else if (props.IsMiddleButtonPressed)
+            {
+                modelDragPoint = e.GetPosition(this);
+                e.Pointer.Capture(this); // 光标拖出窗口边界后仍能收到移动事件
+            }
         };
         PointerMoved += (_, e) =>
         {
             // 目光跟随由 TrackGlobalCursor 全局轮询负责（PointerMoved 只在窗口内触发），
             // 这里只处理按住拖动判定。
             var pos = e.GetPosition(this);
+
+            // 中键拖模型：按 DIP 增量移动模型显示位置
+            if (modelDragPoint is not null)
+            {
+                _control.MoveModelBy(
+                    (float)(pos.X - modelDragPoint.Value.X),
+                    (float)(pos.Y - modelDragPoint.Value.Y));
+                modelDragPoint = pos;
+                return;
+            }
 
             if ((DateTime.Now - _lastMoveLog).TotalMilliseconds > 800)
             {
@@ -116,6 +137,12 @@ public class NativePetWindow : Window, IPetWindow
         };
         PointerReleased += (_, e) =>
         {
+            if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.MiddleButtonReleased)
+            {
+                modelDragPoint = null;
+                e.Pointer.Capture(null);
+                return;
+            }
             if (pressPoint is null) return;
             pressPoint = null;
             if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonReleased)
@@ -197,8 +224,10 @@ public class NativePetWindow : Window, IPetWindow
         EnsureLayered();
 
         // 按住鼠标期间保持交互，避免拖拽中途穿透翻转把拖拽交给下层窗口
+        // （中键拖模型时模型可能被拖离光标，IsPointerOverModel 会变 false）
         var held = (GetAsyncKeyState(VkLbutton) & 0x8000) != 0
-                || (GetAsyncKeyState(VkRbutton) & 0x8000) != 0;
+                || (GetAsyncKeyState(VkRbutton) & 0x8000) != 0
+                || (GetAsyncKeyState(VkMbutton) & 0x8000) != 0;
         var want = !_control.IsPointerOverModel && !held;
         if (want == _clickThrough) return;
         _clickThrough = want;

@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework.Model;
+using Live2DCSharpSDK.Framework.Model;
 
 namespace Live2DCSharpSDK.Framework.Motion;
 
@@ -44,7 +44,7 @@ public class CubismMotionQueueManager
         // 既にモーションがあれば終了フラグを立てる
         for (int i = 0; i < Motions.Count; ++i)
         {
-            motionQueueEntry = Motions[0];
+            motionQueueEntry = Motions[i];
             if (motionQueueEntry == null)
             {
                 continue;

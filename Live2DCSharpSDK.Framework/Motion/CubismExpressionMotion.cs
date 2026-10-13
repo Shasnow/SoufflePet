@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Nodes;
+using System.Text.Json.Nodes;
 using Live2DCSharpSDK.Framework.Model;
 
 namespace Live2DCSharpSDK.Framework.Motion;
@@ -32,12 +32,6 @@ public class CubismExpressionMotion : ACubismMotion
     /// 表情のパラメータ情報リスト
     /// </summary>
     public List<ExpressionParameter> Parameters { get; init; } = [];
-
-    /// <summary>
-    /// 表情のフェードのウェイト値
-    /// </summary>
-    [Obsolete("CubismExpressionMotion._fadeWeightが削除予定のため非推奨\nCubismExpressionMotionManager.getFadeWeight(int index) を使用してください。")]
-    public float FadeWeight { get; private set; }
 
     /// <summary>
     /// インスタンスを作成する。
@@ -154,9 +148,8 @@ public class CubismExpressionMotion : ACubismMotion
             return;
         }
 
-        // CubismExpressionMotion._fadeWeight は廃止予定です。
-        // 互換性のために処理は残りますが、実際には使用しておりません。
-        FadeWeight = UpdateFadeWeight(motionQueueEntry, userTimeSeconds);
+        // フェードのウェイトは呼び出し元（CubismExpressionMotionManager）から
+        // fadeWeight 引数で渡されるため、ここでは再計算しない。
 
         // モデルに適用する値を計算
         for (int i = 0; i < expressionParameterValues.Count; ++i)
@@ -242,9 +235,9 @@ public class CubismExpressionMotion : ACubismMotion
             }
             else
             {
-                expressionParameterValues[i].AdditiveValue = (expressionParameterValue.AdditiveValue * (1.0f - FadeWeight)) + newAdditiveValue * FadeWeight;
-                expressionParameterValues[i].MultiplyValue = (expressionParameterValue.MultiplyValue * (1.0f - FadeWeight)) + newMultiplyValue * FadeWeight;
-                expressionParameterValues[i].OverwriteValue = (expressionParameterValue.OverwriteValue * (1.0f - FadeWeight)) + newSetValue * FadeWeight;
+                expressionParameterValues[i].AdditiveValue = (expressionParameterValue.AdditiveValue * (1.0f - fadeWeight)) + newAdditiveValue * fadeWeight;
+                expressionParameterValues[i].MultiplyValue = (expressionParameterValue.MultiplyValue * (1.0f - fadeWeight)) + newMultiplyValue * fadeWeight;
+                expressionParameterValues[i].OverwriteValue = (expressionParameterValue.OverwriteValue * (1.0f - fadeWeight)) + newSetValue * fadeWeight;
             }
         }
     }

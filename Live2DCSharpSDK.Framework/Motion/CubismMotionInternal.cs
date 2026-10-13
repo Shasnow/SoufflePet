@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework.Model;
+using Live2DCSharpSDK.Framework.Model;
 
 namespace Live2DCSharpSDK.Framework.Motion;
 
@@ -136,7 +136,7 @@ public record CubismMotionSegment
     /// <summary>
     /// 使用する評価関数
     /// </summary>
-    public csmMotionSegmentEvaluationFunction Evaluate;
+    public csmMotionSegmentEvaluationFunction Evaluate = null!;
     /// <summary>
     /// 最初のセグメントへのインデックス
     /// </summary>
@@ -159,7 +159,7 @@ public record CubismMotionCurve
     /// <summary>
     /// カーブのID
     /// </summary>
-    public string Id;
+    public string Id = null!;
     /// <summary>
     /// セグメントの個数
     /// </summary>
@@ -184,7 +184,7 @@ public record CubismMotionCurve
 public record CubismMotionEvent
 {
     public float FireTime;
-    public string Value;
+    public string Value = null!;
 }
 
 /// <summary>
@@ -215,17 +215,17 @@ public record CubismMotionData
     /// <summary>
     /// カーブのリスト
     /// </summary>
-    public CubismMotionCurve[] Curves;
+    public CubismMotionCurve[] Curves = null!;
     /// <summary>
     /// セグメントのリスト
     /// </summary>
-    public CubismMotionSegment[] Segments;
+    public CubismMotionSegment[] Segments = null!;
     /// <summary>
     /// ポイントのリスト
     /// </summary>
-    public CubismMotionPoint[] Points;
+    public CubismMotionPoint[] Points = null!;
     /// <summary>
     /// イベントのリスト
     /// </summary>
-    public CubismMotionEvent[] Events;
+    public CubismMotionEvent[] Events = null!;
 }

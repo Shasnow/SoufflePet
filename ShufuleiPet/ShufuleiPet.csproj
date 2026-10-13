@@ -11,6 +11,10 @@
 
   <ItemGroup>
     <None Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\Live2DCubismCore.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Live2DCubismCore.dll</Link>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
@@ -29,5 +33,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Live2DCSharpSDK.OpenGL\Live2DCSharpSDK.OpenGL.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Assets\pet.ico" />
+    <AvaloniaResource Include="Assets\pet.ico" />
   </ItemGroup>
 </Project>

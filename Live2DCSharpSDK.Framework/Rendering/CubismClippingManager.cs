@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Live2DCSharpSDK.Framework.Math;
 using Live2DCSharpSDK.Framework.Model;
 using Live2DCSharpSDK.Framework.Type;
@@ -27,7 +27,7 @@ public abstract class CubismClippingManager
     /// <summary>
     /// オフスクリーンサーフェイスのアドレス
     /// </summary>
-    protected CubismOffscreenSurface CurrentMaskBuffer;
+    protected CubismOffscreenSurface CurrentMaskBuffer = null!;
     /// <summary>
     /// マスクのクリアフラグの配列
     /// </summary>

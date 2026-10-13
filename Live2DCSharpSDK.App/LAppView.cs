@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework;
+using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Math;
 
 namespace Live2DCSharpSDK.App;
@@ -112,6 +112,19 @@ public abstract class LAppView(LAppDelegate lapp)
     public float GetScale()
     {
         return _viewMatrix.GetScaleX();
+    }
+
+    /// <summary>
+    /// モデルの表示位置を移動する（画面論理座標の移動量）。
+    /// 移動可能範囲は SetMaxScreenRect の設定に応じて AdjustTranslate 内でクランプされる。
+    /// </summary>
+    /// <remarks>
+    /// Render() 毎に manager.ViewMatrix へ _viewMatrix がコピーされるため、
+    /// 移動も必ずこの _viewMatrix 側に対して行う必要がある（Zoom と同じ扱い）。
+    /// </remarks>
+    public void AdjustTranslate(float x, float y)
+    {
+        _viewMatrix.AdjustTranslate(x, y);
     }
 
     /// <summary>

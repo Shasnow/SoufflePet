@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework.Math;
+using Live2DCSharpSDK.Framework.Math;
 using Live2DCSharpSDK.Framework.Model;
 
 namespace Live2DCSharpSDK.Framework.Motion;
@@ -11,7 +11,7 @@ public record ExpressionParameterValue
     /// <summary>
     /// パラメータID
     /// </summary>
-    public string ParameterId;
+    public string ParameterId = null!;
     /// <summary>
     /// 加算値
     /// </summary>
@@ -58,7 +58,7 @@ public class CubismExpressionMotionManager : CubismMotionQueueManager
 
         _fadeWeights.Add(0.0f);
 
-        return StartMotion(motion, UserTimeSeconds);
+        return StartMotion(motion);
     }
 
     /// <summary>
