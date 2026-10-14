@@ -101,7 +101,8 @@ public class NativePetControl : OpenGlControlBase
             _model = _lapp.Live2dManager.LoadModel(modelDir, "舒芙蕾");
             Logger.Debug("LoadModel ok textures={TextureCount}", _model.Textures.Count);
 
-            PlayIdle();
+            // SDK会自动播放 Idle 动作，这里注释掉手动播放
+            // PlayIdle();
 
             // 补设模型加载完成前缓存的自动表情（自动表情服务可能先于 GL 初始化触发）
             if (_hasPendingExpression)
