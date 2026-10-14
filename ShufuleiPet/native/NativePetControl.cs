@@ -34,6 +34,13 @@ public class NativePetControl : OpenGlControlBase
     private System.Numerics.Vector2? _eyeModel;
     private bool _eyeMeasured;
 
+    /// <summary>模型包围盒（视图空间，缩放 1 且未平移时测得）：中键拖拽时据此保证模型不会整体移出窗口。</summary>
+    private float _bboxMinX, _bboxMaxX = 1f, _bboxMinY, _bboxMaxY = 1f;
+    private bool _bboxMeasured;
+
+    /// <summary>拖拽时至少保留在窗口内的可见边条（DIP），保证拖到窗口边缘外仍能抓回来。</summary>
+    private const float KeepVisibleDip = 64f;
+
     /// <summary>光标下是否有模型的可见像素（每帧渲染后读取 1 像素 alpha 判定，供点击穿透用）。</summary>
     public bool IsPointerOverModel { get; private set; }
 
@@ -158,20 +165,53 @@ public class NativePetControl : OpenGlControlBase
     /// </remarks>
     public void Zoom(float factor)
     {
-        _lapp?.View.AdjustScale(0f, 0f, factor);
+        if (_lapp == null) return;
+        _lapp.View.AdjustScale(0f, 0f, factor);
+        // 缩放以窗口中心为轴：模型偏在一侧时放大可能把仅剩的可见部分顶出窗口，需同步钳制
+        ClampModelOnScreen();
     }
 
     /// <summary>中键拖拽：按 DIP 增量移动模型在窗口内的显示位置（窗口本身不动）。</summary>
     /// <remarks>
-    /// 换算推导：投影 = Scale(h/w,1)·ViewMatrix，clip.x = (h/w)(s·mx+tx)、clip.w=1，
-    /// 屏幕像素 px = (vpH·(s·mx+tx) + vpW)/2（DIP 表示同理），因此 Δtx = 2·Δpx/vpH，
-    /// x、y 两轴都除以高度。AdjustTranslate 平移在裁剪空间直接叠加，与当前缩放无关。
+    /// 换算：模型在屏幕上的位移 Δpx = 窗口高/2·Δtr（tr12/13 为视图矩阵的平移分量），故 Δtr = 2·Δpx/窗口高。
+    /// 不用 AdjustTranslate：它把请求量再乘当前缩放（放大后不跟手），且其钳制窗口
+    /// 随缩小急剧收缩（缩到 0.4 时仅能拖约 ±50px）。这里直接改平移分量，再按模型包围盒钳制。
     /// </remarks>
     public void MoveModelBy(float dx, float dy)
     {
         if (_lapp == null || Bounds.Height <= 0) return;
         var h = (float)Bounds.Height;
-        _lapp.View.AdjustTranslate(2f * dx / h, -2f * dy / h);
+        _lapp.View.TranslateX += 2f * dx / h;
+        _lapp.View.TranslateY -= 2f * dy / h;
+        ClampModelOnScreen();
+    }
+
+    /// <summary>
+    /// 按模型包围盒钳制拖动范围：模型缩放平移后仍要有至少 KeepVisibleDip 的边条留在窗口内。
+    /// 既能把它拖到窗口的任意角落（拖出窗口一部分），又不会整个拖丢。
+    /// </summary>
+    /// <remarks>
+    /// 模型在视图空间的包围盒 = s·[bboxMin,bboxMax] + tr（缩放以窗口中心为轴，平移为直接叠加）。
+    /// 仅当模型在该轴上比窗口小时才钳制（可见边条 ≥ KeepVisibleDip）；
+    /// 模型比窗口大时任意位置都不可能完全移出窗口，此时若仍钳制会因上下界倒置触发 Math.Clamp 异常。
+    /// </remarks>
+    private void ClampModelOnScreen()
+    {
+        if (_lapp == null || !_bboxMeasured || Bounds.Height <= 0) return;
+        var view = _lapp.View;
+
+        // 可见边条 DIP → 视图单位：1 视图单位 = 窗口高/2 DIP
+        var k = KeepVisibleDip / ((float)Bounds.Height / 2f);
+        var s = view.GetScale();
+        if (s <= 0f) s = 1f;
+
+        var loX = view.ViewLeft + k - s * _bboxMaxX;
+        var hiX = view.ViewRight - k - s * _bboxMinX;
+        if (loX <= hiX) view.TranslateX = Math.Clamp(view.TranslateX, loX, hiX);
+
+        var loY = view.ViewBottom + k - s * _bboxMaxY;
+        var hiY = view.ViewTop - k - s * _bboxMinY;
+        if (loY <= hiY) view.TranslateY = Math.Clamp(view.TranslateY, loY, hiY);
     }
 
     /// <summary>托盘菜单：重置模型大小与位置（恢复初始缩放与居中位置）。</summary>
@@ -250,29 +290,67 @@ public class NativePetControl : OpenGlControlBase
         // 眼睛部件按显示名识别：名称含"眼"即可（本模型为 "←眼"/"→眼"），
         // 但排除"眼镜"/"眼罩"/"眼泪"等干扰项。
         // 先对每个眼睛部件求顶点均值，再对这些部件中心取平均 = 双眼之间的中点。
+        // 同一次顶点遍历里顺便累计模型包围盒（排除水印），供中键拖拽钳制范围。
         var eyeParts = new Dictionary<string, (double SumX, double SumY, int Drawables)>();
+        float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
         unsafe
         {
             for (int i = 0; i < model.GetDrawableCount(); i++)
             {
-                var partIndex = model.GetDrawableParentPartIndex(i);
-                if (partIndex < 0 || partIndex >= model.PartIds.Count) continue;
-                if (!partNames.TryGetValue(model.PartIds[partIndex], out var name)) continue;
-                if (!name.Contains('眼') || name.Contains('镜') || name.Contains('罩') || name.Contains('泪')) continue;
-
                 var count = model.GetDrawableVertexCount(i);
                 var vertices = model.GetDrawableVertexPositions(i);
                 if (count <= 0 || vertices == null) continue;
 
+                // 部件显示名：无映射时为 null
+                string? name = null;
+                var partIndex = model.GetDrawableParentPartIndex(i);
+                if (partIndex >= 0 && partIndex < model.PartIds.Count)
+                    partNames.TryGetValue(model.PartIds[partIndex], out name);
+
+                var isWatermark = name != null && name.Contains("水印");
+                var isEye = name != null && name.Contains('眼')
+                            && !name.Contains('镜') && !name.Contains('罩') && !name.Contains('泪');
+
                 double cx = 0, cy = 0;
                 for (int k = 0; k < count; k++)
                 {
-                    cx += vertices[k].X;
-                    cy += vertices[k].Y;
+                    var vx = vertices[k].X;
+                    var vy = vertices[k].Y;
+
+                    // 水印部件被隐藏且几乎覆盖整个画布，不参与包围盒
+                    if (!isWatermark)
+                    {
+                        if (vx < minX) minX = vx;
+                        if (vx > maxX) maxX = vx;
+                        if (vy < minY) minY = vy;
+                        if (vy > maxY) maxY = vy;
+                    }
+
+                    if (isEye)
+                    {
+                        cx += vx;
+                        cy += vy;
+                    }
                 }
-                var acc = eyeParts.TryGetValue(name, out var v) ? v : (SumX: 0d, SumY: 0d, Drawables: 0);
-                eyeParts[name] = (acc.SumX + cx / count, acc.SumY + cy / count, acc.Drawables + 1);
+
+                if (isEye)
+                {
+                    var acc = eyeParts.TryGetValue(name!, out var v) ? v : (SumX: 0d, SumY: 0d, Drawables: 0);
+                    eyeParts[name!] = (acc.SumX + cx / count, acc.SumY + cy / count, acc.Drawables + 1);
+                }
             }
+        }
+
+        // 模型包围盒由模型空间换算到视图空间（ModelMatrix 为纯缩放+平移，两角点分别变换即可）
+        if (minX <= maxX && minY <= maxY && _model?.ModelMatrix is { } mm)
+        {
+            _bboxMinX = mm.TransformX(minX);
+            _bboxMaxX = mm.TransformX(maxX);
+            _bboxMinY = mm.TransformY(minY);
+            _bboxMaxY = mm.TransformY(maxY);
+            _bboxMeasured = true;
+            Logger.Debug("model bbox view=({MinX:F4},{MinY:F4})-({MaxX:F4},{MaxY:F4})",
+                _bboxMinX, _bboxMinY, _bboxMaxX, _bboxMaxY);
         }
 
         if (eyeParts.Count == 0)

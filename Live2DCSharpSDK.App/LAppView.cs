@@ -115,7 +115,7 @@ public abstract class LAppView(LAppDelegate lapp)
     }
 
     /// <summary>
-    /// モデルの表示位置を移動する（画面論理座標の移動量）。
+    /// モデルの表示位置を移動する（画面論理座標の移动量）。
     /// 移動可能範囲は SetMaxScreenRect の設定に応じて AdjustTranslate 内でクランプされる。
     /// </summary>
     /// <remarks>
@@ -126,6 +126,39 @@ public abstract class LAppView(LAppDelegate lapp)
     {
         _viewMatrix.AdjustTranslate(x, y);
     }
+
+    /// <summary>
+    /// 视图平移分量（裁剪空间）。屏幕位移 = 窗口高/2 × 该值，与缩放无关。
+    /// </summary>
+    /// <remarks>
+    /// 不用 AdjustTranslate 来移动：它是矩阵左乘实现，请求量会被当前缩放再乘一次
+    /// （放大后移动变快、缩小后变慢，拖拽不跟手），且其钳制窗口随缩放收缩
+    /// （缩到最小时几乎无法移动）。拖拽范围的钳制由调用方按模型包围盒处理。
+    /// </remarks>
+    public float TranslateX
+    {
+        get => _viewMatrix.Tr[12];
+        set => _viewMatrix.Tr[12] = value;
+    }
+
+    /// <inheritdoc cref="TranslateX"/>
+    public float TranslateY
+    {
+        get => _viewMatrix.Tr[13];
+        set => _viewMatrix.Tr[13] = value;
+    }
+
+    /// <summary>视图可视范围左边界（裁剪空间），供调用方按模型包围盒钳制拖动范围。</summary>
+    public float ViewLeft => _viewMatrix.ScreenLeft;
+
+    /// <summary>视图可视范围右边界（裁剪空间）。</summary>
+    public float ViewRight => _viewMatrix.ScreenRight;
+
+    /// <summary>视图可视范围下边界（裁剪空间）。</summary>
+    public float ViewBottom => _viewMatrix.ScreenBottom;
+
+    /// <summary>视图可视范围上边界（裁剪空间）。</summary>
+    public float ViewTop => _viewMatrix.ScreenTop;
 
     /// <summary>
     /// 将视图矩阵恢复到初始状态（重置缩放与位移）。
