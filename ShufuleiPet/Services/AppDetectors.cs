@@ -25,12 +25,18 @@ public interface IAppDetector
     bool IsMatch(AppEntry entry);
 }
 
+/// <summary>进程检测方案的标记接口（与前台检测区分注册，避免 IEnumerable&lt;IAppDetector&gt; 语义模糊）。</summary>
+public interface IProcessDetector : IAppDetector;
+
+/// <summary>前台窗口检测方案的标记接口。</summary>
+public interface IForegroundDetector : IAppDetector;
+
 /// <summary>
 /// 方案一：进程检测。枚举系统进程名，判定目标进程是否在运行。
 /// 适合"后台运行也算参与"的程序（游戏全屏无稳定标题、音乐播放器后台播放）。
 /// 基于 System.Diagnostics.Process，天然跨平台；每轮只枚举一次。
 /// </summary>
-public sealed class ProcessDetector : IAppDetector
+public sealed class ProcessDetector : IProcessDetector
 {
     private readonly HashSet<string> _running = new(StringComparer.OrdinalIgnoreCase);
 
@@ -68,12 +74,12 @@ public sealed class ProcessDetector : IAppDetector
 }
 
 /// <summary>
-/// 方案二：前台窗口检测。取当前激活窗口 → 标题匹配 → 反查进程名，三重校验后判定。
+/// 方案二：前台窗口检测。取当前激活窗口的标题进行匹配（不做进程反查）。
 /// 适合"窗口在前台才有意义"的程序（视频播放器、浏览器等）。
 /// 仅 Windows 支持（Win32 窗口管理机制）；非 Windows 平台 Supported=false，
 /// 调用方应回退到进程检测，不抛异常。
 /// </summary>
-public sealed class ForegroundDetector : IAppDetector
+public sealed class ForegroundDetector : IForegroundDetector
 {
     private static readonly ILogger Logger = Log.ForContext<ForegroundDetector>();
 

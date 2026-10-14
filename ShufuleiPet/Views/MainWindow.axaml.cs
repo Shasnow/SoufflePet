@@ -4,19 +4,15 @@ using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using ShufuleiPet.Services;
 
 namespace ShufuleiPet.Views;
 
 public partial class MainWindow : Window, IPetWindow
 {
-    private static readonly string WwwRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-    public const int Port = 18923;
-
-    private HttpListener? _server;
     private bool _exiting;
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
@@ -38,11 +34,18 @@ public partial class MainWindow : Window, IPetWindow
     private int _lastCursorX = int.MinValue;
     private int _lastCursorY = int.MinValue;
 
-    public MainWindow()
+    /// <summary>设计时（XAML previewer）用的无参构造：只初始化组件，不启动服务器。</summary>
+    public MainWindow() : this(null) { }
+
+    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer），启动并指向其端口。</summary>
+    public MainWindow(ILocalFileServer? server)
     {
         InitializeComponent();
-        var port = StartStaticServer();
-        WebView.Source = new Uri($"http://localhost:{port}/index.html");
+        if (server != null)
+        {
+            var port = server.Start();
+            WebView.Source = new Uri($"http://localhost:{port}/index.html");
+        }
 
         Opened += (_, _) => MoveToBottomRight();
         WebView.WebMessageReceived += OnWebMessage;
@@ -107,11 +110,10 @@ public partial class MainWindow : Window, IPetWindow
         }
     }
 
-    /// <summary>托盘菜单：真正退出（解除 Closing 劫持并停掉本地服务器）。</summary>
+    /// <summary>托盘菜单：真正退出（解除 Closing 劫持）。</summary>
     public void ExitForShutdown()
     {
         _exiting = true;
-        try { _server?.Stop(); } catch { /* ignore */ }
         Close();
     }
 
@@ -182,79 +184,6 @@ public partial class MainWindow : Window, IPetWindow
         catch (JsonException)
         {
             // 忽略无法解析的消息
-        }
-    }
-
-    private int StartStaticServer()
-    {
-        for (var port = Port; port < Port + 10; port++)
-        {
-            var listener = new HttpListener();
-            listener.Prefixes.Add($"http://localhost:{port}/");
-            try
-            {
-                listener.Start();
-            }
-            catch (HttpListenerException)
-            {
-                listener.Close();
-                continue;
-            }
-            _server = listener;
-            _ = ServeAsync(listener);
-            return port;
-        }
-        throw new InvalidOperationException("无法启动本地静态服务器，端口 18923-18932 均被占用");
-    }
-
-    private static async Task ServeAsync(HttpListener listener)
-    {
-        while (listener.IsListening)
-        {
-            HttpListenerContext ctx;
-            try
-            {
-                ctx = await listener.GetContextAsync();
-            }
-            catch
-            {
-                return; // listener 已停止
-            }
-
-            try
-            {
-                // 模型文件名是中文，URL 中被百分号编码，必须解码；根路径回退到 index.html
-                var rel = Uri.UnescapeDataString(ctx.Request.Url!.AbsolutePath.TrimStart('/'));
-                if (rel.Length == 0) rel = "index.html";
-                var file = Path.GetFullPath(Path.Combine(WwwRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
-                var root = Path.GetFullPath(WwwRoot);
-                if (!file.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
-                {
-                    ctx.Response.StatusCode = 404;
-                    ctx.Response.Close();
-                    continue;
-                }
-
-                ctx.Response.StatusCode = 200;
-                ctx.Response.ContentType = Path.GetExtension(file).ToLowerInvariant() switch
-                {
-                    ".html" => "text/html; charset=utf-8",
-                    ".js" => "text/javascript; charset=utf-8",
-                    ".json" => "application/json; charset=utf-8",
-                    ".png" => "image/png",
-                    ".ico" => "image/x-icon",
-                    _ => "application/octet-stream", // .moc3 等
-                };
-                await using (var fs = File.OpenRead(file))
-                {
-                    await fs.CopyToAsync(ctx.Response.OutputStream);
-                }
-                ctx.Response.Close();
-            }
-            catch
-            {
-                try { ctx.Response.Abort(); } catch { /* ignore */ }
-            }
         }
     }
 }

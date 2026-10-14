@@ -171,12 +171,22 @@ public class AutoExpressionConfig
     }
 }
 
+/// <summary>自动表情联动服务抽象（DI 注册用）。</summary>
+public interface IAutoExpressionService : IDisposable
+{
+    /// <summary>功能总开关（关闭时停止轮询并清除已设置的自动表情）。</summary>
+    bool Enabled { get; set; }
+
+    /// <summary>检测结果变化事件：参数为要切换的表情名，null 表示恢复默认（无表情）。</summary>
+    event Action<string?>? ExpressionChanged;
+}
+
 /// <summary>
 /// 自动表情联动服务：定时按逐应用条目轮询检测（进程检测 / 前台窗口检测两种方案），
-/// 命中状态汇总（game 优先于 music）后通过回调通知窗口切换表情，全部未命中则恢复默认。
+/// 命中状态汇总（game 优先于 music）后通过 ExpressionChanged 事件通知窗口切换表情，全部未命中则恢复默认。
 /// 原生版与 WebView 版共用同一个服务实例（App 启动时创建一次）。
 /// </summary>
-public class AutoExpressionService : IDisposable
+public class AutoExpressionService : IAutoExpressionService
 {
     private static readonly ILogger Logger = Log.ForContext<AutoExpressionService>();
 
@@ -189,11 +199,10 @@ public class AutoExpressionService : IDisposable
     }
 
     private readonly AutoExpressionConfig _config;
-    private readonly Action<string?> _onExpression; // null = 恢复默认（无表情）
     private readonly DispatcherTimer _timer;
 
-    private readonly ProcessDetector _procDetector = new();
-    private readonly ForegroundDetector _fgDetector = new();
+    private readonly IProcessDetector _procDetector;
+    private readonly IForegroundDetector _fgDetector;
 
     /// <summary>本轮是否存在 foreground 条目（决定是否采集前台窗口快照）。</summary>
     private bool _hasForegroundEntries;
@@ -231,15 +240,22 @@ public class AutoExpressionService : IDisposable
                 _timer.Stop();
                 // 关闭开关 = 立即清除自动表情（无论之前处于什么状态）
                 _lastState = AppState.None;
-                _onExpression(null);
+                ExpressionChanged?.Invoke(null);
             }
         }
     }
 
-    public AutoExpressionService(AutoExpressionConfig config, Action<string?> onExpression)
+    /// <inheritdoc />
+    public event Action<string?>? ExpressionChanged;
+
+    public AutoExpressionService(
+        AutoExpressionConfig config,
+        IProcessDetector processDetector,
+        IForegroundDetector foregroundDetector)
     {
         _config = config;
-        _onExpression = onExpression;
+        _procDetector = processDetector;
+        _fgDetector = foregroundDetector;
         for (var i = 0; i < config.Apps.Count; i++) config.Apps[i].Index = i;
         _hasForegroundEntries = config.Apps.Exists(e => e.Method == "foreground");
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(1f, config.PollSeconds)) };
@@ -275,13 +291,13 @@ public class AutoExpressionService : IDisposable
             _ => null, // None = 恢复默认
         };
         Logger.Information("auto expression: {Prev} -> {Next} ({Expression})", prev, state, expression ?? "default");
-        _onExpression(expression);
+        ExpressionChanged?.Invoke(expression);
     }
 
     /// <summary>
     /// 判定单个条目本轮是否确认命中。
     /// process 条目：进程存在即命中（无防抖）。
-    /// foreground 条目：三重校验（标题 + 进程）得到原始判定后，连续 DebounceRounds 轮一致才确认；
+    /// foreground 条目：标题匹配得到原始判定后，连续 DebounceRounds 轮一致才确认；
     /// 平台不支持时回退进程检测（优雅降级，不抛异常）。
     /// </summary>
     private bool Evaluate(AppEntry entry)
