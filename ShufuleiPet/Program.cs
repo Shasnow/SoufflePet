@@ -15,7 +15,7 @@ class Program
     {
         // Serilog：DEBUG 级别，按天滚动写入 logs/pet-YYYYMMDD.log（保留 7 天）；
         // DEBUG 构建额外输出到控制台。日志模板带 SourceContext（类名）便于定位。
-        const string template = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+        const string template = "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
         var loggerConfig = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.File(

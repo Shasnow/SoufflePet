@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Utils;
 
 namespace ShufuleiPet.Services;
 
@@ -92,45 +93,14 @@ public class AutoExpressionConfig
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    /// <summary>旧版配置格式（gameProcesses/musicProcesses 两组白名单），仅用于读取迁移。</summary>
-    private class LegacyConfig
-    {
-        public bool Enabled { get; set; } = true;
-        public float PollSeconds { get; set; } = 3f;
-        public string GameExpression { get; set; } = "手柄";
-        public string MusicExpression { get; set; } = "麦克风";
-        public string[]? GameProcesses { get; set; }
-        public string[]? MusicProcesses { get; set; }
-    }
-
-    /// <summary>
-    /// 读取配置；文件缺失或解析失败时回退到内置默认并写回模板。
-    /// 检测到旧版格式（gameProcesses/musicProcesses）时自动迁移为逐应用 apps 格式并回写。
-    /// </summary>
+    /// <summary>读取配置；文件缺失或解析失败时回退到内置默认并写回模板。</summary>
     public static AutoExpressionConfig Load()
     {
         if (!File.Exists(ConfigPath)) return WriteFallback(new AutoExpressionConfig());
 
         try
         {
-            var text = File.ReadAllText(ConfigPath);
-
-            // 判别格式：根含 gameProcesses/musicProcesses 即旧版，迁移为逐应用条目
-            using (var doc = JsonDocument.Parse(text))
-            {
-                var root = doc.RootElement;
-                var legacy = root.TryGetProperty("GameProcesses", out _)
-                          || root.TryGetProperty("MusicProcesses", out _)
-                          || root.TryGetProperty("gameProcesses", out _)
-                          || root.TryGetProperty("musicProcesses", out _);
-                if (legacy)
-                {
-                    var old = JsonSerializer.Deserialize<LegacyConfig>(text, JsonOptions);
-                    if (old != null) return WriteFallback(Migrate(old));
-                }
-            }
-
-            var cfg = JsonSerializer.Deserialize<AutoExpressionConfig>(text, JsonOptions);
+            var cfg = JsonSerializer.Deserialize<AutoExpressionConfig>(File.ReadAllText(ConfigPath), JsonOptions);
             if (cfg != null) return cfg;
         }
         catch (Exception ex)
@@ -139,25 +109,6 @@ public class AutoExpressionConfig
         }
 
         return WriteFallback(new AutoExpressionConfig());
-    }
-
-    /// <summary>旧格式 → 逐应用条目（数组映射类别，统一 method=process）。</summary>
-    private static AutoExpressionConfig Migrate(LegacyConfig old)
-    {
-        var cfg = new AutoExpressionConfig
-        {
-            Enabled = old.Enabled,
-            PollSeconds = old.PollSeconds,
-            GameExpression = old.GameExpression,
-            MusicExpression = old.MusicExpression,
-            Apps = [],
-        };
-        foreach (var p in old.GameProcesses ?? [])
-            cfg.Apps.Add(new AppEntry { Process = p, Category = "game" });
-        foreach (var p in old.MusicProcesses ?? [])
-            cfg.Apps.Add(new AppEntry { Process = p, Category = "music" });
-        if (cfg.Apps.Count == 0) cfg.Apps = BuildDefaults();
-        return cfg;
     }
 
     /// <summary>兜底：写回模板文件（失败不影响功能）并返回配置。</summary>
@@ -206,6 +157,12 @@ public class AutoExpressionService : IAutoExpressionService
 
     private readonly AutoExpressionConfig _config;
     private readonly DispatcherTimer _timer;
+
+    /// <summary>
+    /// 本轮实际参与检测的条目：配置文件条目 + 启动时合并的 NVIDIA App 游戏库条目。
+    /// NVIDIA 条目只存在于运行期，不写回配置文件（避免把一次快照固化进用户配置）。
+    /// </summary>
+    private readonly List<AppEntry> _entries;
 
     private readonly IProcessDetector _procDetector;
     private readonly IForegroundDetector _fgDetector;
@@ -267,11 +224,38 @@ public class AutoExpressionService : IAutoExpressionService
         _config = config;
         _procDetector = processDetector;
         _fgDetector = foregroundDetector;
-        for (var i = 0; i < config.Apps.Count; i++) config.Apps[i].Index = i;
-        _hasForegroundEntries = config.Apps.Exists(e => e.Method == "foreground");
+        _entries = BuildEntries(config);
+        for (var i = 0; i < _entries.Count; i++) _entries[i].Index = i;
+        _hasForegroundEntries = _entries.Exists(e => e.Method == "foreground");
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(1f, config.PollSeconds)) };
         _timer.Tick += (_, _) => PollOnce();
         if (config.Enabled) _timer.Start();
+    }
+
+    /// <summary>
+    /// 组装本轮检测条目：配置文件条目在前（用户显式配置优先），随后追加 NVIDIA App 识别为游戏、
+    /// 且配置文件里没有同进程名的条目。NVIDIA 库缺失或读取失败时只返回配置文件条目。
+    /// </summary>
+    private static List<AppEntry> BuildEntries(AutoExpressionConfig config)
+    {
+        var entries = new List<AppEntry>(config.Apps);
+        try
+        {
+            var merged = 0;
+            foreach (var entry in NvidiaGameLibrary.Load())
+            {
+                if (entries.Exists(e => string.Equals(e.Process, entry.Process, StringComparison.OrdinalIgnoreCase))) continue;
+                entries.Add(entry);
+                Logger.Debug("nvidia game library: merged {Process}", entry.Process);
+                merged++;
+            }
+            if (merged > 0) Logger.Information("nvidia game library: merged {Count} game entries", merged);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "merge nvidia game library failed, ignored");
+        }
+        return entries;
     }
 
     /// <summary>轮询一次：采集快照 → 逐条目判定（含防抖）→ 汇总 → 按状态变化触发回调。</summary>
@@ -283,7 +267,7 @@ public class AutoExpressionService : IAutoExpressionService
 
         var gameHit = false;
         var musicHit = false;
-        foreach (var entry in _config.Apps)
+        foreach (var entry in _entries)
         {
             if (!Evaluate(entry)) continue; // 该条目本轮未确认命中
             if (entry.Category == "music") musicHit = true;
