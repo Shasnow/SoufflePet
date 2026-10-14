@@ -253,6 +253,20 @@ async function main() {
     });
     exprBox.appendChild(btn);
   }
+
+  // 自动表情联动（宿主检测到游戏/音乐应用后通过 InvokeScript 调用）：
+  // 复用表情栏的 model.expression / resetExpression，并同步按钮高亮
+  window.onHostSetExpression = (name) => {
+    const btn = [...exprBox.children].find((b) => b.textContent === name);
+    // 已是该表情则跳过，避免重复设置时点击导致误取消
+    if (btn && btn !== activeBtn) btn.click(); // 复用按钮点击逻辑（含 activeBtn 高亮同步）
+  };
+  window.onHostResetExpression = () => {
+    if (activeBtn) activeBtn.click(); // 再次点击 = 取消表情并清高亮
+  };
+
+  // 通知宿主页面已就绪（模型加载完成），宿主据此重放此前缓存的自动表情状态
+  tellHost({ type: 'ready' });
 }
 
 main().catch((e) => { console.error(e); showError('加载失败：' + e.message); });

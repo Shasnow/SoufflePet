@@ -81,6 +81,32 @@ public partial class MainWindow : Window, IPetWindow
         }
     }
 
+    /// <summary>自动表情联动：缓存状态后转发给页面；页面加载完成前先缓存，收到 ready 后重放。</summary>
+    public void SetAutoExpression(string? name)
+    {
+        _autoExpression = name;
+        PushAutoExpression();
+    }
+
+    /// <summary>当前自动表情状态（页面模型异步加载完成前缓存，ready 后重放）。</summary>
+    private string? _autoExpression;
+
+    /// <summary>把自动表情状态推给页面（页面未加载完成时 InvokeScript 会抛异常，忽略即可）。</summary>
+    private void PushAutoExpression()
+    {
+        try
+        {
+            var script = _autoExpression == null
+                ? "window.onHostResetExpression && window.onHostResetExpression();"
+                : $"window.onHostSetExpression && window.onHostSetExpression('{_autoExpression}');";
+            _ = WebView.InvokeScript(script);
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略，等 ready 消息重放
+        }
+    }
+
     /// <summary>托盘菜单：真正退出（解除 Closing 劫持并停掉本地服务器）。</summary>
     public void ExitForShutdown()
     {
@@ -136,7 +162,15 @@ public partial class MainWindow : Window, IPetWindow
         {
             if (string.IsNullOrEmpty(e.Body)) return;
             using var doc = JsonDocument.Parse(e.Body);
-            if (!doc.RootElement.TryGetProperty("type", out var type) || type.GetString() != "drag") return;
+            if (!doc.RootElement.TryGetProperty("type", out var type)) return;
+            var kind = type.GetString();
+            if (kind == "ready")
+            {
+                // 页面模型加载完成，重放此前缓存的自动表情状态（解决启动竞态）
+                PushAutoExpression();
+                return;
+            }
+            if (kind != "drag") return;
             Dispatcher.Post(() =>
             {
                 var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;

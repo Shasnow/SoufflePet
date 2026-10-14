@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Effect;
 using Live2DCSharpSDK.Framework.Math;
@@ -593,6 +593,16 @@ public class LAppModel : CubismUserModel
             }
             i++;
         }
+    }
+
+    /// <summary>
+    /// 清除当前表情，恢复默认（无表情）状态。
+    /// 表情启动时已捕获基线参数值，清空表情队列后每帧以 weight=0 写回基线，
+    /// 参数即回到表情前的状态，等价于 Web SDK 的 resetExpression()。
+    /// </summary>
+    public void ResetExpression()
+    {
+        _expressionManager.StopAllMotions();
     }
 
     /// <summary>

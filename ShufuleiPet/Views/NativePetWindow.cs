@@ -15,6 +15,10 @@ public interface IPetWindow
 {
     void ToggleVisible();
     void ResetModel();
+
+    /// <summary>自动表情联动：传表情名切换，传 null 恢复默认（无表情）。</summary>
+    void SetAutoExpression(string? name);
+
     void ExitForShutdown();
 }
 
@@ -250,6 +254,12 @@ public class NativePetWindow : Window, IPetWindow
     public void ResetModel()
     {
         _control.ResetModel();
+    }
+
+    /// <summary>自动表情联动：转发给控制层切换/清除表情。</summary>
+    public void SetAutoExpression(string? name)
+    {
+        _control.SetAutoExpression(name);
     }
 
     /// <summary>托盘菜单：退出（原生窗口不劫持关闭行为）。</summary>

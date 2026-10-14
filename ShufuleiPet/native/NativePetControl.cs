@@ -56,6 +56,24 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>暴露给外部：切换表情（参数为 model3.json 中的表情名，如 "哭哭"）。</summary>
     public void SetExpression(string name) => _model?.SetExpression(name);
 
+    /// <summary>自动表情联动入口：传表情名切换，传 null 恢复默认（无表情）。</summary>
+    public void SetAutoExpression(string? name)
+    {
+        if (_model == null)
+        {
+            // 模型在 OnOpenGlInit 才加载，先缓存，加载完成后补设
+            _pendingExpression = name;
+            _hasPendingExpression = true;
+            return;
+        }
+        if (name == null) _model.ResetExpression();
+        else _model.SetExpression(name);
+    }
+
+    /// <summary>模型加载完成前缓存的自动表情（配合 _hasPendingExpression 区分"无缓存"）。</summary>
+    private string? _pendingExpression;
+    private bool _hasPendingExpression;
+
     protected override void OnOpenGlInit(GlInterface gl)
     {
         if (_inited) return;
@@ -84,6 +102,16 @@ public class NativePetControl : OpenGlControlBase
             Logger.Debug("LoadModel ok textures={TextureCount}", _model.Textures.Count);
 
             PlayIdle();
+
+            // 补设模型加载完成前缓存的自动表情（自动表情服务可能先于 GL 初始化触发）
+            if (_hasPendingExpression)
+            {
+                _hasPendingExpression = false;
+                var pending = _pendingExpression;
+                _pendingExpression = null;
+                if (pending == null) _model.ResetExpression();
+                else _model.SetExpression(pending);
+            }
 
             // 注意：不要设 CustomValueUpdate=true——LAppModel.Update 里它与拖拽参数
             // 应用是 if/else 互斥的，设了会禁用目光跟随。水印直接在渲染循环里隐藏。

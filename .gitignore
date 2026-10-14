@@ -1,4 +1,5 @@
 .idea
+.trae
 obj
 bin
 **/wwwroot/*
