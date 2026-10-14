@@ -8,14 +8,14 @@ using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
 using Live2DCSharpSDK.App;
 using Live2DCSharpSDK.Framework;
-using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Model;
+using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
 using ShufuleiPet.Views.native;
 
-namespace ShufuleiPet.Views.Native;
+namespace ShufuleiPet.native;
 
 /// <summary>用 Live2DCSharpSDK（官方 Native SDK 的 C# 移植）原生渲染 Live2D 模型的 GL 控件。</summary>
 public class NativePetControl : OpenGlControlBase

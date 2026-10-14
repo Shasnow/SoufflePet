@@ -6,8 +6,8 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.native;
 using ShufuleiPet.Services;
-using ShufuleiPet.Views.Native;
 
 namespace ShufuleiPet.Views;
 
