@@ -308,9 +308,8 @@ public class NativePetControl : OpenGlControlBase
         try
         {
             // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
-            // 兜底值必须等于本机 DPI 缩放（如 125% 屏写 1.25），否则视口小于帧缓冲，
             // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。
-            var scaling = (VisualRoot as TopLevel)?.RenderScaling ?? 1.25;
+            var scaling = App.RenderScaling;
             var vpW = (int)(Bounds.Width * scaling);
             var vpH = (int)(Bounds.Height * scaling);
             gl.Viewport(0, 0, vpW, vpH);

@@ -13,6 +13,7 @@ namespace ShufuleiPet;
 public partial class App : Application
 {
     private static readonly ILogger Logger = Log.ForContext<App>();
+    public static double RenderScaling { get; private set; } = 1.0;
 
     /// <summary>DI 容器（组合根在 OnFrameworkInitializationCompleted 装配，Exit 时统一 Dispose）。</summary>
     private ServiceProvider? _provider;
@@ -59,6 +60,7 @@ public partial class App : Application
             var petOps = _provider.GetRequiredService<IPetWindow>();
             var window = (Window)petOps; // 单实例，避免二次解析
             desktop.MainWindow = window;
+            RenderScaling = window.RenderScaling;
             Logger.Debug("Main window assigned");
 
             // 自动表情事件 → 窗口（订阅先于 DispatcherTimer 触发，无竞态）
