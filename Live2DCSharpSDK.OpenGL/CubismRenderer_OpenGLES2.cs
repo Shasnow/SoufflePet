@@ -61,6 +61,13 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
 
     internal VBO[] vbo = new VBO[512];
 
+    // VBO/IBO 容量缓存（单位：字节）。
+    // 原 SDK 每个 drawable 每次绘制都用 glBufferData(STATIC_DRAW) 全量重分配缓冲，
+    // 本模型约 150 个 drawable、含蒙版通道每帧约 600 次绘制调用，驱动因此每帧重分配存储数百次，
+    // 实测 GPU 3D 占用高达 20% 以上。这里改为「首次/扩容时重分配 + 后续 glBufferSubData 原地更新」。
+    private int _vboCapBytes;
+    private int _iboCapBytes;
+
     /// <summary>
     /// Tegraプロセッサ対応。拡張方式による描画の有効・無効
     /// </summary>
@@ -224,11 +231,28 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
         GL.BindBuffer(GL.GL_ARRAY_BUFFER, VertexBuffer);
         fixed (void* p = vbo)
         {
-            GL.BufferData(GL.GL_ARRAY_BUFFER, vertexCount * sizeof(VBO), new IntPtr(p), GL.GL_STATIC_DRAW);
+            int bytes = vertexCount * sizeof(VBO);
+            if (bytes > _vboCapBytes)
+            {
+                // 顶点数据超出已有容量：按两倍扩容重新分配一次，之后长期复用
+                _vboCapBytes = bytes * 2;
+                GL.BufferData(GL.GL_ARRAY_BUFFER, _vboCapBytes, IntPtr.Zero, GL.GL_DYNAMIC_DRAW);
+            }
+
+            // 容量内直接原地写入，避免每次绘制都让驱动重新分配缓冲存储
+            GL.BufferSubData(GL.GL_ARRAY_BUFFER, 0, (nint)bytes, p);
         }
 
         GL.BindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, IndexBuffer);
-        GL.BufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(ushort), new IntPtr(indexArray), GL.GL_STATIC_DRAW);
+        int indexBytes = indexCount * sizeof(ushort);
+        if (indexBytes > _iboCapBytes)
+        {
+            // 同上：索引缓冲也只在容量不足时扩容一次
+            _iboCapBytes = indexBytes * 2;
+            GL.BufferData(GL.GL_ELEMENT_ARRAY_BUFFER, _iboCapBytes, IntPtr.Zero, GL.GL_DYNAMIC_DRAW);
+        }
+
+        GL.BufferSubData(GL.GL_ELEMENT_ARRAY_BUFFER, 0, (nint)indexBytes, indexArray);
 
         if (IsGeneratingMask())  // マスク生成時
         {
@@ -242,11 +266,10 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
         // ポリゴンメッシュを描画する
         GL.DrawElements(GL.GL_TRIANGLES, indexCount, GL.GL_UNSIGNED_SHORT, 0);
 
-        // 後処理
-        GL.UseProgram(0);
-        GL.BindBuffer(GL.GL_ARRAY_BUFFER, 0);
-        GL.BindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0);
-        GL.BindVertexArray(0);
+        // 后处理：不再逐个 drawable 解绑 GL 状态。
+        // 原 SDK 这里会执行 UseProgram(0) + BindBuffer(0) + BindVertexArray(0)，
+        // 下一个 drawable 又要把 program / 缓冲 / VAO / 纹理全部重新绑定，
+        // 每帧数百次无意义的状态翻转；去掉后由下一次绘制自行绑定所需状态即可。
         ClippingContextBufferForDraw = null;
         ClippingContextBufferForMask = null;
     }

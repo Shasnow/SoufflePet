@@ -23,6 +23,11 @@ public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
     public delegate bool Func10(int a);
     public delegate void Func11(int a, int b, float c);
     public delegate void Func12(int a, float b, float c, float d, float e);
+    
+    // glBufferSubData 不在 Avalonia GlInterface 的托管封装里，走 GetProcAddress 自行绑定
+    public unsafe delegate void Func15(int a, nint b, nint c, void* d);
+    
+    public Func15 GLBufferSubData = Marshal.GetDelegateForFunctionPointer<Func15>(gl.GetProcAddress("glBufferSubData"));
     public Func1 GLBlendFunc = Marshal.GetDelegateForFunctionPointer<Func1>(gl.GetProcAddress("glBlendFunc"));
     public Func2 GLBlendFuncSeparate = Marshal.GetDelegateForFunctionPointer<Func2>(gl.GetProcAddress("glBlendFuncSeparate"));
     public Func3 GLClearDepthf = Marshal.GetDelegateForFunctionPointer<Func3>(gl.GetProcAddress("glClearDepthf"));
@@ -280,6 +285,10 @@ public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
     public override void BufferData(int type, int v1, nint v2, int type1)
     {
         gl.BufferData(type, v1, v2, type1);
+    }
+    public override unsafe void BufferSubData(int type, nint offset, nint size, void* data)
+    {
+        GLBufferSubData(type, offset, size, data);
     }
     public override int GenVertexArray()
     {

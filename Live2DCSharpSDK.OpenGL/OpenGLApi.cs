@@ -59,6 +59,7 @@ public abstract class OpenGLApi
     public readonly int GL_INFO_LOG_LENGTH = 0x8B84;
     public readonly int GL_CURRENT_PROGRAM = 0x8B8D;
     public readonly int GL_STATIC_DRAW = 0x88E4;
+    public readonly int GL_DYNAMIC_DRAW = 0x88E8;
     public readonly int GL_FRAMEBUFFER_BINDING = 0x8CA6;
     public readonly int GL_COLOR_ATTACHMENT0 = 0x8CE0;
     public readonly int GL_FRAMEBUFFER = 0x8D40;
@@ -120,6 +121,8 @@ public abstract class OpenGLApi
     public abstract int GetError();
     public abstract int GenBuffer();
     public abstract void BufferData(int type, int v1, nint v2, int type1);
+    // glBufferSubData：用于向已分配的缓冲原地写入，避免每次绘制都整块重新分配
+    public abstract unsafe void BufferSubData(int type, nint offset, nint size, void* data);
     public abstract int GenVertexArray();
     public abstract void BindVertexArray(int vertexArray);
 }

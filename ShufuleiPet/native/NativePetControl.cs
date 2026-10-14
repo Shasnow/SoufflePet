@@ -106,6 +106,10 @@ public class NativePetControl : OpenGlControlBase
             var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "舒芙蕾");
             _modelDir = modelDir;
             _model = _lapp.Live2dManager.LoadModel(modelDir, "舒芙蕾");
+            // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
+            // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
+            // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。
+            _model.Renderer?.Anisotropy = 16f;
             Logger.Debug("LoadModel ok textures={TextureCount}", _model.Textures.Count);
 
             // SDK会自动播放 Idle 动作，这里注释掉手动播放
