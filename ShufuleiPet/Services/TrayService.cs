@@ -26,14 +26,16 @@ public sealed class TrayService : ITrayService, IDisposable
 
     private readonly IPetWindow _petOps;
     private readonly IAutoExpressionService _autoExpression;
+    private readonly ILipSyncService _lipSync;
     private readonly AutoExpressionConfig _config;
     private TrayIcons? _trayIcons;
     private Application? _app;
 
-    public TrayService(IPetWindow petOps, IAutoExpressionService autoExpression, AutoExpressionConfig config)
+    public TrayService(IPetWindow petOps, IAutoExpressionService autoExpression, ILipSyncService lipSync, AutoExpressionConfig config)
     {
         _petOps = petOps;
         _autoExpression = autoExpression;
+        _lipSync = lipSync;
         _config = config;
     }
 
@@ -61,6 +63,18 @@ public sealed class TrayService : ITrayService, IDisposable
             Logger.Information("auto expression toggled enabled={Enabled}", autoExprItem.IsChecked);
         };
 
+        // 音乐口型律动：自动表情处于 music 状态时，系统播放声音驱动嘴部开合
+        var lipSyncItem = new NativeMenuItem("口型律动")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = _lipSync.Enabled,
+        };
+        lipSyncItem.Click += (_, _) =>
+        {
+            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
+            _lipSync.Enabled = lipSyncItem.IsChecked;
+        };
+
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
         {
@@ -71,6 +85,7 @@ public sealed class TrayService : ITrayService, IDisposable
         menu.Items.Add(toggleItem);
         menu.Items.Add(resetItem);
         menu.Items.Add(autoExprItem);
+        menu.Items.Add(lipSyncItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
 

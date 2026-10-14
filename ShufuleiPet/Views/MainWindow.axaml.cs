@@ -34,12 +34,22 @@ public partial class MainWindow : Window, IPetWindow
     private int _lastCursorX = int.MinValue;
     private int _lastCursorY = int.MinValue;
 
-    /// <summary>设计时（XAML previewer）用的无参构造：只初始化组件，不启动服务器。</summary>
-    public MainWindow() : this(null) { }
+    /// <summary>口型律动服务（设计时为 null）：每帧把音量推给页面。</summary>
+    private readonly ILipSyncService? _lipSync;
 
-    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer），启动并指向其端口。</summary>
-    public MainWindow(ILocalFileServer? server)
+    /// <summary>上次推送给页面的口型音量（差值过小不推送，减少 InvokeScript 调用）。</summary>
+    private float _lastPushedLip = float.MinValue;
+
+    /// <summary>上次推送给页面的口型水平宽窄值。</summary>
+    private float _lastPushedWide = float.MinValue;
+
+    /// <summary>设计时（XAML previewer）用的无参构造：只初始化组件，不启动服务器。</summary>
+    public MainWindow() : this(null, null) { }
+
+    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）与口型律动服务（ILipSyncService）。</summary>
+    public MainWindow(ILocalFileServer? server, ILipSyncService? lipSync)
     {
+        _lipSync = lipSync;
         InitializeComponent();
         if (server != null)
         {
@@ -53,7 +63,11 @@ public partial class MainWindow : Window, IPetWindow
         // 全局鼠标追踪：页面里的 pointermove 只在光标位于窗口内时触发，移出窗口后
         // 视线会定住。这里由宿主轮询屏幕光标，换算成页面坐标后转发给页面。
         _cursorTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _cursorTimer.Tick += (_, _) => ForwardGlobalCursor();
+        _cursorTimer.Tick += (_, _) =>
+        {
+            ForwardGlobalCursor();
+            ForwardLipSync();
+        };
         _cursorTimer.Start();
 
         Closing += (_, e) =>
@@ -149,6 +163,31 @@ public partial class MainWindow : Window, IPetWindow
         {
             // NativeWebView 没有 Post 消息 API，官方做法是 InvokeScript 执行页面 JS
             _ = WebView.InvokeScript($"window.onHostCursor && window.onHostCursor({x},{y});");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略
+        }
+    }
+
+    /// <summary>
+    /// 口型律动：把音频音量与水平宽窄推给页面（音量差值 &gt;0.01 才推送，静音时不打扰页面）。
+    /// 页面在 beforeModelUpdate 里把值写入 ParamMouthOpenY / ParamMouthForm2 驱动嘴部开合与横向扩张收缩。
+    /// </summary>
+    private void ForwardLipSync()
+    {
+        var lipSync = _lipSync;
+        if (lipSync == null || !IsVisible || _exiting) return;
+        var level = lipSync.CurrentLevel;
+        var wide = lipSync.CurrentWideLevel;
+        if (Math.Abs(level - _lastPushedLip) <= 0.01f && Math.Abs(wide - _lastPushedWide) <= 0.01f) return;
+        _lastPushedLip = level;
+        _lastPushedWide = wide;
+        try
+        {
+            var v = level.ToString("0.###", CultureInfo.InvariantCulture);
+            var w = wide.ToString("0.###", CultureInfo.InvariantCulture);
+            _ = WebView.InvokeScript($"window.onHostSetLipSync && window.onHostSetLipSync({v},{w});");
         }
         catch
         {

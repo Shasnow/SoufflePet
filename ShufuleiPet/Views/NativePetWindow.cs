@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Services;
 using ShufuleiPet.Views.Native;
 
 namespace ShufuleiPet.Views;
@@ -29,6 +30,7 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
+    private readonly ILipSyncService _lipSync;
     private DateTime _lastMoveLog;
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
@@ -62,8 +64,9 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    public NativePetWindow()
+    public NativePetWindow(ILipSyncService lipSync)
     {
+        _lipSync = lipSync;
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
         Height = 680;
@@ -84,6 +87,8 @@ public class NativePetWindow : Window, IPetWindow
             _control.RequestNextFrameRendering();
             TrackGlobalCursor();
             UpdateClickThrough();
+            _control.SetLipSync(_lipSync.CurrentLevel);         // 口型律动音量每帧推给渲染层
+            _control.SetLipSyncWide(_lipSync.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
         };
         _renderTimer.Start();
 

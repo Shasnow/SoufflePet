@@ -43,6 +43,7 @@ public partial class App : Application
             services.AddSingleton<IForegroundDetector, ForegroundDetector>();
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
             services.AddSingleton<ILocalFileServer, LocalFileServer>();
+            services.AddSingleton<ILipSyncService, LipSyncService>();
             services.AddTransient<MainWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
@@ -66,6 +67,10 @@ public partial class App : Application
             // 自动表情事件 → 窗口（订阅先于 DispatcherTimer 触发，无竞态）
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
             autoExpression.ExpressionChanged += petOps.SetAutoExpression;
+
+            // music 状态进出 → 口型律动采集启停（停用时不占音频设备）
+            var lipSync = _provider.GetRequiredService<ILipSyncService>();
+            autoExpression.MusicStateChanged += active => lipSync.Active = active;
 
             try
             {

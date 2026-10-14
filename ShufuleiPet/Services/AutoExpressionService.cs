@@ -37,6 +37,9 @@ public class AutoExpressionConfig
     /// <summary>功能总开关（托盘"自动表情"勾选项的状态）。</summary>
     public bool Enabled { get; set; } = true;
 
+    /// <summary>音乐口型律动开关（托盘"口型律动"勾选项的状态）：仅在自动表情处于 music 状态时采集。</summary>
+    public bool LipSyncEnabled { get; set; } = true;
+
     /// <summary>轮询周期（秒）：进程枚举与前台窗口查询共用同一周期。</summary>
     public float PollSeconds { get; set; } = 3f;
 
@@ -179,6 +182,9 @@ public interface IAutoExpressionService : IDisposable
 
     /// <summary>检测结果变化事件：参数为要切换的表情名，null 表示恢复默认（无表情）。</summary>
     event Action<string?>? ExpressionChanged;
+
+    /// <summary>music 状态变化事件：true 表示进入 music（应开始口型律动），false 表示离开。</summary>
+    event Action<bool>? MusicStateChanged;
 }
 
 /// <summary>
@@ -239,14 +245,19 @@ public class AutoExpressionService : IAutoExpressionService
             {
                 _timer.Stop();
                 // 关闭开关 = 立即清除自动表情（无论之前处于什么状态）
+                var wasMusic = _lastState == AppState.Music;
                 _lastState = AppState.None;
                 ExpressionChanged?.Invoke(null);
+                if (wasMusic) MusicStateChanged?.Invoke(false);
             }
         }
     }
 
     /// <inheritdoc />
     public event Action<string?>? ExpressionChanged;
+
+    /// <inheritdoc />
+    public event Action<bool>? MusicStateChanged;
 
     public AutoExpressionService(
         AutoExpressionConfig config,
@@ -292,6 +303,10 @@ public class AutoExpressionService : IAutoExpressionService
         };
         Logger.Information("auto expression: {Prev} -> {Next} ({Expression})", prev, state, expression ?? "default");
         ExpressionChanged?.Invoke(expression);
+
+        // music 状态进出时通知口型律动启停（进入 music 开始采集，离开停止）
+        if (state == AppState.Music && prev != AppState.Music) MusicStateChanged?.Invoke(true);
+        else if (prev == AppState.Music && state != AppState.Music) MusicStateChanged?.Invoke(false);
     }
 
     /// <summary>

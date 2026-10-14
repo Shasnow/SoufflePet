@@ -419,14 +419,11 @@ public class LAppModel : CubismUserModel
         if (_lipSync)
         {
             // リアルタイムでリップシンクを行う場合、システムから音量を取得して0〜1の範囲で値を入力します。
-            float value = 0.0f;
-
-            // 状態更新/RMS値取得
-            //_wavFileHandler.Update(deltaTimeSeconds);
-            //value = _wavFileHandler.GetRms();
-
+            // 口型音量改由外部每帧写入，不再写死 0：
+            //   第 1 个口型参数（Ids[0]，嘴开闭）写 LipSyncValue，其余（Ids[1]，水平宽窄）写 LipSyncWideValue
             for (int i = 0; i < _lipSyncIds.Count; ++i)
             {
+                var value = i == 0 ? LipSyncValue : LipSyncWideValue;
                 Model.AddParameterValue(_lipSyncIds[i], value, 0.8f);
             }
         }

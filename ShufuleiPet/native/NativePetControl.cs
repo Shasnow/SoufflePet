@@ -301,6 +301,18 @@ public class NativePetControl : OpenGlControlBase
     public void ReplayMotion()
         => _model?.StartMotion("Idle", 0, MotionPriority.PriorityNormal, (_, _) => PlayIdle());
 
+    /// <summary>口型律动音量（0~1）：由窗口从 ILipSyncService 每帧推送，渲染前写给模型的 LipSyncValue。</summary>
+    private volatile float _lipSyncValue;
+
+    /// <summary>口型水平宽窄值（-1 收缩 ~ +1 扩张）：驱动 ParamMouthForm。</summary>
+    private volatile float _lipSyncWide;
+
+    /// <summary>设置口型律动音量（0~1），驱动模型嘴部开合（ParamMouthOpenY）。</summary>
+    public void SetLipSync(float value) => _lipSyncValue = Math.Clamp(value, 0f, 1f);
+
+    /// <summary>设置口型水平宽窄值（-1 收缩 ~ +1 扩张），驱动嘴部横向扩张/收缩（ParamMouthForm2）。</summary>
+    public void SetLipSyncWide(float value) => _lipSyncWide = Math.Clamp(value, -1f, 1f);
+
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
         if (_lapp == null) return;
@@ -322,6 +334,14 @@ public class NativePetControl : OpenGlControlBase
             // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
             if (!_showWatermark)
                 _model?.Model.SetPartOpacity("Part13", 0f);
+
+            // 口型律动：渲染前把最新音量写给模型，LAppModel.Update 的口型同步代码块
+            // 会在物理演算后以 LipSyncIds 写入嘴部参数（Ids[0] 开闭，Ids[1] 水平宽窄）
+            if (_model != null)
+            {
+                _model.LipSyncValue = _lipSyncValue;
+                _model.LipSyncWideValue = _lipSyncWide;
+            }
 
             _lapp.Run(span);
 

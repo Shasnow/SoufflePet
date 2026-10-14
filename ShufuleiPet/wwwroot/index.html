@@ -83,12 +83,35 @@ async function main() {
   // 未更新参数时才触发）因此永远不会执行。这里挂到 beforeModelUpdate（各参数更新之后、
   // 计算顶点之前，与官方 SDK 的顺序一致）上强制驱动眨眼。
   const blink = model.internalModel;
+  // 口型律动音量（0~1 开闭 / -1~1 水平宽窄）：宿主检测到 music 状态后推送。
+  // 注意写的是物理输入参数（ParamMouthOpenY / ParamMouthForm），由物理演算带出
+  // ParamMouthOpenY2 / ParamMouthForm2 驱动网格；直接写 Form2 会被物理结果覆盖。
+  let lipValue = 0;
+  let lipWide = 0;
+  window.onHostSetLipSync = (v, w) => {
+    lipValue = Math.max(0, Math.min(1, v));
+    lipWide = Math.max(-1, Math.min(1, w || 0));
+  };
   if (blink.eyeBlink && typeof blink.on === 'function') {
     blink.on('beforeModelUpdate', () => {
       blink.eyeBlink.updateParameters(blink.coreModel, PIXI.Ticker.shared.deltaMS / 1000);
+      // 口型律动：每帧在参数更新后写入，音乐节奏驱动嘴部开合与横向扩张收缩
+      try {
+        blink.coreModel.setParameterValueById('ParamMouthOpenY', lipValue);
+        blink.coreModel.setParameterValueById('ParamMouthForm', lipWide);
+      } catch (_) {}
     });
   } else {
     console.warn('[pet] eye blink unavailable (missing EyeBlink group?)');
+    // 眨眼不可用时仍尝试单独挂口型写入
+    if (typeof blink.on === 'function') {
+      blink.on('beforeModelUpdate', () => {
+        try {
+          blink.coreModel.setParameterValueById('ParamMouthOpenY', lipValue);
+          blink.coreModel.setParameterValueById('ParamMouthForm', lipWide);
+        } catch (_) {}
+      });
+    }
   }
 
   // 自适应窗口大小，模型居中偏下

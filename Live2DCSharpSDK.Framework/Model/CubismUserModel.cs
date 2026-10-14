@@ -81,6 +81,12 @@ public abstract class CubismUserModel : IDisposable
     /// 最後のリップシンクの制御値
     /// </summary>
     protected float _lastLipSyncValue;
+
+    /// <summary>口型同步音量（0~1）：由外部每帧更新（如音频 RMS），Update 中写入口型参数。</summary>
+    public float LipSyncValue { get; set; }
+
+    /// <summary>口型水平宽窄音量（-1 收缩 ~ +1 扩张）：由外部每帧更新，写入 LipSync 组的第 2 个参数（物理输入，由物理带出 Form2）。</summary>
+    public float LipSyncWideValue { get; set; }
     /// <summary>
     /// マウスドラッグのX位置
     /// </summary>
