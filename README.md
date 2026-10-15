@@ -7,19 +7,20 @@
 - **透明置顶窗口**：无边框、透明背景、置顶显示，默认停靠屏幕右下角
 - **视线全局跟随**：宿主用 `GetCursorPos` 轮询全局光标（而非窗口内指针事件），鼠标移出窗口甚至在其他显示器上，模型视线仍持续追踪
 - **交互**（两种模式通用）：
-  - 按住拖动 → 移动窗口（系统级拖拽）
+  - 左键拖动 → 移动窗口
+  - 中键拖动 → 移动模型
   - 左键单击 → 随机切换表情
-  - 右键单击 → 重播 Idle 动作
   - 滚轮 → 缩放模型
-- **点击穿透**（原生版）：逐像素读取帧缓冲 alpha 判定光标是否压在模型上；不在模型上时给窗口挂 `WS_EX_TRANSPARENT`，点击落到下层窗口，压在模型上（或按住鼠标期间）恢复交互
 - **托盘图标**：显示 / 隐藏、退出；关闭窗口默认隐藏到托盘
+- **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
+- **口型同步**：在音乐模式下，根据当前播放的音乐，自动同步模型的口型
 
 ## 两种运行模式
 
-| 模式 | 启动参数 | 渲染方式 | 说明 |
-| --- | --- | --- | --- |
-| 原生版（默认） | （无参数） | Live2DCSharpSDK + OpenGL ES2 | 不依赖 WebView，Cubism Native SDK 的 C# 移植直接渲染 |
-| WebView 版 | `--webview` | WebView2 + WebGL（Live2D JS SDK） | 宿主内置 `HttpListener` 静态服务器（端口 18923 起，最多顺延 10 个），加载 `wwwroot/index.html` |
+| 模式 | 启动参数 | 渲染方式 |
+| --- | --- | --- |
+| 原生版（默认） | （无参数） | Live2DCSharpSDK + OpenGL ES2 |
+| WebView 版 | `--webview` | WebView2 + WebGL（Live2D JS SDK） |
 
 ## 环境要求
 
@@ -58,16 +59,11 @@ ShufuleiPet.sln
 └─ Live2DCSharpSDK.OpenGL/       # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）
 ```
 
-> `Live2DCSharpSDK.Vulkan*` 项目未纳入解决方案，且已被 `.gitignore` 忽略。
-
-## 日志
-
-使用 [Serilog](https://serilog.com/) 输出，内容为英文（避免控制台乱码）：
-
-- 文件：`logs/pet-YYYYMMDD.log`，按天滚动，保留 7 天
-- 控制台：DEBUG 构建额外输出
-- 级别：Debug 及以上；未处理异常记录 Fatal 并在退出前刷盘
-
 ## 资源说明
 
-Live2D 模型资源位于 `ShufuleiPet/wwwroot/`（含 `舒芙蕾/` 模型目录），整个 `wwwroot` 已被 `.gitignore` 忽略，不随仓库分发，请自行放入合法授权的模型文件后再构建运行。
+Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，不随仓库分发，请自行放入合法授权的模型文件后再构建运行。
+
+## 鸣谢
+
+[Live2D Cubism](https://www.live2d.com/zh-CHS/)
+[Live2DCSharpSDK](https://github.com/live2d/Live2DCSharpSDK)
