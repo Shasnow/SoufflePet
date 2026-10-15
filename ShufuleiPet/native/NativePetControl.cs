@@ -32,8 +32,6 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>模型包围盒（视图空间，缩放 1 且未平移时测得）：中键拖拽时据此保证模型不会整体移出窗口。</summary>
     private float _bboxMinX, _bboxMaxX = 1f, _bboxMinY, _bboxMaxY = 1f;
 
-    private bool _eyeMeasured;
-
     /// <summary>模型双眼中心的模型坐标（加载后测一次并缓存），作为目光跟随的基准点。</summary>
     private Vector2? _eyeModel;
 
@@ -62,6 +60,24 @@ public class NativePetControl : OpenGlControlBase
     private bool _pendingGaze;
     private bool _renderErrLogged;
 
+    /// <summary>是否允许自续帧（窗口隐藏时置 false，避免看不见时仍满速空转）。</summary>
+    private volatile bool _renderLoopEnabled = true;
+
+    /// <summary>帧率上限（0 = 不限制）。按 vsync 整数分频跳帧，实际帧率 = min(vsync, 上限)。</summary>
+    private volatile int _fpsCap;
+
+    /// <summary>当前显示器刷新率（窗口层查询传入；0 = 未知，退回时间阈值法）。</summary>
+    private volatile int _vsyncHz;
+
+    /// <summary>vsync 节拍计数：仅在渲染回调线程访问，每 N 拍渲染 1 帧实现整数分频。</summary>
+    private int _vsyncPhase;
+
+    /// <summary>设置帧率上限（0 表示不限制，跟随显示器 vsync）。渲染线程每帧读取。</summary>
+    public void SetFpsCap(int cap) => _fpsCap = cap;
+
+    /// <summary>设置显示器刷新率（窗口层在显示/跨屏移动时查询传入），用于 vsync 整数分频。</summary>
+    public void SetVsyncHz(int hz) => _vsyncHz = hz;
+
     /// <summary>实际渲染帧计数（渲染线程累加，窗口层每秒取走一次用于统计 FPS）。</summary>
     private int _renderedFrames;
 
@@ -75,6 +91,25 @@ public class NativePetControl : OpenGlControlBase
     public int TakeRenderedFrames()
     {
         return Interlocked.Exchange(ref _renderedFrames, 0);
+    }
+
+    /// <summary>窗口可见性变化时启停续帧：隐藏即停，重新显示立即拉起。</summary>
+    public void SetRenderLoopEnabled(bool enabled)
+    {
+        if (enabled) StartRenderLoop();
+        else StopRenderLoop();
+    }
+
+    /// <summary>拉起渲染链：直接请求一帧，续帧链自此自行维持。</summary>
+    private void StartRenderLoop()
+    {
+        _renderLoopEnabled = true;
+        RequestNextFrameRendering();
+    }
+
+    private void StopRenderLoop()
+    {
+        _renderLoopEnabled = false;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -150,6 +185,8 @@ public class NativePetControl : OpenGlControlBase
             // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
             if (!ShowWatermark)
                 _model?.Model.SetPartOpacity("Part13", 0f);
+            // 测量双眼中心
+            MeasureEyeCenter(_model?.Model);
             Logger.Debug("LoadModel ok textures={TextureCount}", _model?.Textures.Count);
 
             // SDK会自动播放 Idle 动作，这里注释掉手动播放
@@ -184,11 +221,82 @@ public class NativePetControl : OpenGlControlBase
         }
     }
 
+    protected override void OnOpenGlRender(GlInterface gl, int fb)
+    {
+        if (_lapp == null) return;
+
+        // 帧率限制：优先按 vsync 节拍整数分频——每 N 个垂直同步渲染 1 帧
+        // （N = 刷新率/上限 向上取整，保证不超上限）。节拍严格均匀、相位锁定，
+        // 不会像时间阈值法那样因回调触发时间的毫秒级抖动把"该画"的帧误跳掉，
+        // 出现 2:1 间隔的运动拖影。上限 ≥ 刷新率时 N=1，每帧都画，与不限帧一致。
+        // 刷新率未知时退回时间阈值法（留 0.5ms 容差）。跳帧不改 _last，动画速度不受影响。
+        var cap = _fpsCap;
+        if (cap > 0)
+        {
+            var hz = _vsyncHz;
+            var skip = false;
+            if (hz > cap)
+            {
+                skip = ++_vsyncPhase % (int)Math.Ceiling((double)hz / cap) != 0;
+            }
+            else if (hz <= 0 && (DateTime.Now - _last).TotalMilliseconds < 1000.0 / cap - 0.5)
+            {
+                skip = true;
+            }
+            if (skip)
+            {
+                if (_renderLoopEnabled) RequestNextFrameRendering();
+                return;
+            }
+        }
+
+        try
+        {
+            // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
+            // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。
+            var vpW = (int)(Bounds.Width * App.RenderScaling);
+            var vpH = (int)(Bounds.Height * App.RenderScaling);
+            gl.Viewport(0, 0, vpW, vpH);
+
+            var now = DateTime.Now;
+            var span = (float)(now - _last).TotalSeconds;
+            _last = now;
+
+            // 口型律动：渲染前把最新音量写给模型，LAppModel.Update 的口型同步代码块
+            // 会在物理演算后以 LipSyncIds 写入嘴部参数（Ids[0] 开闭，Ids[1] 水平宽窄）
+            if (_model != null)
+            {
+                _model.LipSyncValue = _lipSyncValue;
+                _model.LipSyncWideValue = _lipSyncWide;
+            }
+
+            _lapp.Run(span);
+
+            ProbeCursorPixel(fb, vpW, vpH);
+
+            Interlocked.Increment(ref _renderedFrames);
+            _frames++;
+            if (_frames == 1 || _frames % 300 == 0)
+                Logger.Debug("render frames={Frames} span={Span:F3}", _frames, span);
+
+            // 自续帧：渲染完立刻请求下一帧，节奏交给合成器帧时钟（显示器 vsync），
+            // 避免固定周期定时器与高刷屏相位不同步导致的周期性掉帧。
+            if (_renderLoopEnabled) RequestNextFrameRendering();
+        }
+        catch (Exception ex)
+        {
+            if (!_renderErrLogged)
+            {
+                _renderErrLogged = true;
+                Logger.Error(ex, "OnOpenGlRender exception");
+            }
+        }
+    }
+
     // Idle 动作循环播放（播完自动重播）
     private void PlayIdle()
     {
-        if (_model == null) return;
-        _model.StartMotion("Idle", 0, MotionPriority.PriorityIdle, (_, _) => PlayIdle());
+        _model?.StartMotion("Idle", 0, MotionPriority.PriorityIdle, (_, _) => PlayIdle());
     }
 
     protected override void OnOpenGlDeinit(GlInterface gl)
@@ -297,10 +405,8 @@ public class NativePetControl : OpenGlControlBase
     ///     均值再对两眼取平均，即"双眼之间"的中点。只测一次可避免 idle 动作使基准漂移。
     ///     找不到眼睛部件时基准点保持为视图中心，行为与改动前一致。
     /// </remarks>
-    private void MeasureEyeCenter()
+    private void MeasureEyeCenter(CubismModel? model)
     {
-        _eyeMeasured = true;
-        var model = _model?.Model;
         if (model == null) return;
 
         // cdi3.json 的 Parts[].{Id,Name} 提供部件 ID 到显示名的映射
@@ -433,52 +539,6 @@ public class NativePetControl : OpenGlControlBase
     public void SetLipSyncWide(float value)
     {
         _lipSyncWide = Math.Clamp(value, -1f, 1f);
-    }
-
-    protected override void OnOpenGlRender(GlInterface gl, int fb)
-    {
-        if (_lapp == null) return;
-
-        try
-        {
-            // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
-            // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。
-            var vpW = (int)(Bounds.Width * App.RenderScaling);
-            var vpH = (int)(Bounds.Height * App.RenderScaling);
-            gl.Viewport(0, 0, vpW, vpH);
-
-            var now = DateTime.Now;
-            var span = (float)(now - _last).TotalSeconds;
-            _last = now;
-
-            // 口型律动：渲染前把最新音量写给模型，LAppModel.Update 的口型同步代码块
-            // 会在物理演算后以 LipSyncIds 写入嘴部参数（Ids[0] 开闭，Ids[1] 水平宽窄）
-            if (_model != null)
-            {
-                _model.LipSyncValue = _lipSyncValue;
-                _model.LipSyncWideValue = _lipSyncWide;
-            }
-
-            _lapp.Run(span);
-
-            // 顶点数据在 UpdateModel 之后才有效，故在第一帧渲染后再测量双眼中心
-            if (!_eyeMeasured && _model != null) MeasureEyeCenter();
-
-            ProbeCursorPixel(fb, vpW, vpH);
-
-            Interlocked.Increment(ref _renderedFrames);
-            _frames++;
-            if (_frames == 1 || _frames % 300 == 0)
-                Logger.Debug("render frames={Frames} span={Span:F3}", _frames, span);
-        }
-        catch (Exception ex)
-        {
-            if (!_renderErrLogged)
-            {
-                _renderErrLogged = true;
-                Logger.Error(ex, "OnOpenGlRender exception");
-            }
-        }
     }
 
     /// <summary>

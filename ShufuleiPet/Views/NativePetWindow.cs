@@ -43,7 +43,7 @@ public class NativePetWindow : Window, IPetWindow
     /// 帧率显示叠加层的上限：自续帧模式下实际节奏由显示器 vsync 决定，
     /// 因此上限就是主显示器刷新率（查询失败为 0，此时只显示当前帧率）。
     /// </summary>
-    private readonly int _fpsCap = 60;
+    private readonly int _fpsCap = 0;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
@@ -80,6 +80,10 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+
     public NativePetWindow(ILipSyncService lipSync)
     {
         var lipSync1 = lipSync;
@@ -94,6 +98,7 @@ public class NativePetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _control = new NativePetControl();
+        _control.SetFpsCap(_fpsCap); // 帧率上限：vsync 分频跳帧，实际帧率 = min(vsync, 上限)
 
         // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
         _fpsText = new TextBlock
@@ -114,11 +119,11 @@ public class NativePetWindow : Window, IPetWindow
         };
         Content = new Grid { Children = { _control, _fpsBadge } };
 
-        // 16ms 定时器驱动 GL 重绘（约 60fps）+ 全局鼠标追踪
+        // 定时器只负责输入侧与统计，不再驱动 GL 重绘：
+        // 重绘改为渲染回调自续帧（跟随合成器帧时钟 / 显示器 vsync）。
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) =>
         {
-            _control.RequestNextFrameRendering();
             TrackGlobalCursor();
             UpdateClickThrough();
             UpdateFps();                                        // 每满 1 秒刷新一次帧率显示
@@ -127,12 +132,12 @@ public class NativePetWindow : Window, IPetWindow
         };
         _renderTimer.Start();
 
-        // 窗口隐藏时停掉定时器（否则看不见也在渲染），重新显示时恢复
+        // 窗口隐藏时停掉自续帧（否则看不见也在满速渲染），重新显示时立即拉起
         PropertyChanged += (_, e) =>
         {
-            if (e.Property == Visual.IsVisibleProperty)
+            if (e.Property == IsVisibleProperty)
             {
-                _renderTimer.IsEnabled = IsVisible;
+                _control.SetRenderLoopEnabled(IsVisible);
             }
         };
 
@@ -217,8 +222,10 @@ public class NativePetWindow : Window, IPetWindow
             // 之后点击穿透只切换 WS_EX_TRANSPARENT 即可。
             EnsureLayered();
 
+            // 每次显示都刷新 vsync 基准（显示器刷新率可能被用户改过），
             // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
             // 避免托盘切换显示/隐藏把用户拖动过的窗口位置复原
+            UpdateVsyncHz();
             if (_positioned) return;
             _positioned = true;
 
@@ -227,6 +234,9 @@ public class NativePetWindow : Window, IPetWindow
             var wa = screen.WorkingArea;
             Position = new PixelPoint(wa.Right - (int)Bounds.Width - 48, wa.Bottom - (int)Bounds.Height - 24);
         };
+
+        // 拖到另一台刷新率不同的显示器时更新 vsync 基准
+        PositionChanged += (_, _) => UpdateVsyncHz();
     }
 
     /// <summary>
@@ -324,6 +334,32 @@ public class NativePetWindow : Window, IPetWindow
     public void SetFpsVisible(bool visible)
     {
         _fpsBadge.IsVisible = visible;
+    }
+
+    /// <summary>GDI 设备上下文能力索引：垂直刷新率（Hz）。</summary>
+    private const int DeviceCapsVRefresh = 116;
+
+    /// <summary>
+    /// 查询本窗口所在显示器的刷新率传给渲染层（vsync 整数分频限帧的节拍基准）。
+    /// Avalonia 12 的 Screen 没有 RefreshRate 属性，走 Win32 GetDeviceCaps(VREFRESH)；
+    /// 返回 0/1 表示未知或隔行，一律视为未知（0，渲染层退回时间阈值法）。
+    /// </summary>
+    private void UpdateVsyncHz()
+    {
+        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        var hz = 0;
+        if (hwnd != IntPtr.Zero)
+        {
+            var hdc = GetDC(hwnd);
+            if (hdc != IntPtr.Zero)
+            {
+                var v = GetDeviceCaps(hdc, DeviceCapsVRefresh);
+                ReleaseDC(hwnd, hdc);
+                if (v > 1) hz = v;
+            }
+        }
+        _control.SetVsyncHz(hz);
+        Logger.Debug("vsync hz={Hz}", hz);
     }
 
     /// <summary>帧率统计：取走渲染层实际渲染的帧数，每满 1 秒刷新一次"当前/上限"。</summary>
