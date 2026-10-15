@@ -18,8 +18,8 @@
 
 | 模式 | 启动参数 | 渲染方式 | 说明 |
 | --- | --- | --- | --- |
-| WebView 版 | （默认） | WebView2 + WebGL（Live2D JS SDK） | 宿主内置 `HttpListener` 静态服务器（端口 18923 起，最多顺延 10 个），加载 `wwwroot/index.html` |
-| 原生版 | `--native` | Live2DCSharpSDK + OpenGL ES2 | 不依赖 WebView，Cubism Native SDK 的 C# 移植直接渲染 |
+| 原生版（默认） | （无参数） | Live2DCSharpSDK + OpenGL ES2 | 不依赖 WebView，Cubism Native SDK 的 C# 移植直接渲染 |
+| WebView 版 | `--webview` | WebView2 + WebGL（Live2D JS SDK） | 宿主内置 `HttpListener` 静态服务器（端口 18923 起，最多顺延 10 个），加载 `wwwroot/index.html` |
 
 ## 环境要求
 
@@ -33,11 +33,11 @@
 # 构建整个解决方案
 dotnet build ShufuleiPet.sln
 
-# WebView 版（默认）
+# 原生版（默认）
 dotnet run --project ShufuleiPet
 
-# 原生版
-dotnet run --project ShufuleiPet -- --native
+# WebView 版
+dotnet run --project ShufuleiPet -- --webview
 ```
 
 ## 解决方案结构
@@ -46,7 +46,7 @@ dotnet run --project ShufuleiPet -- --native
 ShufuleiPet.sln
 ├─ ShufuleiPet/                  # 主程序（Avalonia 桌面应用）
 │  ├─ Views/                     # 窗口层
-│  │  ├─ MainWindow.axaml(.cs)   #   WebView 版窗口 + 本地静态服务器
+│  │  ├─ WebViewPetWindow.cs    #   WebView 版窗口（纯代码，+ 本地静态服务器）
 │  │  └─ NativePetWindow.cs      #   原生版窗口（拖拽 / 穿透 / 全局光标）
 │  ├─ native/                    # 原生渲染控件
 │  │  ├─ NativePetControl.cs     #   OpenGL 渲染循环、逐像素命中检测

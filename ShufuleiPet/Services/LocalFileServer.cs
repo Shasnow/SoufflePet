@@ -18,7 +18,7 @@ public interface ILocalFileServer : IDisposable
 
 /// <summary>
 /// 本地静态文件服务器：HttpListener 从 18923 起扫描可用端口，服务 wwwroot 目录。
-/// 单例懒创建——--native 模式下永不被解析，不占端口。
+/// 单例懒创建——原生模式（默认）下永不被解析，不占端口。
 /// </summary>
 public sealed class LocalFileServer : ILocalFileServer
 {

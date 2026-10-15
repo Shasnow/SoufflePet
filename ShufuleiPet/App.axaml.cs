@@ -32,9 +32,9 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // --native：用 Live2DCSharpSDK OpenGL 原生渲染（对比 WebView 方案）
-            var useNative = desktop.Args?.Contains("--native") == true;
-            Logger.Information("Lifetime initialized native={Native}", useNative);
+            // 默认：Live2DCSharpSDK OpenGL 原生渲染；--webview：切 WebView 方案（对比用）
+            var useWebView = desktop.Args?.Contains("--webview") == true;
+            Logger.Information("Lifetime initialized native={Native}", !useWebView);
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
@@ -44,12 +44,12 @@ public partial class App : Application
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
             services.AddSingleton<ILocalFileServer, LocalFileServer>();
             services.AddSingleton<ILipSyncService, LipSyncService>();
-            services.AddTransient<MainWindow>();
+            services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
-            services.AddSingleton<IPetWindow>(sp => useNative
-                ? sp.GetRequiredService<NativePetWindow>()
-                : sp.GetRequiredService<MainWindow>());
+            services.AddSingleton<IPetWindow>(sp => useWebView
+                ? sp.GetRequiredService<WebViewPetWindow>()
+                : sp.GetRequiredService<NativePetWindow>());
             services.AddSingleton<ITrayService, TrayService>();
             _provider = services.BuildServiceProvider(new ServiceProviderOptions
             {

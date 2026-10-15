@@ -9,20 +9,6 @@
   #stage { position: fixed; inset: 0; }
   #stage canvas { display: block; touch-action: none; }
 
-  #exprs {
-    position: fixed; left: 50%; bottom: 6px; transform: translateX(-50%);
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 5px;
-    width: 96%; opacity: 0.22; transition: opacity 0.25s; pointer-events: auto;
-  }
-  #exprs:hover { opacity: 1; }
-  #exprs button {
-    padding: 3px 9px; font-size: 12px; border-radius: 999px; cursor: pointer;
-    border: 1px solid rgba(150, 100, 150, 0.35);
-    background: rgba(255, 255, 255, 0.85); color: #5a4a55;
-  }
-  #exprs button:hover { box-shadow: 0 2px 6px rgba(120, 80, 120, 0.2); }
-  #exprs button.active { background: #ff9ec4; color: #fff; border-color: #ff9ec4; }
-
   #err {
     display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
     background: rgba(255, 255, 255, 0.95); border: 1px solid #e88;
@@ -32,7 +18,6 @@
 </head>
 <body>
   <div id="stage"></div>
-  <div id="exprs"></div>
   <div id="err"></div>
 
   <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
@@ -40,7 +25,7 @@
   <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
 
 <script>
-const MODEL_URL = '舒芙蕾/舒芙蕾.model3.json';
+const MODEL_URL = 'models/舒芙蕾/舒芙蕾.model3.json';
 const EXPRESSIONS = ['哭哭', '手柄', '星星', '水印', '爱心', '猫猫手', '生气', '眼罩', '眼镜', '脸红', '麦克风', '黑脸'];
 
 const errEl = document.getElementById('err');
@@ -58,12 +43,14 @@ async function main() {
   PIXI.live2d.Live2DModel.registerTicker(PIXI.Ticker);
 
   // resolution = devicePixelRatio：按物理像素光栅化，避免高 DPI 下拉伸发糊
+  // preserveDrawingBuffer：允许每帧读 1 个像素做命中检测（点击穿透判定），开销可忽略
   const app = new PIXI.Application({
     resizeTo: window,
     backgroundAlpha: 0,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
+    preserveDrawingBuffer: true,
   });
   document.getElementById('stage').appendChild(app.view);
   app.stage.interactive = true;
@@ -71,6 +58,20 @@ async function main() {
   const model = await PIXI.live2d.Live2DModel.from(MODEL_URL, { autoInteract: false });
   model.anchor.set(0.5, 0.5);
   app.stage.addChild(model);
+
+  // 16x 各向异性过滤：与原生版一致，修复 4096 图集在缩小/斜视角下唇线等
+  // 细线在高 mip 层被采样成碎点/虚线的问题。
+  // 注意：PIXI Texture 对象在 model.textures（from() 内部 Promise.all 加载后赋值），
+  // 而 internalModel.textures 是 model3.json 里的贴图 URL 字符串数组，设了无效；
+  // 属性挂在 baseTexture 上，且仅当 mipmap 开启（4096 为 2 的幂，AUTO 自动启用）
+  // 且 scaleMode=LINEAR 时才会真正传给 GPU（EXT_texture_filter_anisotropic）。
+  for (const t of (model.textures || [])) {
+    try {
+      const bt = t.baseTexture || t;
+      bt.anisotropicLevel = 16;
+      bt.update();
+    } catch (_) { /* API 版本差异时忽略 */ }
+  }
 
   // 水印开关：水印是模型里的独立部件 "Part13"（cdi3.json 显示名"水印.png"）。
   // 每帧在参数提交前把该部件透明度压 0，等同于 VTube Studio"按空格关闭水印"的内置功能。
@@ -151,7 +152,7 @@ async function main() {
       // cdi3.json 的 Parts[].{Id,Name} 提供部件 ID 到显示名的映射
       const names = new Map();
       try {
-        const res = await fetch('舒芙蕾/舒芙蕾.cdi3.json');
+        const res = await fetch('models/舒芙蕾/舒芙蕾.cdi3.json');
         const json = await res.json();
         for (const p of (json.Parts || [])) names.set(p.Id, p.Name);
       } catch (_) { /* 读不到就退化为画布中心 */ }
@@ -211,10 +212,6 @@ async function main() {
     lookAt(p.x, p.y);
   });
 
-  // 宿主（Avalonia）轮询转发的全局光标：光标移出窗口后视线仍继续跟随。
-  // 页面里的 pointermove 只在光标位于窗口内时触发，窗口外由宿主 GetCursorPos 补上。
-  window.onHostCursor = (x, y) => lookAt(x, y);
-
   // 宿主托盘菜单"重置模型大小和位置"：缩放回 1，再按窗口重新居中
   window.onHostResetModel = () => { zoom = 1; layout(); };
 
@@ -223,7 +220,6 @@ async function main() {
   let modelDrag = null;
   document.addEventListener('pointerdown', (e) => {
     if (e.button !== 1) return;             // 只处理中键
-    if (e.target.closest('#exprs')) return;
     e.preventDefault();                      // 抑制中键默认行为（滚动/粘贴）
     modelDrag = { x: e.clientX, y: e.clientY };
     // 指针捕获：光标拖出窗口后仍能收到移动/抬起事件
@@ -240,12 +236,65 @@ async function main() {
   document.addEventListener('pointerup', endModelDrag);
   document.addEventListener('pointercancel', endModelDrag);
 
-  // 按住空白处/模型 -> 通知宿主进入系统级拖窗（中键走上面的拖模型，不触发）
+  // 左键：按住移动 >6px → 通知宿主进入系统级拖窗（拖拽全程交给 Windows）；
+  // 未产生位移的单击 → 轮换表情（与原生版 pressPoint 位移阈值判定一致）
+  let leftPress = null;
   document.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
-    if (e.target.closest('#exprs')) return;
-    tellHost({ type: 'drag' });
+    leftPress = { x: e.clientX, y: e.clientY, dragged: false };
   });
+  document.addEventListener('pointermove', (e) => {
+    if (!leftPress || leftPress.dragged) return;
+    const dx = e.clientX - leftPress.x, dy = e.clientY - leftPress.y;
+    if (dx * dx + dy * dy < 36) return;     // 位移 < 6px 不算拖拽
+    leftPress.dragged = true;
+    tellHost({ type: 'drag' });             // 进入系统拖拽模态
+  });
+  const endLeftPress = (e) => {
+    if (e.button !== 0 || !leftPress) return;
+    const click = !leftPress.dragged;
+    leftPress = null;
+    if (click) cycleExpression();           // 单击 = 轮换表情
+    // 鼠标抬起后补发一次当前命中状态：按住期间宿主保持非穿透，
+    // 松开后需要按最新命中结果重新应用穿透
+    if (lastHit !== null) tellHost({ type: 'hit', value: lastHit });
+  };
+  document.addEventListener('pointerup', endLeftPress);
+  document.addEventListener('pointercancel', (e) => { leftPress = null; });
+
+  // 命中检测：每帧读光标下 1 个像素的 alpha，>=32 判定压在模型可见区域上；
+  // 状态变化时通知宿主，宿主据此切换 WS_EX_TRANSPARENT 实现点击穿透
+  // （鼠标不在模型上时点击落到下层应用，与原生版 ProbeCursorPixel 逻辑一致）。
+  // 依赖 preserveDrawingBuffer，否则读到的是已清空的缓冲（全透明）。
+  const gl = app.view.getContext('webgl2') || app.view.getContext('webgl');
+  const hitPixel = new Uint8Array(4);
+  let lastHit = null;                       // 最近一次上报宿主的命中状态
+  let mouseCssX = -1e4, mouseCssY = -1e4;   // 光标 CSS 像素坐标（页面内 + 宿主全局轮询共用）
+
+  // 光标移出窗口后页面收不到 pointermove，由宿主全局轮询转发坐标补上，
+  // 命中检测也用同一份坐标（窗口外坐标为负/越界，直接判未命中）
+  window.onHostCursor = (x, y) => { mouseCssX = x; mouseCssY = y; lookAt(x, y); };
+  document.addEventListener('pointermove', (e) => { mouseCssX = e.clientX; mouseCssY = e.clientY; });
+
+  function probePointer() {
+    if (!gl) return;
+    const w = app.view.width, h = app.view.height;
+    if (!w || !h) return;
+    const res = app.renderer.resolution || 1;
+    const rx = Math.floor(mouseCssX * res);
+    const ry = Math.floor(mouseCssY * res);
+    let hit = false;
+    if (rx >= 0 && ry >= 0 && rx < w && ry < h) {
+      // glReadPixels 原点在左下，页面坐标 y 向下，需翻转
+      gl.readPixels(rx, h - ry - 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, hitPixel);
+      hit = hitPixel[3] >= 32;
+    }
+    if (hit !== lastHit) {
+      lastHit = hit;
+      tellHost({ type: 'hit', value: hit });
+    }
+  }
+  PIXI.Ticker.shared.add(probePointer);
 
   // 滚轮缩放
   window.addEventListener('wheel', (e) => {
@@ -254,38 +303,38 @@ async function main() {
     model.scale.set(fitScale * zoom);
   }, { passive: false });
 
-  // 表情栏（平时半透明，悬停显示）
-  const exprBox = document.getElementById('exprs');
-  let activeBtn = null;
-  for (const name of EXPRESSIONS) {
-    const btn = document.createElement('button');
-    btn.textContent = name;
-    btn.addEventListener('pointerdown', (e) => e.stopPropagation()); // 不触发拖窗
-    btn.addEventListener('click', async () => {
-      const em = model.internalModel.motionManager.expressionManager;
-      if (activeBtn === btn) {
-        if (em) em.resetExpression();
-        btn.classList.remove('active');
-        activeBtn = null;
-      } else {
-        await model.expression(name);
-        if (activeBtn) activeBtn.classList.remove('active');
-        btn.classList.add('active');
-        activeBtn = btn;
-      }
-    });
-    exprBox.appendChild(btn);
+  // 表情：单击模型轮换（与原生版 TapRandomExpression 一致），
+  // 自动表情联动走独立的 setExpr 状态，优先级高于单击轮换的任意表情
+  let curExpr = null;                 // 当前单击轮换的任意表情名
+  let autoExpr = null;                // 自动表情联动设置的表情名（null = 无）
+
+  async function setExpr(name) {
+    const em = model.internalModel.motionManager.expressionManager;
+    if (name && name !== curExpr) {
+      await model.expression(name);
+      curExpr = name;
+    } else {
+      if (em) em.resetExpression();
+      curExpr = null;
+    }
+  }
+
+  // 左键单击模型 -> 轮换表情（按 EXPRESSIONS 顺序循环）
+  function cycleExpression() {
+    if (autoExpr) return; // 自动表情联动激活时，单击不覆盖
+    const i = curExpr == null ? -1 : EXPRESSIONS.indexOf(curExpr);
+    setExpr(EXPRESSIONS[(i + 1) % EXPRESSIONS.length]);
   }
 
   // 自动表情联动（宿主检测到游戏/音乐应用后通过 InvokeScript 调用）：
-  // 复用表情栏的 model.expression / resetExpression，并同步按钮高亮
+  // 设置时切换，传 null 清除后由单击轮换接管
   window.onHostSetExpression = (name) => {
-    const btn = [...exprBox.children].find((b) => b.textContent === name);
-    // 已是该表情则跳过，避免重复设置时点击导致误取消
-    if (btn && btn !== activeBtn) btn.click(); // 复用按钮点击逻辑（含 activeBtn 高亮同步）
+    autoExpr = name;
+    setExpr(name);
   };
   window.onHostResetExpression = () => {
-    if (activeBtn) activeBtn.click(); // 再次点击 = 取消表情并清高亮
+    autoExpr = null;
+    setExpr(null);
   };
 
   // 通知宿主页面已就绪（模型加载完成），宿主据此重放此前缓存的自动表情状态

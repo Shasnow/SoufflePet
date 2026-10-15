@@ -1,18 +1,24 @@
 using System;
 using System.Globalization;
-using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Threading;
 using ShufuleiPet.Services;
 
 namespace ShufuleiPet.Views;
 
-public partial class MainWindow : Window, IPetWindow
+/// <summary>
+/// WebView 版桌宠窗口：纯代码构建（无 XAML，与 NativePetWindow 风格一致），
+/// 窗口内嵌 NativeWebView 加载本地静态服务器页面，负责光标转发、口型律动、
+/// 拖窗、点击穿透、自动表情等宿主侧交互。
+/// </summary>
+public class WebViewPetWindow : Window, IPetWindow
 {
+    private readonly NativeWebView _webView;
     private bool _exiting;
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
@@ -43,22 +49,34 @@ public partial class MainWindow : Window, IPetWindow
     /// <summary>上次推送给页面的口型水平宽窄值。</summary>
     private float _lastPushedWide = float.MinValue;
 
-    /// <summary>设计时（XAML previewer）用的无参构造：只初始化组件，不启动服务器。</summary>
-    public MainWindow() : this(null, null) { }
-
     /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）与口型律动服务（ILipSyncService）。</summary>
-    public MainWindow(ILocalFileServer? server, ILipSyncService? lipSync)
+    public WebViewPetWindow(ILocalFileServer? server, ILipSyncService? lipSync)
     {
         _lipSync = lipSync;
-        InitializeComponent();
+
+        Title = "舒芙蕾桌宠";
+        Width = 480;
+        Height = 680;
+        MinWidth = 200;
+        MinHeight = 200;
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
+        Background = Brushes.Transparent;
+        WindowDecorations = WindowDecorations.None;
+        Topmost = true;
+        ShowInTaskbar = false;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+
+        _webView = new NativeWebView { Background = Brushes.Transparent };
+        Content = _webView;
+
         if (server != null)
         {
             var port = server.Start();
-            WebView.Source = new Uri($"http://localhost:{port}/index.html");
+            _webView.Source = new Uri($"http://localhost:{port}/index.html");
         }
 
         Opened += (_, _) => MoveToBottomRight();
-        WebView.WebMessageReceived += OnWebMessage;
+        _webView.WebMessageReceived += OnWebMessage;
 
         // 全局鼠标追踪：页面里的 pointermove 只在光标位于窗口内时触发，移出窗口后
         // 视线会定住。这里由宿主轮询屏幕光标，换算成页面坐标后转发给页面。
@@ -90,7 +108,7 @@ public partial class MainWindow : Window, IPetWindow
     {
         try
         {
-            _ = WebView.InvokeScript("window.onHostResetModel && window.onHostResetModel();");
+            _ = _webView.InvokeScript("window.onHostResetModel && window.onHostResetModel();");
         }
         catch
         {
@@ -116,7 +134,7 @@ public partial class MainWindow : Window, IPetWindow
             var script = _autoExpression == null
                 ? "window.onHostResetExpression && window.onHostResetExpression();"
                 : $"window.onHostSetExpression && window.onHostSetExpression('{_autoExpression}');";
-            _ = WebView.InvokeScript(script);
+            _ = _webView.InvokeScript(script);
         }
         catch
         {
@@ -162,7 +180,7 @@ public partial class MainWindow : Window, IPetWindow
         try
         {
             // NativeWebView 没有 Post 消息 API，官方做法是 InvokeScript 执行页面 JS
-            _ = WebView.InvokeScript($"window.onHostCursor && window.onHostCursor({x},{y});");
+            _ = _webView.InvokeScript($"window.onHostCursor && window.onHostCursor({x},{y});");
         }
         catch
         {
@@ -187,7 +205,7 @@ public partial class MainWindow : Window, IPetWindow
         {
             var v = level.ToString("0.###", CultureInfo.InvariantCulture);
             var w = wide.ToString("0.###", CultureInfo.InvariantCulture);
-            _ = WebView.InvokeScript($"window.onHostSetLipSync && window.onHostSetLipSync({v},{w});");
+            _ = _webView.InvokeScript($"window.onHostSetLipSync && window.onHostSetLipSync({v},{w});");
         }
         catch
         {
@@ -211,6 +229,15 @@ public partial class MainWindow : Window, IPetWindow
                 PushAutoExpression();
                 return;
             }
+            if (kind == "hit")
+            {
+                // 页面逐像素命中检测结果：光标不在模型可见像素上时挂
+                // WS_EX_TRANSPARENT，让点击落到下层应用（与原生版 UpdateClickThrough 一致）
+                if (!doc.RootElement.TryGetProperty("value", out var value)) return;
+                var overModel = value.ValueKind == JsonValueKind.True;
+                Dispatcher.Post(() => ApplyClickThrough(overModel));
+                return;
+            }
             if (kind != "drag") return;
             Dispatcher.Post(() =>
             {
@@ -224,5 +251,45 @@ public partial class MainWindow : Window, IPetWindow
         {
             // 忽略无法解析的消息
         }
+    }
+
+    private const int GwlExstyle = -20;
+    private const long WsExTransparent = 0x00000020;
+    private const long WsExLayered = 0x00080000;
+    private const uint LwaAlpha = 0x2;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    /// <summary>当前是否处于点击穿透状态（避免重复调 SetWindowLongPtr）。</summary>
+    private bool _clickThrough;
+
+    /// <summary>
+    /// 点击穿透：光标没压在模型可见像素上时挂 WS_EX_TRANSPARENT，点击落到下层应用。
+    /// 命中状态由页面逐像素读 alpha 得出并经 web 消息上报。
+    /// </summary>
+    private void ApplyClickThrough(bool overModel)
+    {
+        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (hwnd == IntPtr.Zero) return;
+
+        // WS_EX_TRANSPARENT 只对分层窗口生效，Avalonia 12 透明窗口默认不挂
+        // WS_EX_LAYERED——首次切换前补挂上（不影响渲染）
+        var style = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
+        if ((style & WsExLayered) == 0)
+        {
+            style |= WsExLayered;
+            SetWindowLongPtr(hwnd, GwlExstyle, (IntPtr)style);
+            SetLayeredWindowAttributes(hwnd, 0, 255, LwaAlpha);
+        }
+
+        var want = !overModel;
+        if (want == _clickThrough) return;
+        _clickThrough = want;
+        style = want ? style | WsExTransparent : style & ~WsExTransparent;
+        SetWindowLongPtr(hwnd, GwlExstyle, (IntPtr)style);
     }
 }

@@ -103,7 +103,7 @@ public class NativePetControl : OpenGlControlBase
             };
             Logger.Debug("LAppDelegateOpenGL ok");
 
-            var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "舒芙蕾");
+            var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "models", "舒芙蕾");
             _modelDir = modelDir;
             _model = _lapp.Live2dManager.LoadModel(modelDir, "舒芙蕾");
             // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
