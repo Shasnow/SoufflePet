@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Serilog;
 using ShufuleiPet.native;
 using ShufuleiPet.Services;
+using ShufuleiPet.Utils;
 
 namespace ShufuleiPet.Views;
 
@@ -37,16 +38,6 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     private const uint WmNcLButtonDown = 0x00A1;
     private static readonly IntPtr HtCaption = new(2);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint lpPoint);
-    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref NativePoint lpPoint);
 
     private const int GwlExstyle = -20;
     private const long WsExTransparent = 0x00000020;
@@ -189,15 +180,12 @@ public class NativePetWindow : Window, IPetWindow
     {
         if (!IsVisible || Bounds.Width <= 0 || Bounds.Height <= 0) return;
         var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (hwnd == IntPtr.Zero) return;
-        if (!GetCursorPos(out var cursor)) return;
-        var origin = new NativePoint();
-        if (!ClientToScreen(hwnd, ref origin)) return;
+        if (!GlobalCursor.TryGetClientPos(hwnd, out var px, out var py)) return;
 
-        // GetCursorPos 是物理像素，Bounds 是 DIP，先按 RenderScaling 换算
+        // 光标坐标是物理像素，Bounds 是 DIP，先按 RenderScaling 换算
         var scaling = RenderScaling <= 0 ? 1.0 : RenderScaling;
-        var x = (float)((cursor.X - origin.X) / scaling / Bounds.Width * 2 - 1);
-        var y = (float)((cursor.Y - origin.Y) / scaling / Bounds.Height * 2 - 1);
+        var x = (float)(px / scaling / Bounds.Width * 2 - 1);
+        var y = (float)(py / scaling / Bounds.Height * 2 - 1);
 
         // 裁剪坐标：中心原点、y 向上；窗口外光标夹到边界。
         // 基准点（模型双眼中心）的换算在 NativePetControl.OnDrag 内完成。

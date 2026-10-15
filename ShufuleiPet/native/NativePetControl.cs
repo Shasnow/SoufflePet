@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.OpenGL;
@@ -12,6 +11,7 @@ using Live2DCSharpSDK.Framework.Model;
 using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
+using ShufuleiPet.Utils;
 using Serilog;
 using ShufuleiPet.Views.native;
 
@@ -43,16 +43,6 @@ public class NativePetControl : OpenGlControlBase
 
     /// <summary>光标下是否有模型的可见像素（每帧渲染后读取 1 像素 alpha 判定，供点击穿透用）。</summary>
     public bool IsPointerOverModel { get; private set; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint lpPoint);
-    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref NativePoint lpPoint);
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -455,12 +445,7 @@ public class NativePetControl : OpenGlControlBase
         IsPointerOverModel = false;
         var api = _glApi;
         if (api == null || _lapp == null || _hwnd == IntPtr.Zero) return;
-        if (!GetCursorPos(out var cur)) return;
-        var origin = new NativePoint();
-        if (!ClientToScreen(_hwnd, ref origin)) return;
-
-        var px = cur.X - origin.X;
-        var py = cur.Y - origin.Y;
+        if (!GlobalCursor.TryGetClientPos(_hwnd, out var px, out var py)) return;
         if (px < 0 || py < 0 || px >= vpW || py >= vpH) return; // 光标在窗口外
 
         var glLib = _lapp.GL;

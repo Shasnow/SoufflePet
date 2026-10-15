@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using ShufuleiPet.Services;
+using ShufuleiPet.Utils;
 
 namespace ShufuleiPet.Views;
 
@@ -25,16 +26,6 @@ public class WebViewPetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     private const uint WmNcLButtonDown = 0x00A1; // WM_NCLBUTTONDOWN
     private static readonly IntPtr HtCaption = new(2); // HTCAPTION
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint lpPoint);
-    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref NativePoint lpPoint);
 
     private readonly DispatcherTimer _cursorTimer;
     private int _lastCursorX = int.MinValue;
@@ -54,7 +45,7 @@ public class WebViewPetWindow : Window, IPetWindow
     {
         _lipSync = lipSync;
 
-        Title = "舒芙蕾桌宠";
+        Title = "舒芙蕾桌宠（WebView）";
         Width = 480;
         Height = 680;
         MinWidth = 200;
@@ -166,17 +157,16 @@ public class WebViewPetWindow : Window, IPetWindow
     {
         if (!IsVisible || _exiting) return;
         var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (hwnd == IntPtr.Zero) return;
-        if (!GetCursorPos(out var cursor)) return;
-        if (cursor.X == _lastCursorX && cursor.Y == _lastCursorY) return;
-        _lastCursorX = cursor.X;
-        _lastCursorY = cursor.Y;
+        if (!GlobalCursor.TryGetClientPos(hwnd, out var px, out var py)) return;
+        // 光标未变化时不打扰页面（InvokeScript 是跨进程调用，频率敏感）
+        if (px == _lastCursorX && py == _lastCursorY) return;
+        _lastCursorX = px;
+        _lastCursorY = py;
 
-        var origin = new NativePoint();
-        if (!ClientToScreen(hwnd, ref origin)) return;
+        // 物理像素 → CSS 像素
         var scaling = RenderScaling <= 0 ? 1.0 : RenderScaling;
-        var x = ((cursor.X - origin.X) / scaling).ToString(CultureInfo.InvariantCulture);
-        var y = ((cursor.Y - origin.Y) / scaling).ToString(CultureInfo.InvariantCulture);
+        var x = (px / scaling).ToString(CultureInfo.InvariantCulture);
+        var y = (py / scaling).ToString(CultureInfo.InvariantCulture);
         try
         {
             // NativeWebView 没有 Post 消息 API，官方做法是 InvokeScript 执行页面 JS
