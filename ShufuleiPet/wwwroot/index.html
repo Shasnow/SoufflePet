@@ -358,6 +358,84 @@ async function main() {
     setExpr(EXPRESSIONS[(i + 1) % EXPRESSIONS.length]);
   }
 
+  // 手柄联动：宿主把手柄（或 WASD + 鼠标）输入推给页面，写入模型 ParamGroup3「手柄」的
+  // 摇杆与按键参数。写入挂在 beforeModelUpdate（各参数更新之后、顶点计算之前），
+  // 这样物理演算（physics3.json 把摇杆/按键当输入源）能随即带出身体与手臂的晃动。
+  // 宿主 30Hz 推送、页面 60fps 渲染，中间做指数逼近避免台阶感。
+  // 参数索引在首次驱动时构建一次，只写确实存在的参数（换模型也不会抛错）。
+  let padOn = false;                      // 驱动开关（游戏命中或手动开启时宿主置 true）
+  const pad = { lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0, dx: 0, dy: 0, mask: 0 };   // 目标值
+  const padCur = { lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };                       // 平滑后的当前值
+  const PAD_AXES = ['LStickX', 'LStickY', 'RStickX', 'RStickY', 'LTrigger', 'RTrigger'];
+  const PAD_AXIS_KEYS = ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'];
+  const PAD_BUTTONS = ['ButtonA', 'ButtonB', 'ButtonX', 'ButtonY',
+                       'LShoulder', 'RShoulder', 'LStickButton', 'RStickButton'];
+
+  // 参数 id → 索引映射：coreModel 支持 getParameterIndex 时预建，写入走按索引的
+  // setParameterValueByIndex（省掉每帧的字符串查找，也更贴近 wasm 原生 API）。
+  // 不支持的实现回退 setParameterValueById；索引 -1（参数不存在）一律跳过。
+  let padIdx = null;
+  function buildPadIndex() {
+    try {
+      const core = blink.coreModel;
+      if (typeof core.getParameterIndex !== 'function') { padIdx = null; return; }
+      const map = {};
+      for (const id of [...PAD_AXES, ...PAD_BUTTONS, 'DPadX', 'DPadY']) {
+        const i = core.getParameterIndex(id);
+        if (i >= 0) map[id] = i;
+      }
+      padIdx = map;
+      console.log('[pet] gamepad params mapped:', Object.keys(map).length);
+    } catch (_) { padIdx = null; }
+  }
+
+  function setPadParam(id, v) {
+    try {
+      if (padIdx && padIdx[id] !== undefined
+          && typeof blink.coreModel.setParameterValueByIndex === 'function') {
+        blink.coreModel.setParameterValueByIndex(padIdx[id], v);
+      } else {
+        blink.coreModel.setParameterValueById(id, v);
+      }
+    } catch (_) {}
+  }
+
+  window.onHostSetGamepadEnabled = (v) => {
+    padOn = !!v;
+    if (!padIdx && padOn) buildPadIndex();
+    if (!padOn) {
+      // 关闭驱动：参数回中，避免残留偏转（模型每帧会自行复位，这里写一次加速回中）
+      for (const id of PAD_AXES) setPadParam(id, 0);
+      for (const id of PAD_BUTTONS) setPadParam(id, 0);
+      setPadParam('DPadX', 0);
+      setPadParam('DPadY', 0);
+      for (const k of PAD_AXIS_KEYS) padCur[k] = 0;
+      for (const k of Object.keys(pad)) pad[k] = 0;
+    }
+  };
+  window.onHostSetGamepad = (lx, ly, rx, ry, lt, rt, dx, dy, mask) => {
+    pad.lx = lx; pad.ly = ly; pad.rx = rx; pad.ry = ry;
+    pad.lt = lt; pad.rt = rt; pad.dx = dx; pad.dy = dy; pad.mask = mask | 0;
+  };
+
+  if (typeof blink.on === 'function') {
+    blink.on('beforeModelUpdate', () => {
+      if (!padOn) return;
+      if (!padIdx) buildPadIndex();
+      const k = 0.25;
+      for (let i = 0; i < PAD_AXES.length; i++) {
+        const key = PAD_AXIS_KEYS[i];
+        padCur[key] += (pad[key] - padCur[key]) * k;
+        setPadParam(PAD_AXES[i], padCur[key]);
+      }
+      for (let i = 0; i < PAD_BUTTONS.length; i++) {
+        setPadParam(PAD_BUTTONS[i], (pad.mask & (1 << i)) ? 1 : 0);
+      }
+      setPadParam('DPadX', pad.dx);
+      setPadParam('DPadY', pad.dy);
+    });
+  }
+
   // 自动表情联动（宿主检测到游戏/音乐应用后通过 InvokeScript 调用）：
   // 设置时切换，传 null 清除后由单击轮换接管
   window.onHostSetExpression = (name) => {

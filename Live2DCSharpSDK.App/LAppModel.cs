@@ -69,6 +69,13 @@ public class LAppModel : CubismUserModel
     public Action<LAppModel>? ValueUpdate;
 
     /// <summary>
+    /// 手柄参数回调（应用层挂载）：在动作/表情之后、物理演算之前写入摇杆与按键参数。
+    /// 与 ValueUpdate 的区别——后者被 CustomValueUpdate 与拖拽（目光跟随）二选一门控，
+    /// 手柄参数需要在两种情况下都能写入，故单独开一个不受门控的钩子。
+    /// </summary>
+    public Action<LAppModel>? GamepadValueUpdate;
+
+    /// <summary>
     /// パラメータID: ParamAngleX
     /// </summary>
     public string IdParamAngleX { get; set; }
@@ -416,6 +423,12 @@ public class LAppModel : CubismUserModel
 
         // 呼吸など
         _breath?.UpdateParameters(Model, deltaTimeSeconds);
+
+        // 手柄摇杆/按键：由宿主实时写入（必须在 SaveParameters 之后——Update 开头会
+        // LoadParameters 把参数恢复到保存值，提前写入的下场是被覆盖）。
+        // 位置选在物理演算之前：physics3.json 把摇杆、扳机、ABXY 作为物理输入源，
+        // 这样推摇杆/按键会随即带出身体与手臂的晃动（模型作者的设计意图）。
+        GamepadValueUpdate?.Invoke(this);
 
         // 物理演算の設定
         _physics?.Evaluate(Model, deltaTimeSeconds);

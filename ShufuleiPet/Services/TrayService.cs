@@ -20,24 +20,17 @@ public interface ITrayService
 /// 托盘服务：构建托盘图标与菜单（显示/隐藏、重置模型、自动表情开关、退出），
 /// 菜单项逻辑依赖 IPetWindow 与 IAutoExpressionService（构造注入）。
 /// </summary>
-public sealed class TrayService : ITrayService, IDisposable
+public sealed class TrayService(
+    IPetWindow petOps,
+    IAutoExpressionService autoExpression,
+    ILipSyncService lipSync,
+    AutoExpressionConfig config)
+    : ITrayService, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<TrayService>();
 
-    private readonly IPetWindow _petOps;
-    private readonly IAutoExpressionService _autoExpression;
-    private readonly ILipSyncService _lipSync;
-    private readonly AutoExpressionConfig _config;
     private TrayIcons? _trayIcons;
     private Application? _app;
-
-    public TrayService(IPetWindow petOps, IAutoExpressionService autoExpression, ILipSyncService lipSync, AutoExpressionConfig config)
-    {
-        _petOps = petOps;
-        _autoExpression = autoExpression;
-        _lipSync = lipSync;
-        _config = config;
-    }
 
     public void Show(Application app, IClassicDesktopStyleApplicationLifetime desktop)
     {
@@ -45,21 +38,21 @@ public sealed class TrayService : ITrayService, IDisposable
         var menu = new NativeMenu();
 
         var toggleItem = new NativeMenuItem("显示 / 隐藏");
-        toggleItem.Click += (_, _) => _petOps.ToggleVisible();
+        toggleItem.Click += (_, _) => petOps.ToggleVisible();
 
         var resetItem = new NativeMenuItem("重置模型");
-        resetItem.Click += (_, _) => _petOps.ResetModel();
+        resetItem.Click += (_, _) => petOps.ResetModel();
 
         // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 autoexpression.json）
         var autoExprItem = new NativeMenuItem("自动表情")
         {
             ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = _config.Enabled,
+            IsChecked = config.Enabled,
         };
         autoExprItem.Click += (_, _) =>
         {
             // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            _autoExpression.Enabled = autoExprItem.IsChecked;
+            autoExpression.Enabled = autoExprItem.IsChecked;
             Logger.Information("auto expression toggled enabled={Enabled}", autoExprItem.IsChecked);
         };
 
@@ -67,27 +60,27 @@ public sealed class TrayService : ITrayService, IDisposable
         var lipSyncItem = new NativeMenuItem("口型律动")
         {
             ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = _lipSync.Enabled,
+            IsChecked = lipSync.Enabled,
         };
         lipSyncItem.Click += (_, _) =>
         {
             // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            _lipSync.Enabled = lipSyncItem.IsChecked;
+            lipSync.Enabled = lipSyncItem.IsChecked;
         };
 
         // 目光跟随：视线持续朝向全局光标（关闭时视线回正）
         var gazeItem = new NativeMenuItem("目光跟随")
         {
             ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = _config.GazeFollowEnabled,
+            IsChecked = config.GazeFollowEnabled,
         };
         gazeItem.Click += (_, _) =>
         {
             // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
             var enabled = gazeItem.IsChecked;
-            _config.GazeFollowEnabled = enabled;
-            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            _petOps.SetGazeFollow(enabled);
+            config.GazeFollowEnabled = enabled;
+            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            petOps.SetGazeFollow(enabled);
             Logger.Information("gaze follow toggled enabled={Enabled}", enabled);
         };
 
@@ -95,22 +88,63 @@ public sealed class TrayService : ITrayService, IDisposable
         var fpsItem = new NativeMenuItem("显示帧率")
         {
             ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = _config.FpsOverlayEnabled,
+            IsChecked = config.FpsOverlayEnabled,
         };
         fpsItem.Click += (_, _) =>
         {
             // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
             var visible = fpsItem.IsChecked;
-            _config.FpsOverlayEnabled = visible;
-            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            _petOps.SetFpsVisible(visible);
+            config.FpsOverlayEnabled = visible;
+            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            petOps.SetFpsVisible(visible);
             Logger.Information("fps overlay toggled visible={Visible}", visible);
+        };
+
+        // 手柄联动：命中游戏时把手柄（或 WASD + 鼠标）输入写进模型摇杆/按键参数
+        var gamepadItem = new NativeMenuItem("手柄联动")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = config.GamepadEnabled,
+        };
+        gamepadItem.Click += (_, _) =>
+        {
+            var enabled = gamepadItem.IsChecked;
+            config.GamepadEnabled = enabled;
+            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            RefreshGamepadDriving();
+            Logger.Information("gamepad linkage toggled enabled={Enabled}", enabled);
+        };
+
+        // 常显手柄：不等待游戏检测，直接显示手柄并驱动（没打游戏时调试/演示用）
+        var manualPadItem = new NativeMenuItem("常显手柄")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = config.GamepadManual,
+        };
+        manualPadItem.Click += (_, _) =>
+        {
+            var on = manualPadItem.IsChecked;
+            config.GamepadManual = on;
+            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            if (on)
+            {
+                petOps.SetAutoExpression(config.GameExpression);
+            }
+            else
+            {
+                // 交回自动检测：先清掉手动设置的表情，再立刻轮询一次（命中游戏会马上切回来）
+                petOps.SetAutoExpression(null);
+                petOps.SetGamepadEnabled(false);
+                autoExpression.PollNow();
+            }
+            RefreshGamepadDriving();
+            Logger.Information("manual gamepad mode toggled on={On}", on);
         };
 
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
         {
-            _petOps.ExitForShutdown();
+            petOps.ExitForShutdown();
             desktop.Shutdown();
         };
 
@@ -119,6 +153,8 @@ public sealed class TrayService : ITrayService, IDisposable
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
         menu.Items.Add(gazeItem);
+        menu.Items.Add(gamepadItem);
+        menu.Items.Add(manualPadItem);
         menu.Items.Add(fpsItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
@@ -133,6 +169,17 @@ public sealed class TrayService : ITrayService, IDisposable
         _trayIcons = [trayIcon];
         TrayIcon.SetIcons(app, _trayIcons);
         Logger.Information("Tray icon set, initialization completed");
+    }
+
+    /// <summary>
+    /// 重新评估手柄驱动开关：总开关开 且（手动模式 或 当前正处于"手柄"表情）时才驱动。
+    /// 托盘切换开关后立即调用，不必等下一个自动检测周期。
+    /// </summary>
+    private void RefreshGamepadDriving()
+    {
+        var on = config.GamepadEnabled
+              && (config.GamepadManual || autoExpression.CurrentExpression == config.GameExpression);
+        petOps.SetGamepadEnabled(on);
     }
 
     public void Dispose()

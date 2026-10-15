@@ -41,6 +41,15 @@ public class AutoExpressionConfig
     /// <summary>音乐口型律动开关（托盘"口型律动"勾选项的状态）：仅在自动表情处于 music 状态时采集。</summary>
     public bool LipSyncEnabled { get; set; } = true;
 
+    /// <summary>手柄联动开关（托盘"手柄联动"勾选项）：关闭后不再把手柄/键鼠输入写进模型参数。</summary>
+    public bool GamepadEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 手动手柄模式（托盘"常显手柄"勾选项）：勾选后一直显示手柄并驱动摇杆，
+    /// 不再跟随游戏检测结果（方便没有游戏在跑时调试/演示）。
+    /// </summary>
+    public bool GamepadManual { get; set; } = false;
+
     /// <summary>目光跟随开关（托盘"目光跟随"勾选项的状态）：关闭后视线回正并停止跟随光标。</summary>
     public bool GazeFollowEnabled { get; set; } = true;
 
@@ -142,6 +151,12 @@ public interface IAutoExpressionService : IDisposable
 
     /// <summary>music 状态变化事件：true 表示进入 music（应开始口型律动），false 表示离开。</summary>
     event Action<bool>? MusicStateChanged;
+
+    /// <summary>当前生效的自动表情名（null = 无），供托盘菜单重新评估联动状态。</summary>
+    string? CurrentExpression { get; }
+
+    /// <summary>立即轮询一次（托盘切换开关后不必等下一个轮询周期）。</summary>
+    void PollNow();
 }
 
 /// <summary>
@@ -221,6 +236,17 @@ public class AutoExpressionService : IAutoExpressionService
 
     /// <inheritdoc />
     public event Action<bool>? MusicStateChanged;
+
+    /// <inheritdoc />
+    public string? CurrentExpression => _lastState switch
+    {
+        AppState.Game => _config.GameExpression,
+        AppState.Music => _config.MusicExpression,
+        _ => null,
+    };
+
+    /// <inheritdoc />
+    public void PollNow() => PollOnce();
 
     public AutoExpressionService(
         AutoExpressionConfig config,

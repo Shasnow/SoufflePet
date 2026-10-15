@@ -27,6 +27,12 @@ public interface IPetWindow
     /// <summary>帧率显示开关：窗口右上角 当前/上限 叠加层的显示与否。</summary>
     void SetFpsVisible(bool visible);
 
+    /// <summary>
+    /// 手柄参数驱动开关：开启后把手柄/键鼠输入写进模型的摇杆与按键参数。
+    /// 只在模型显示手柄时开启（自动表情命中游戏，或托盘手动开启手柄模式）。
+    /// </summary>
+    void SetGamepadEnabled(bool enabled);
+
     void ExitForShutdown();
 }
 
@@ -85,9 +91,8 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
-    public NativePetWindow(ILipSyncService lipSync)
+    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad)
     {
-        var lipSync1 = lipSync;
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
         Height = 680;
@@ -128,8 +133,9 @@ public class NativePetWindow : Window, IPetWindow
             TrackGlobalCursor();
             UpdateClickThrough();
             UpdateFps();                                        // 每满 1 秒刷新一次帧率显示
-            _control.SetLipSync(lipSync1.CurrentLevel);         // 口型律动音量每帧推给渲染层
-            _control.SetLipSyncWide(lipSync1.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
+            _control.SetLipSync(lipSync.CurrentLevel);         // 口型律动音量每帧推给渲染层
+            _control.SetLipSyncWide(lipSync.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
+            _control.SetGamepadInput(gamepad.State);           // 手柄输入快照喂给渲染层（服务内部 30Hz 轮询）
         };
         _renderTimer.Start();
 
@@ -347,6 +353,12 @@ public class NativePetWindow : Window, IPetWindow
     public void SetFpsVisible(bool visible)
     {
         _fpsBadge.IsVisible = visible;
+    }
+
+    /// <summary>手柄参数驱动开关：转发给渲染层（关闭时参数自动回中）。</summary>
+    public void SetGamepadEnabled(bool enabled)
+    {
+        _control.SetGamepadEnabled(enabled);
     }
 
     /// <summary>GDI 设备上下文能力索引：垂直刷新率（Hz）。</summary>

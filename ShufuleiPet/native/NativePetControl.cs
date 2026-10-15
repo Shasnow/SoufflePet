@@ -15,6 +15,7 @@ using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
+using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
 using ShufuleiPet.Views.native;
 
@@ -50,6 +51,35 @@ public class NativePetControl : OpenGlControlBase
 
     /// <summary>口型水平宽窄值（-1 收缩 ~ +1 扩张）：驱动 ParamMouthForm。</summary>
     private volatile float _lipSyncWide;
+
+    /// <summary>最新一帧的手柄输入快照（窗口层每帧喂入；null = 尚未接入）。</summary>
+    private GamepadState? _gamepad;
+
+    /// <summary>手柄参数驱动开关：仅在模型显示手柄（自动表情命中游戏，或托盘手动开启）时写入。</summary>
+    private volatile bool _gamepadEnabled;
+
+    /// <summary>平滑后的手柄连续量（顺序同 PadAxisKeys）：输入是 30Hz，渲染可能 180Hz，逐帧插值避免台阶感。</summary>
+    private readonly float[] _padSmooth = new float[PadAxisKeys.Length];
+
+    /// <summary>关闭驱动后是否需要把参数写回中位一次（避免摇杆残留偏转）。</summary>
+    private bool _padNeedCenter = true;
+
+    /// <summary>手柄自检日志计数（约每 3 秒打印一条写入值与模型回读值，便于确认联动生效）。</summary>
+    private int _padLogTick;
+
+    /// <summary>上一帧的时间跨度（秒），供手柄值平滑使用（渲染线程内读写，无需加锁）。</summary>
+    private float _frameSpan = 1f / 60f;
+
+    /// <summary>手柄平滑响应系数：越大越跟手（1/系数 ≈ 收敛时间常数，秒）。</summary>
+    private const float PadResponse = 14f;
+
+    /// <summary>需要平滑写入的连续量参数（cdi3.json 的 ParamGroup3「手柄」）。</summary>
+    private static readonly string[] PadAxisKeys =
+        ["LStickX", "LStickY", "RStickX", "RStickY", "LTrigger", "RTrigger"];
+
+    /// <summary>直接写入 0/1 的按键参数。</summary>
+    private static readonly string[] PadButtonKeys =
+        ["LShoulder", "RShoulder", "LStickButton", "RStickButton", "ButtonA", "ButtonB", "ButtonX", "ButtonY"];
 
     private LAppModel? _model;
     private string? _modelDir;
@@ -185,6 +215,9 @@ public class NativePetControl : OpenGlControlBase
             // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
             if (!ShowWatermark)
                 _model?.Model.SetPartOpacity("Part13", 0f);
+            // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
+            if (_model != null) _model.GamepadValueUpdate = ApplyGamepadParams;
+
             // 测量双眼中心
             MeasureEyeCenter(_model?.Model);
             Logger.Debug("LoadModel ok textures={TextureCount}", _model?.Textures.Count);
@@ -261,6 +294,7 @@ public class NativePetControl : OpenGlControlBase
             var now = DateTime.Now;
             var span = (float)(now - _last).TotalSeconds;
             _last = now;
+            _frameSpan = span > 0f ? span : 1f / 60f; // 供手柄值平滑使用（帧率无关）
 
             // 口型律动：渲染前把最新音量写给模型，LAppModel.Update 的口型同步代码块
             // 会在物理演算后以 LipSyncIds 写入嘴部参数（Ids[0] 开闭，Ids[1] 水平宽窄）
@@ -540,6 +574,97 @@ public class NativePetControl : OpenGlControlBase
     {
         _lipSyncWide = Math.Clamp(value, -1f, 1f);
     }
+
+    /// <summary>窗口层每帧喂入最新手柄输入（服务以 30Hz 轮询，这里只是转存引用）。</summary>
+    public void SetGamepadInput(GamepadState state)
+    {
+        _gamepad = state;
+    }
+
+    /// <summary>
+    /// 手柄参数驱动开关：仅在模型显示手柄时开启（自动表情命中游戏，或托盘手动开启手柄模式）。
+    /// 关闭时会把已写入的摇杆/按键参数回中一次，避免残留偏转。
+    /// </summary>
+    public void SetGamepadEnabled(bool enabled)
+    {
+        if (_gamepadEnabled == enabled) return;
+        _gamepadEnabled = enabled;
+        _padNeedCenter = true;
+        Logger.Information("gamepad driving enabled={Enabled}", enabled);
+    }
+
+    /// <summary>
+    /// 把手柄输入写进模型参数（由 LAppModel.GamepadValueUpdate 在动作/表情之后、物理演算之前回调）。
+    /// 写入的连续性：Update 开头会 LoadParameters 恢复保存值，所以必须每帧重写一次。
+    /// 参数不存在时 SDK 会静默忽略（写进"不存在参数表"），因此换模型也不会抛异常。
+    /// </summary>
+    private void ApplyGamepadParams(LAppModel model)
+    {
+        var state = _gamepad;
+        if (state == null) return;
+
+        var m = model.Model;
+
+        if (!_gamepadEnabled)
+        {
+            // 关闭驱动：回中一次后就不再打扰（参数由 LoadParameters 每帧自行复位）
+            if (!_padNeedCenter) return;
+            _padNeedCenter = false;
+            for (var i = 0; i < PadAxisKeys.Length; i++)
+            {
+                _padSmooth[i] = 0f;
+                m.SetParameterValue(PadAxisKeys[i], 0f);
+            }
+            foreach (var key in PadButtonKeys) m.SetParameterValue(key, 0f);
+            m.SetParameterValue("DPadX", 0f);
+            m.SetParameterValue("DPadY", 0f);
+            return;
+        }
+
+        _padNeedCenter = true;
+
+        // 连续量：向目标值指数逼近（帧率无关）
+        var k = Math.Clamp(_frameSpan * PadResponse, 0f, 1f);
+        Span<float> targets = stackalloc float[6];
+        targets[0] = state.LStickX;
+        targets[1] = state.LStickY;
+        targets[2] = state.RStickX;
+        targets[3] = state.RStickY;
+        targets[4] = state.LTrigger;
+        targets[5] = state.RTrigger;
+        for (var i = 0; i < PadAxisKeys.Length; i++)
+        {
+            _padSmooth[i] += (targets[i] - _padSmooth[i]) * k;
+            m.SetParameterValue(PadAxisKeys[i], _padSmooth[i]);
+        }
+
+        // 按键量：0/1 直接写（布尔动作，平滑反而糊）
+        Span<float> buttons = stackalloc float[8];
+        buttons[0] = Bool(state.LShoulder);
+        buttons[1] = Bool(state.RShoulder);
+        buttons[2] = Bool(state.LStickButton);
+        buttons[3] = Bool(state.RStickButton);
+        buttons[4] = Bool(state.ButtonA);
+        buttons[5] = Bool(state.ButtonB);
+        buttons[6] = Bool(state.ButtonX);
+        buttons[7] = Bool(state.ButtonY);
+        for (var i = 0; i < PadButtonKeys.Length; i++) m.SetParameterValue(PadButtonKeys[i], buttons[i]);
+
+        m.SetParameterValue("DPadX", state.DPadX);
+        m.SetParameterValue("DPadY", state.DPadY);
+
+        // 自检日志：低频打印写入值与模型回读值，确认参数确实写进了模型（换模型/参数缺失时便于排查）
+        if (++_padLogTick >= 600)
+        {
+            _padLogTick = 0;
+            Logger.Debug(
+                "gamepad write LStick=({Lx:0.00},{Ly:0.00}) RStick=({Rx:0.00},{Ry:0.00}) readback Ly={Read:0.00} src={Src}",
+                _padSmooth[0], _padSmooth[1], _padSmooth[2], _padSmooth[3],
+                m.GetParameterValue("LStickY"), state.HasGamepad ? "xinput" : "kb+mouse");
+        }
+    }
+
+    private static float Bool(bool v) => v ? 1f : 0f;
 
     /// <summary>
     ///     逐像素命中检测：读取帧缓冲中光标下的 1 个像素，alpha 大于阈值说明压在模型可见区域。

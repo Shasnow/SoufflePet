@@ -44,6 +44,7 @@ public partial class App : Application
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
             services.AddSingleton<ILocalFileServer, LocalFileServer>();
             services.AddSingleton<ILipSyncService, LipSyncService>();
+            services.AddSingleton<IGamepadService, GamepadService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
@@ -66,16 +67,31 @@ public partial class App : Application
 
             // 自动表情事件 → 窗口（订阅先于 DispatcherTimer 触发，无竞态）
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
-            autoExpression.ExpressionChanged += petOps.SetAutoExpression;
+            var cfg0 = _provider.GetRequiredService<AutoExpressionConfig>();
+
+            // 手柄联动：命中游戏（切到"手柄"表情）时开始把手柄/键鼠输入写进模型摇杆参数；
+            // 手动模式下不看检测结果，一直驱动（方便没打游戏时调试/演示）。
+            autoExpression.ExpressionChanged += name =>
+            {
+                if (cfg0.GamepadManual) return; // 手动模式：表情由托盘控制，忽略自动切换
+                petOps.SetAutoExpression(name);
+                petOps.SetGamepadEnabled(cfg0.GamepadEnabled && name == cfg0.GameExpression);
+            };
 
             // music 状态进出 → 口型律动采集启停（停用时不占音频设备）
             var lipSync = _provider.GetRequiredService<ILipSyncService>();
             autoExpression.MusicStateChanged += active => lipSync.Active = active;
 
             // 应用持久化的初始状态：目光跟随与帧率显示（托盘勾选项，窗口默认开启）
-            var cfg = _provider.GetRequiredService<AutoExpressionConfig>();
-            petOps.SetGazeFollow(cfg.GazeFollowEnabled);
-            petOps.SetFpsVisible(cfg.FpsOverlayEnabled);
+            petOps.SetGazeFollow(cfg0.GazeFollowEnabled);
+            petOps.SetFpsVisible(cfg0.FpsOverlayEnabled);
+
+            // 启动时若勾选了"常显手柄"，立即显示手柄并开始驱动
+            if (cfg0.GamepadManual)
+            {
+                petOps.SetAutoExpression(cfg0.GameExpression);
+                petOps.SetGamepadEnabled(cfg0.GamepadEnabled);
+            }
 
             try
             {

@@ -49,10 +49,21 @@ public class WebViewPetWindow : Window, IPetWindow
     /// <summary>上次推送给页面的口型水平宽窄值。</summary>
     private float _lastPushedWide = float.MinValue;
 
-    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）与口型律动服务（ILipSyncService）。</summary>
-    public WebViewPetWindow(ILocalFileServer? server, ILipSyncService? lipSync)
+    /// <summary>手柄输入服务（真实手柄优先，无手柄时 WASD + 鼠标回退）。</summary>
+    private readonly IGamepadService? _gamepad;
+
+    /// <summary>手柄参数驱动开关（托盘"手柄联动"）：推给页面，页面在 beforeModelUpdate 里写参数。</summary>
+    private bool _gamepadDriving;
+
+    /// <summary>上次推送给页面的手柄状态（含按键位掩码），用于脏检查，减少 InvokeScript 调用。</summary>
+    private float _lastPadLx, _lastPadLy, _lastPadRx, _lastPadRy, _lastPadLt, _lastPadRt;
+    private int _lastPadDx, _lastPadDy, _lastPadMask = -1;
+
+    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务。</summary>
+    public WebViewPetWindow(ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
     {
         _lipSync = lipSync;
+        _gamepad = gamepad;
 
         Title = "舒芙蕾桌宠（WebView）";
         Width = 480;
@@ -92,6 +103,7 @@ public class WebViewPetWindow : Window, IPetWindow
         {
             ForwardGlobalCursor();
             ForwardLipSync();
+            ForwardGamepad();
         };
         _cursorTimer.Start();
 
@@ -261,6 +273,79 @@ public class WebViewPetWindow : Window, IPetWindow
         }
     }
 
+    /// <summary>
+    /// 手柄联动：把手柄/键鼠输入推给页面（脏检查：连续量变化 &gt;0.01 或按键变化才推送，
+    /// InvokeScript 是跨进程调用，频率敏感）。页面在 beforeModelUpdate 里把值写进
+    /// 模型 ParamGroup3「手柄」的摇杆与按键参数，并平滑到目标值。
+    /// </summary>
+    private void ForwardGamepad()
+    {
+        var gamepad = _gamepad;
+        if (gamepad == null || !_gamepadDriving || !IsVisible || _exiting) return;
+        var s = gamepad.State;
+
+        // 按键位掩码：与页面约定 A=1 B=2 X=4 Y=8 左肩=16 右肩=32 左摇杆按下=64 右摇杆按下=128
+        var mask = (s.ButtonA ? 1 : 0) | (s.ButtonB ? 2 : 0) | (s.ButtonX ? 4 : 0) | (s.ButtonY ? 8 : 0)
+                 | (s.LShoulder ? 16 : 0) | (s.RShoulder ? 32 : 0)
+                 | (s.LStickButton ? 64 : 0) | (s.RStickButton ? 128 : 0);
+
+        if (Math.Abs(s.LStickX - _lastPadLx) <= 0.01f
+            && Math.Abs(s.LStickY - _lastPadLy) <= 0.01f
+            && Math.Abs(s.RStickX - _lastPadRx) <= 0.01f
+            && Math.Abs(s.RStickY - _lastPadRy) <= 0.01f
+            && Math.Abs(s.LTrigger - _lastPadLt) <= 0.01f
+            && Math.Abs(s.RTrigger - _lastPadRt) <= 0.01f
+            && s.DPadX == _lastPadDx && s.DPadY == _lastPadDy && mask == _lastPadMask) return;
+
+        _lastPadLx = s.LStickX;
+        _lastPadLy = s.LStickY;
+        _lastPadRx = s.RStickX;
+        _lastPadRy = s.RStickY;
+        _lastPadLt = s.LTrigger;
+        _lastPadRt = s.RTrigger;
+        _lastPadDx = s.DPadX;
+        _lastPadDy = s.DPadY;
+        _lastPadMask = mask;
+
+        try
+        {
+            var args = string.Join(',',
+                s.LStickX.ToString("0.###", CultureInfo.InvariantCulture),
+                s.LStickY.ToString("0.###", CultureInfo.InvariantCulture),
+                s.RStickX.ToString("0.###", CultureInfo.InvariantCulture),
+                s.RStickY.ToString("0.###", CultureInfo.InvariantCulture),
+                s.LTrigger.ToString("0.###", CultureInfo.InvariantCulture),
+                s.RTrigger.ToString("0.###", CultureInfo.InvariantCulture),
+                s.DPadX, s.DPadY, mask);
+            _ = _webView.InvokeScript($"window.onHostSetGamepad && window.onHostSetGamepad({args});");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略
+        }
+    }
+
+    /// <summary>手柄参数驱动开关：转发给页面（关闭时页面把参数回中）。</summary>
+    public void SetGamepadEnabled(bool enabled)
+    {
+        _gamepadDriving = enabled;
+        PushGamepadEnabled();
+    }
+
+    /// <summary>把驱动开关推给页面（页面未加载完成时忽略，等 ready 消息重放）。</summary>
+    private void PushGamepadEnabled()
+    {
+        try
+        {
+            var v = _gamepadDriving ? "true" : "false";
+            _ = _webView.InvokeScript($"window.onHostSetGamepadEnabled && window.onHostSetGamepadEnabled({v});");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略，等 ready 消息重放
+        }
+    }
+
     // 网页里按住空白处/模型时调用 invokeCSharpAction('{"type":"drag"}')，
     // 这里转成系统级窗口拖拽（WM_NCLBUTTONDOWN + HTCAPTION），拖拽全程交给 Windows 处理
     private void OnWebMessage(object? sender, WebMessageReceivedEventArgs e)
@@ -277,6 +362,7 @@ public class WebViewPetWindow : Window, IPetWindow
                 PushAutoExpression();
                 PushGazeFollow();
                 PushFpsVisible();
+                PushGamepadEnabled();
                 return;
             }
             if (kind == "hit")
