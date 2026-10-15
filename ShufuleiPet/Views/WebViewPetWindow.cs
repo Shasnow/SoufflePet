@@ -38,6 +38,9 @@ public class WebViewPetWindow : Window, IPetWindow
     /// 宿主侧仍照常转发光标（页面点击穿透的命中检测依赖同一份坐标）。</summary>
     private bool _gazeFollow = true;
 
+    /// <summary>是否已完成首次定位（Opened 每次显示都会触发，位置只设一次）。</summary>
+    private bool _positioned;
+
     /// <summary>上次推送给页面的口型音量（差值过小不推送，减少 InvokeScript 调用）。</summary>
     private float _lastPushedLip = float.MinValue;
 
@@ -70,7 +73,14 @@ public class WebViewPetWindow : Window, IPetWindow
             _webView.Source = new Uri($"http://localhost:{port}/index.html");
         }
 
-        Opened += (_, _) => MoveToBottomRight();
+        // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
+        // 避免托盘切换显示/隐藏把用户拖动过的窗口位置复原
+        Opened += (_, _) =>
+        {
+            if (_positioned) return;
+            _positioned = true;
+            MoveToBottomRight();
+        };
         _webView.WebMessageReceived += OnWebMessage;
 
         // 全局鼠标追踪：页面里的 pointermove 只在光标位于窗口内时触发，移出窗口后

@@ -54,6 +54,9 @@ public class NativePetWindow : Window, IPetWindow
     /// <summary>目光跟随开关（托盘勾选项）：关闭时不再把光标坐标喂给控制层。</summary>
     private bool _gazeFollow = true;
 
+    /// <summary>是否已完成首次定位（Opened 每次显示都会触发，位置只设一次）。</summary>
+    private bool _positioned;
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
@@ -169,6 +172,11 @@ public class NativePetWindow : Window, IPetWindow
             // WS_EX_LAYERED——先补挂上并设不透明度 255（不影响正常渲染），
             // 之后点击穿透只切换 WS_EX_TRANSPARENT 即可。
             EnsureLayered();
+
+            // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
+            // 避免托盘切换显示/隐藏把用户拖动过的窗口位置复原
+            if (_positioned) return;
+            _positioned = true;
 
             var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
             if (screen is null) return;
