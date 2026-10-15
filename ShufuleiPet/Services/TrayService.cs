@@ -91,6 +91,22 @@ public sealed class TrayService : ITrayService, IDisposable
             Logger.Information("gaze follow toggled enabled={Enabled}", enabled);
         };
 
+        // 帧率显示：窗口右上角 当前/上限 叠加层
+        var fpsItem = new NativeMenuItem("显示帧率")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = _config.FpsOverlayEnabled,
+        };
+        fpsItem.Click += (_, _) =>
+        {
+            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
+            var visible = fpsItem.IsChecked;
+            _config.FpsOverlayEnabled = visible;
+            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            _petOps.SetFpsVisible(visible);
+            Logger.Information("fps overlay toggled visible={Visible}", visible);
+        };
+
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
         {
@@ -103,6 +119,7 @@ public sealed class TrayService : ITrayService, IDisposable
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
         menu.Items.Add(gazeItem);
+        menu.Items.Add(fpsItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
 

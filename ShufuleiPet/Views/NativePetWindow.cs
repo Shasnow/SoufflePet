@@ -24,6 +24,9 @@ public interface IPetWindow
     /// <summary>目光跟随开关：关闭时视线回正并停止跟随光标。</summary>
     void SetGazeFollow(bool enabled);
 
+    /// <summary>帧率显示开关：窗口右上角 当前/上限 叠加层的显示与否。</summary>
+    void SetFpsVisible(bool visible);
+
     void ExitForShutdown();
 }
 
@@ -34,8 +37,21 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
-    private readonly ILipSyncService _lipSync;
     private DateTime _lastMoveLog;
+
+    /// <summary>
+    /// 帧率显示叠加层的上限：自续帧模式下实际节奏由显示器 vsync 决定，
+    /// 因此上限就是主显示器刷新率（查询失败为 0，此时只显示当前帧率）。
+    /// </summary>
+    private readonly int _fpsCap = 60;
+
+    /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
+    private DateTime _fpsSampleTime = DateTime.Now;
+    private int _fpsAccum;
+
+    /// <summary>右上角帧率叠加层（当前/上限），托盘"显示帧率"开关控制显隐。</summary>
+    private readonly Border _fpsBadge;
+    private readonly TextBlock _fpsText;
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -66,7 +82,7 @@ public class NativePetWindow : Window, IPetWindow
 
     public NativePetWindow(ILipSyncService lipSync)
     {
-        _lipSync = lipSync;
+        var lipSync1 = lipSync;
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
         Height = 680;
@@ -78,19 +94,47 @@ public class NativePetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _control = new NativePetControl();
-        Content = _control;
 
-        // 60 FPS 驱动 GL 重绘 + 全局鼠标追踪
+        // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
+        _fpsText = new TextBlock
+        {
+            Foreground = Brushes.White,
+            FontSize = 12,
+            Text = _fpsCap > 0 ? $"{_fpsCap}/{_fpsCap}" : "0",
+        };
+        _fpsBadge = new Border
+        {
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top,
+            Margin = new Thickness(0, 6, 10, 0),
+            Background = new SolidColorBrush(Color.FromArgb(110, 0, 0, 0)),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2, 6, 2),
+            Child = _fpsText,
+        };
+        Content = new Grid { Children = { _control, _fpsBadge } };
+
+        // 16ms 定时器驱动 GL 重绘（约 60fps）+ 全局鼠标追踪
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) =>
         {
             _control.RequestNextFrameRendering();
             TrackGlobalCursor();
             UpdateClickThrough();
-            _control.SetLipSync(_lipSync.CurrentLevel);         // 口型律动音量每帧推给渲染层
-            _control.SetLipSyncWide(_lipSync.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
+            UpdateFps();                                        // 每满 1 秒刷新一次帧率显示
+            _control.SetLipSync(lipSync1.CurrentLevel);         // 口型律动音量每帧推给渲染层
+            _control.SetLipSyncWide(lipSync1.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
         };
         _renderTimer.Start();
+
+        // 窗口隐藏时停掉定时器（否则看不见也在渲染），重新显示时恢复
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.IsVisibleProperty)
+            {
+                _renderTimer.IsEnabled = IsVisible;
+            }
+        };
 
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
@@ -274,6 +318,26 @@ public class NativePetWindow : Window, IPetWindow
     {
         _gazeFollow = enabled;
         _control.SetGazeFollow(enabled);
+    }
+
+    /// <summary>托盘菜单：帧率显示开关。</summary>
+    public void SetFpsVisible(bool visible)
+    {
+        _fpsBadge.IsVisible = visible;
+    }
+
+    /// <summary>帧率统计：取走渲染层实际渲染的帧数，每满 1 秒刷新一次"当前/上限"。</summary>
+    private void UpdateFps()
+    {
+        if (!_fpsBadge.IsVisible) return;
+        _fpsAccum += _control.TakeRenderedFrames();
+        var now = DateTime.Now;
+        var elapsed = (now - _fpsSampleTime).TotalSeconds;
+        if (elapsed < 1) return;
+        _fpsSampleTime = now;
+        var fps = Math.Round(_fpsAccum / elapsed);
+        _fpsText.Text = _fpsCap > 0 ? $"{fps}/{_fpsCap}" : $"{fps}";
+        _fpsAccum = 0;
     }
 
     /// <summary>托盘菜单：退出（原生窗口不劫持关闭行为）。</summary>

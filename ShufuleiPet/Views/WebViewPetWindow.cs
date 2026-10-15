@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
@@ -40,6 +39,9 @@ public class WebViewPetWindow : Window, IPetWindow
 
     /// <summary>是否已完成首次定位（Opened 每次显示都会触发，位置只设一次）。</summary>
     private bool _positioned;
+
+    /// <summary>帧率显示开关（托盘勾选项）：推给页面控制右上角叠加层显隐。</summary>
+    private bool _fpsVisible = true;
 
     /// <summary>上次推送给页面的口型音量（差值过小不推送，减少 InvokeScript 调用）。</summary>
     private float _lastPushedLip = float.MinValue;
@@ -168,6 +170,27 @@ public class WebViewPetWindow : Window, IPetWindow
         }
     }
 
+    /// <summary>托盘菜单：帧率显示开关（推给页面控制右上角叠加层显隐）。</summary>
+    public void SetFpsVisible(bool visible)
+    {
+        _fpsVisible = visible;
+        PushFpsVisible();
+    }
+
+    /// <summary>把帧率显示开关推给页面（页面未加载完成时忽略，等 ready 消息重放）。</summary>
+    private void PushFpsVisible()
+    {
+        try
+        {
+            var v = _fpsVisible ? "true" : "false";
+            _ = _webView.InvokeScript($"window.onHostSetFpsVisible && window.onHostSetFpsVisible({v});");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略，等 ready 消息重放
+        }
+    }
+
     /// <summary>托盘菜单：真正退出（解除 Closing 劫持）。</summary>
     public void ExitForShutdown()
     {
@@ -253,6 +276,7 @@ public class WebViewPetWindow : Window, IPetWindow
                 // 页面模型加载完成，重放此前缓存的自动表情状态（解决启动竞态）
                 PushAutoExpression();
                 PushGazeFollow();
+                PushFpsVisible();
                 return;
             }
             if (kind == "hit")

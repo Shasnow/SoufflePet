@@ -44,6 +44,9 @@ public class AutoExpressionConfig
     /// <summary>目光跟随开关（托盘"目光跟随"勾选项的状态）：关闭后视线回正并停止跟随光标。</summary>
     public bool GazeFollowEnabled { get; set; } = true;
 
+    /// <summary>帧率显示开关（托盘"显示帧率"勾选项的状态）：窗口右上角显示 当前/上限。</summary>
+    public bool FpsOverlayEnabled { get; set; } = true;
+
     /// <summary>轮询周期（秒）：进程枚举与前台窗口查询共用同一周期。</summary>
     public float PollSeconds { get; set; } = 3f;
 

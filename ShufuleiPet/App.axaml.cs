@@ -72,9 +72,10 @@ public partial class App : Application
             var lipSync = _provider.GetRequiredService<ILipSyncService>();
             autoExpression.MusicStateChanged += active => lipSync.Active = active;
 
-            // 应用持久化的目光跟随初始状态（托盘勾选项，窗口默认开启）
-            var gazeConfig = _provider.GetRequiredService<AutoExpressionConfig>();
-            petOps.SetGazeFollow(gazeConfig.GazeFollowEnabled);
+            // 应用持久化的初始状态：目光跟随与帧率显示（托盘勾选项，窗口默认开启）
+            var cfg = _provider.GetRequiredService<AutoExpressionConfig>();
+            petOps.SetGazeFollow(cfg.GazeFollowEnabled);
+            petOps.SetFpsVisible(cfg.FpsOverlayEnabled);
 
             try
             {
