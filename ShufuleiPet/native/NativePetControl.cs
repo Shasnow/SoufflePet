@@ -71,6 +71,21 @@ public class NativePetControl : OpenGlControlBase
     private string? _pendingExpression;
     private bool _hasPendingExpression;
 
+    /// <summary>目光跟随开关：转发给模型的 EnableFaceTracking；模型加载前先缓存。</summary>
+    public void SetGazeFollow(bool enabled)
+    {
+        if (_model == null)
+        {
+            _pendingGaze = enabled;
+            _hasPendingGaze = true;
+            return;
+        }
+        _model.EnableFaceTracking = enabled;
+    }
+
+    private bool _pendingGaze;
+    private bool _hasPendingGaze;
+
     protected override void OnOpenGlInit(GlInterface gl)
     {
         if (_inited) return;
@@ -117,6 +132,13 @@ public class NativePetControl : OpenGlControlBase
 
             // 注意：不要设 CustomValueUpdate=true——LAppModel.Update 里它与拖拽参数
             // 应用是 if/else 互斥的，设了会禁用目光跟随。水印直接在渲染循环里隐藏。
+
+            // 补设模型加载完成前缓存的目光跟随开关（托盘可能在 GL 初始化前切换）
+            if (_hasPendingGaze)
+            {
+                _hasPendingGaze = false;
+                _model.EnableFaceTracking = _pendingGaze;
+            }
 
             _last = DateTime.Now;
             Logger.Debug("OnOpenGlInit done");

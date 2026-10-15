@@ -63,6 +63,9 @@ public class LAppModel : CubismUserModel
     public bool RandomMotion { get; set; } = true;
     public bool CustomValueUpdate { get; set; }
 
+    /// <summary>目光跟随开关（应用层托盘勾选项）：关闭时不应用拖拽角度参数，视线回正。</summary>
+    public bool EnableFaceTracking { get; set; } = true;
+
     public Action<LAppModel>? ValueUpdate;
 
     /// <summary>
@@ -393,7 +396,7 @@ public class LAppModel : CubismUserModel
         {
             ValueUpdate?.Invoke(this);
         }
-        else
+        else if (EnableFaceTracking)
         {
             //ドラッグによる変化
             //ドラッグによる顔の向きの調整
@@ -408,6 +411,8 @@ public class LAppModel : CubismUserModel
             Model.AddParameterValue(IdParamEyeBallX, _dragX); // -1から1の値を加える
             Model.AddParameterValue(IdParamEyeBallY, _dragY);
         }
+        // 目光跟随关闭：跳过拖拽角度参数。LoadParameters 每帧重置为保存值，
+        // 上一帧的角度自然回正，无需手动清理拖拽残留值。
 
         // 呼吸など
         _breath?.UpdateParameters(Model, deltaTimeSeconds);

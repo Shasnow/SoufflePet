@@ -41,6 +41,9 @@ public class AutoExpressionConfig
     /// <summary>音乐口型律动开关（托盘"口型律动"勾选项的状态）：仅在自动表情处于 music 状态时采集。</summary>
     public bool LipSyncEnabled { get; set; } = true;
 
+    /// <summary>目光跟随开关（托盘"目光跟随"勾选项的状态）：关闭后视线回正并停止跟随光标。</summary>
+    public bool GazeFollowEnabled { get; set; } = true;
+
     /// <summary>轮询周期（秒）：进程枚举与前台窗口查询共用同一周期。</summary>
     public float PollSeconds { get; set; } = 3f;
 

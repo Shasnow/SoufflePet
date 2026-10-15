@@ -190,8 +190,10 @@ async function main() {
   }
 
   // 视线跟随：世界坐标 -> 画布局部坐标，再以双眼中心为原点求方向
+  let gazeEnabled = true;   // 目光跟随开关（宿主托盘勾选项），关闭后 lookAt 直接忽略
   const tempLook = new PIXI.Point();
   function lookAt(worldX, worldY) {
+    if (!gazeEnabled) return;
     const im = model.internalModel;
     tempLook.x = worldX;
     tempLook.y = worldY;
@@ -211,6 +213,13 @@ async function main() {
     const p = e.data ? e.data.global : e.global;
     lookAt(p.x, p.y);
   });
+
+  // 宿主托盘"目光跟随"开关：关闭时 focus(0,0) 回正并让后续 lookAt 失效，
+  // 开启时恢复跟随（下一次光标坐标到达即重新看向光标）
+  window.onHostSetGazeFollow = (enabled) => {
+    gazeEnabled = !!enabled;
+    if (!gazeEnabled) model.internalModel.focusController.focus(0, 0);
+  };
 
   // 宿主托盘菜单"重置模型大小和位置"：缩放回 1，再按窗口重新居中
   window.onHostResetModel = () => { zoom = 1; layout(); };

@@ -21,6 +21,9 @@ public interface IPetWindow
     /// <summary>自动表情联动：传表情名切换，传 null 恢复默认（无表情）。</summary>
     void SetAutoExpression(string? name);
 
+    /// <summary>目光跟随开关：关闭时视线回正并停止跟随光标。</summary>
+    void SetGazeFollow(bool enabled);
+
     void ExitForShutdown();
 }
 
@@ -47,6 +50,9 @@ public class NativePetWindow : Window, IPetWindow
     private const int VkRbutton = 0x02;
     private const int VkMbutton = 0x04;
     private bool _clickThrough;
+
+    /// <summary>目光跟随开关（托盘勾选项）：关闭时不再把光标坐标喂给控制层。</summary>
+    private bool _gazeFollow = true;
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -178,7 +184,7 @@ public class NativePetWindow : Window, IPetWindow
     /// </summary>
     private void TrackGlobalCursor()
     {
-        if (!IsVisible || Bounds.Width <= 0 || Bounds.Height <= 0) return;
+        if (!_gazeFollow || !IsVisible || Bounds.Width <= 0 || Bounds.Height <= 0) return;
         var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (!GlobalCursor.TryGetClientPos(hwnd, out var px, out var py)) return;
 
@@ -253,6 +259,13 @@ public class NativePetWindow : Window, IPetWindow
     public void SetAutoExpression(string? name)
     {
         _control.SetAutoExpression(name);
+    }
+
+    /// <summary>托盘菜单：目光跟随开关（关闭时视线回正并停止跟随光标）。</summary>
+    public void SetGazeFollow(bool enabled)
+    {
+        _gazeFollow = enabled;
+        _control.SetGazeFollow(enabled);
     }
 
     /// <summary>托盘菜单：退出（原生窗口不劫持关闭行为）。</summary>

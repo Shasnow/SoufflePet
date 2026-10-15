@@ -34,6 +34,10 @@ public class WebViewPetWindow : Window, IPetWindow
     /// <summary>口型律动服务（设计时为 null）：每帧把音量推给页面。</summary>
     private readonly ILipSyncService? _lipSync;
 
+    /// <summary>目光跟随开关（托盘勾选项）：推给页面，关闭时页面视线回正并停止 lookAt。
+    /// 宿主侧仍照常转发光标（页面点击穿透的命中检测依赖同一份坐标）。</summary>
+    private bool _gazeFollow = true;
+
     /// <summary>上次推送给页面的口型音量（差值过小不推送，减少 InvokeScript 调用）。</summary>
     private float _lastPushedLip = float.MinValue;
 
@@ -133,6 +137,27 @@ public class WebViewPetWindow : Window, IPetWindow
         }
     }
 
+    /// <summary>托盘菜单：目光跟随开关（关闭时停止转发光标，页面收到后视线回正）。</summary>
+    public void SetGazeFollow(bool enabled)
+    {
+        _gazeFollow = enabled;
+        PushGazeFollow();
+    }
+
+    /// <summary>把目光跟随开关推给页面（页面未加载完成时忽略，等 ready 消息重放）。</summary>
+    private void PushGazeFollow()
+    {
+        try
+        {
+            var v = _gazeFollow ? "true" : "false";
+            _ = _webView.InvokeScript($"window.onHostSetGazeFollow && window.onHostSetGazeFollow({v});");
+        }
+        catch
+        {
+            // 页面尚未加载完成时忽略，等 ready 消息重放
+        }
+    }
+
     /// <summary>托盘菜单：真正退出（解除 Closing 劫持）。</summary>
     public void ExitForShutdown()
     {
@@ -217,6 +242,7 @@ public class WebViewPetWindow : Window, IPetWindow
             {
                 // 页面模型加载完成，重放此前缓存的自动表情状态（解决启动竞态）
                 PushAutoExpression();
+                PushGazeFollow();
                 return;
             }
             if (kind == "hit")

@@ -75,6 +75,22 @@ public sealed class TrayService : ITrayService, IDisposable
             _lipSync.Enabled = lipSyncItem.IsChecked;
         };
 
+        // 目光跟随：视线持续朝向全局光标（关闭时视线回正）
+        var gazeItem = new NativeMenuItem("目光跟随")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = _config.GazeFollowEnabled,
+        };
+        gazeItem.Click += (_, _) =>
+        {
+            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
+            var enabled = gazeItem.IsChecked;
+            _config.GazeFollowEnabled = enabled;
+            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
+            _petOps.SetGazeFollow(enabled);
+            Logger.Information("gaze follow toggled enabled={Enabled}", enabled);
+        };
+
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
         {
@@ -86,6 +102,7 @@ public sealed class TrayService : ITrayService, IDisposable
         menu.Items.Add(resetItem);
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
+        menu.Items.Add(gazeItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
 
