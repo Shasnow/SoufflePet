@@ -1,4 +1,4 @@
-﻿using Live2DCSharpSDK.Framework;
+using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Model;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.Framework.Type;
@@ -327,7 +327,7 @@ gl_FragColor = col_formask;
         SetupTexture(renderer, model, index, shaderSet);
 
         // テクスチャ頂点の設定
-        SetVertexAttributes(shaderSet);
+        SetVertexAttributes(renderer, index, shaderSet);
 
         if (masked)
         {
@@ -382,7 +382,7 @@ gl_FragColor = col_formask;
         SetupTexture(renderer, model, index, shaderSet);
 
         // 頂点配列の設定
-        SetVertexAttributes(shaderSet);
+        SetVertexAttributes(renderer, index, shaderSet);
 
         // 使用するカラーチャンネルを設定
         SetColorChannelUniformVariables(shaderSet, draw);
@@ -871,18 +871,22 @@ gl_FragColor = col_formask;
     /// <summary>
     /// 必要な頂点属性を設定する
     /// </summary>
-    /// <param name="model">描画対象のモデル</param>
-    /// <param name="index">描画対象のメッシュのインデックス</param>
-    /// <param name="shaderSet">シェーダープログラムのセット</param>
-    public void SetVertexAttributes(CubismShaderSet shaderSet)
+    /// <remarks>
+    /// 位置/UV 分别存放在 drawable 自己的缓冲中（位置动态更新、UV 静态一次上传），
+    /// 两个属性按 2 个 float 的紧凑步长分别指向对应缓冲；
+    /// VertexAttribPointer 记录设置时的 ARRAY_BUFFER 绑定，因此每次设置前需切换绑定。
+    /// </remarks>
+    public void SetVertexAttributes(CubismRenderer_OpenGLES2 renderer, int index, CubismShaderSet shaderSet)
     {
         // 頂点位置属性の設定
         gl.EnableVertexAttribArray(shaderSet.AttributePositionLocation);
-        gl.VertexAttribPointer(shaderSet.AttributePositionLocation, 2, gl.GL_FLOAT, false, 4 * sizeof(float), 0);
+        gl.BindBuffer(gl.GL_ARRAY_BUFFER, renderer.GetPositionBuffer(index));
+        gl.VertexAttribPointer(shaderSet.AttributePositionLocation, 2, gl.GL_FLOAT, false, 2 * sizeof(float), 0);
 
         // テクスチャ座標属性の設定
         gl.EnableVertexAttribArray(shaderSet.AttributeTexCoordLocation);
-        gl.VertexAttribPointer(shaderSet.AttributeTexCoordLocation, 2, gl.GL_FLOAT, false, 4 * sizeof(float), 2 * sizeof(float));
+        gl.BindBuffer(gl.GL_ARRAY_BUFFER, renderer.GetUvBuffer(index));
+        gl.VertexAttribPointer(shaderSet.AttributeTexCoordLocation, 2, gl.GL_FLOAT, false, 2 * sizeof(float), 0);
     }
 
     /// <summary>

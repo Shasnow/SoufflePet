@@ -37,6 +37,7 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
+    private readonly DispatcherTimer _positionStableTimer;
     private DateTime _lastMoveLog;
 
     /// <summary>
@@ -235,8 +236,20 @@ public class NativePetWindow : Window, IPetWindow
             Position = new PixelPoint(wa.Right - (int)Bounds.Width - 48, wa.Bottom - (int)Bounds.Height - 24);
         };
 
-        // 拖到另一台刷新率不同的显示器时更新 vsync 基准
-        PositionChanged += (_, _) => UpdateVsyncHz();
+        // 拖到另一台刷新率不同的显示器时更新 vsync 基准。
+        // PositionChanged 在系统拖拽期间逐像素触发，GetDC 查询 + 日志每像素一次既浪费又刷屏，
+        // 用防抖定时器合并：位置变化不断重置计时，停止拖动约 800ms 后只查询一次。
+        _positionStableTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        _positionStableTimer.Tick += (_, _) =>
+        {
+            _positionStableTimer.Stop();
+            UpdateVsyncHz();
+        };
+        PositionChanged += (_, _) =>
+        {
+            _positionStableTimer.Stop();
+            _positionStableTimer.Start();
+        };
     }
 
     /// <summary>

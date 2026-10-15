@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Live2DCSharpSDK.App;
 using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Model;
@@ -47,26 +47,16 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
     private readonly List<CubismOffscreenSurface_OpenGLES2> _offscreenFrameBuffers = [];
 
     internal int VertexArray { get; private set; }
-    internal int VertexBuffer { get; private set; }
-    internal int IndexBuffer { get; private set; }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    internal struct VBO
-    {
-        public float ver0;
-        public float ver1;
-        public float uv0;
-        public float uv1;
-    }
-
-    internal VBO[] vbo = new VBO[512];
-
-    // VBO/IBO 容量缓存（单位：字节）。
-    // 原 SDK 每个 drawable 每次绘制都用 glBufferData(STATIC_DRAW) 全量重分配缓冲，
-    // 本模型约 150 个 drawable、含蒙版通道每帧约 600 次绘制调用，驱动因此每帧重分配存储数百次，
-    // 实测 GPU 3D 占用高达 20% 以上。这里改为「首次/扩容时重分配 + 后续 glBufferSubData 原地更新」。
-    private int _vboCapBytes;
-    private int _iboCapBytes;
+    // 每个 drawable 一组独立网格缓冲。
+    // 索引与 UV 是静态数据（加载后永不变形），只在首次绘制时上传一次；
+    // 顶点位置每帧随动作形变，用独立动态缓冲按固定容量原地更新。
+    // 原实现整个渲染器共用一对 VBO/IBO 交错存放 位置+UV 的 AoS 数据，
+    // 每次绘制都要逐顶点搬运 + 重传 UV/索引，是性能分析中 DrawMesh/BufferSubData 热点的来源。
+    private int[] _posBuffers = [];
+    private int[] _uvBuffers = [];
+    private int[] _indexBuffers = [];
+    private bool[] _meshPrepared = [];
 
     /// <summary>
     /// Tegraプロセッサ対応。拡張方式による描画の有効・無効
@@ -90,8 +80,13 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
         _textures = new Dictionary<int, int>(32);
 
         VertexArray = GL.GenVertexArray();
-        VertexBuffer = GL.GenBuffer();
-        IndexBuffer = GL.GenBuffer();
+
+        // 按 drawable 数量预分配缓冲句柄数组（缓冲本身在首次绘制时懒创建）
+        var drawableCount = model.GetDrawableCount();
+        _posBuffers = new int[drawableCount];
+        _uvBuffers = new int[drawableCount];
+        _indexBuffers = new int[drawableCount];
+        _meshPrepared = new bool[drawableCount];
 
         // 1未満は1に補正する
         if (maskBufferCount < 1)
@@ -209,50 +204,21 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
         var vertexCount = model.GetDrawableVertexCount(index);
         var vertexArray = model.GetDrawableVertices(index);
         var uvArray = (float*)model.GetDrawableVertexUvs(index);
-
-        GL.BindVertexArray(VertexArray);
-
-        if (vbo == null || vbo.Length < vertexCount)
-        {
-            vbo = new VBO[vertexCount];
-        }
-
-        for (int a = 0; a < vertexCount; a++)
-        {
-            vbo[a].ver0 = vertexArray[a * 2];
-            vbo[a].ver1 = vertexArray[a * 2 + 1];
-            vbo[a].uv0 = uvArray[a * 2];
-            vbo[a].uv1 = uvArray[a * 2 + 1];
-        }
-
         int indexCount = model.GetDrawableVertexIndexCount(index);
         ushort* indexArray = model.GetDrawableVertexIndices(index);
 
-        GL.BindBuffer(GL.GL_ARRAY_BUFFER, VertexBuffer);
-        fixed (void* p = vbo)
-        {
-            int bytes = vertexCount * sizeof(VBO);
-            if (bytes > _vboCapBytes)
-            {
-                // 顶点数据超出已有容量：按两倍扩容重新分配一次，之后长期复用
-                _vboCapBytes = bytes * 2;
-                GL.BufferData(GL.GL_ARRAY_BUFFER, _vboCapBytes, IntPtr.Zero, GL.GL_DYNAMIC_DRAW);
-            }
+        // 首次绘制该 drawable 时创建并上传网格缓冲（索引/UV 是静态数据，只上传这一次）
+        EnsureMeshBuffers(index, vertexCount, indexCount, uvArray, indexArray);
 
-            // 容量内直接原地写入，避免每次绘制都让驱动重新分配缓冲存储
-            GL.BufferSubData(GL.GL_ARRAY_BUFFER, 0, (nint)bytes, p);
-        }
+        GL.BindVertexArray(VertexArray);
 
-        GL.BindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, IndexBuffer);
-        int indexBytes = indexCount * sizeof(ushort);
-        if (indexBytes > _iboCapBytes)
-        {
-            // 同上：索引缓冲也只在容量不足时扩容一次
-            _iboCapBytes = indexBytes * 2;
-            GL.BufferData(GL.GL_ELEMENT_ARRAY_BUFFER, _iboCapBytes, IntPtr.Zero, GL.GL_DYNAMIC_DRAW);
-        }
+        // 顶点位置每帧形变：模型数据本就是 SoA 布局，直接从指针原地写入位置缓冲，
+        // 无需再逐顶点搬运成交错的 AoS 结构体
+        GL.BindBuffer(GL.GL_ARRAY_BUFFER, _posBuffers[index]);
+        GL.BufferSubData(GL.GL_ARRAY_BUFFER, 0, (nint)(vertexCount * 2 * sizeof(float)), vertexArray);
 
-        GL.BufferSubData(GL.GL_ELEMENT_ARRAY_BUFFER, 0, (nint)indexBytes, indexArray);
+        // 索引缓冲绑定属于 VAO 状态：每个 drawable 的 IBO 不同，绘制前绑定对应的
+        GL.BindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, _indexBuffers[index]);
 
         if (IsGeneratingMask())  // マスク生成時
         {
@@ -273,6 +239,36 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
         ClippingContextBufferForDraw = null;
         ClippingContextBufferForMask = null;
     }
+
+    /// <summary>
+    /// 确保 drawable 的网格缓冲就绪（每个 drawable 只执行一次）。
+    /// 索引与 UV 为静态数据，按 STATIC_DRAW 一次性上传；
+    /// 顶点位置缓冲按该 drawable 固定的顶点数分配存储（DYNAMIC_DRAW），
+    /// 供每帧 BufferSubData 原地更新，扩容/容量缓存逻辑由此彻底消失。
+    /// </summary>
+    private unsafe void EnsureMeshBuffers(int index, int vertexCount, int indexCount, float* uvArray, ushort* indexArray)
+    {
+        if (_meshPrepared[index]) return;
+        _meshPrepared[index] = true;
+
+        _posBuffers[index] = GL.GenBuffer();
+        GL.BindBuffer(GL.GL_ARRAY_BUFFER, _posBuffers[index]);
+        GL.BufferData(GL.GL_ARRAY_BUFFER, vertexCount * 2 * sizeof(float), IntPtr.Zero, GL.GL_DYNAMIC_DRAW);
+
+        _uvBuffers[index] = GL.GenBuffer();
+        GL.BindBuffer(GL.GL_ARRAY_BUFFER, _uvBuffers[index]);
+        GL.BufferData(GL.GL_ARRAY_BUFFER, vertexCount * 2 * sizeof(float), (nint)uvArray, GL.GL_STATIC_DRAW);
+
+        _indexBuffers[index] = GL.GenBuffer();
+        GL.BindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, _indexBuffers[index]);
+        GL.BufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(ushort), (nint)indexArray, GL.GL_STATIC_DRAW);
+    }
+
+    /// <summary>drawable 的顶点位置缓冲（每帧原地更新）。</summary>
+    internal int GetPositionBuffer(int index) => _posBuffers[index];
+
+    /// <summary>drawable 的 UV 缓冲（静态，仅首次上传）。</summary>
+    internal int GetUvBuffer(int index) => _uvBuffers[index];
 
     /// <summary>
     /// 描画開始時の追加処理。

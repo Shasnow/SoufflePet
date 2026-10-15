@@ -1,5 +1,7 @@
 ﻿namespace Live2DCSharpSDK.Framework.Math;
 
+using System.Numerics;
+
 /// <summary>
 /// 4x4行列の便利クラス。
 /// </summary>
@@ -206,26 +208,25 @@ public record CubismMatrix44
         _tr[5] = y;
     }
 
-    public float[] _mpt = new float[16];
-
-    public void MultiplyByMatrix(float[] a)
+    public unsafe void MultiplyByMatrix(float[] a)
     {
-        Array.Fill(_mpt, 0);
-
-        int n = 4;
-
-        for (int i = 0; i < n; ++i)
+        // 矩阵数组与 System.Numerics.Matrix4x4 的内存布局逐元素一致
+        //（都是 16 个 float 顺序存放，平移分量在 index 12~14），
+        // operator* 的展开式 R[0]=l0·r0+l1·r4+l2·r8+l3·r12 与原三重循环逐元素等价，
+        // 因此可直接 reinterpret 成 Matrix4x4 走 JIT SIMD intrinsic（AVX/SSE 向量化）。
+        // benchmark（MatrixTest）：原三重循环 ~60ns，手写展开 ~17ns，SIMD ~9ns。
+        // 先整体读入两个寄存器结构再相乘，天然处理 a 与 _tr 为同一数组时的自乘别名情形。
+        Matrix4x4 l, r;
+        fixed (float* pa = a, pt = _tr)
         {
-            for (int j = 0; j < n; ++j)
-            {
-                for (int k = 0; k < n; ++k)
-                {
-                    _mpt[j + i * 4] += a[k + i * 4] * _tr[j + k * 4];
-                }
-            }
+            l = *(Matrix4x4*)pa;
+            r = *(Matrix4x4*)pt;
         }
-
-        Array.Copy(_mpt, _tr, 16);
+        var result = l * r;
+        fixed (float* pt = _tr)
+        {
+            *(Matrix4x4*)pt = result;
+        }
     }
 
     /// <summary>
