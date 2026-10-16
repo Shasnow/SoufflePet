@@ -6,7 +6,6 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
-using ShufuleiPet.Models;
 using ShufuleiPet.native;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
@@ -20,20 +19,13 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
-    private readonly DispatcherTimer _positionStableTimer;
     private DateTime _lastMoveLog;
-
-    /// <summary>
-    /// 帧率显示叠加层的上限：自续帧模式下实际节奏由显示器 vsync 决定，
-    /// 因此上限就是主显示器刷新率（查询失败为 0，此时只显示当前帧率）。
-    /// </summary>
-    private readonly int _fpsCap;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
     private int _fpsAccum;
 
-    /// <summary>右上角帧率叠加层（当前/上限），托盘"显示帧率"开关控制显隐。</summary>
+    /// <summary>右上角帧率叠加层（当前帧率），托盘"显示帧率"开关控制显隐。</summary>
     private readonly Border _fpsBadge;
     private readonly TextBlock _fpsText;
 
@@ -64,11 +56,7 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
-    [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
-
-    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad, ShufuleiSettings settings)
+    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad)
     {
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
@@ -81,15 +69,13 @@ public class NativePetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _control = new NativePetControl();
-        _control.SetFpsCap(settings.FpsCap); // 帧率上限：vsync 分频跳帧，实际帧率 = min(vsync, 上限)
-        _fpsCap = settings.FpsCap;
 
         // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
         _fpsText = new TextBlock
         {
             Foreground = Brushes.White,
             FontSize = 12,
-            Text = _fpsCap > 0 ? $"{_fpsCap}/{_fpsCap}" : "0",
+            Text = "0",
         };
         _fpsBadge = new Border
         {
@@ -103,17 +89,17 @@ public class NativePetWindow : Window, IPetWindow
         };
         Content = new Grid { Children = { _control, _fpsBadge } };
 
-        // 定时器只负责输入侧与统计，不再驱动 GL 重绘：
-        // 重绘改为渲染回调自续帧（跟随合成器帧时钟 / 显示器 vsync）。
+        // 定时器只负责输入侧与统计，不驱动 GL 重绘：重绘由渲染回调自续帧
+        // （跟随合成器帧时钟 / 显示器 vsync），不限帧。
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) =>
         {
             TrackGlobalCursor();
             UpdateClickThrough();
             UpdateFps();                                        // 每满 1 秒刷新一次帧率显示
-            _control.SetLipSync(lipSync.CurrentLevel);         // 口型律动音量每帧推给渲染层
-            _control.SetLipSyncWide(lipSync.CurrentWideLevel); // 口型水平宽窄每帧推给渲染层
-            _control.SetGamepadInput(gamepad.State);           // 手柄输入快照喂给渲染层（服务内部 30Hz 轮询）
+            _control.SetLipSync(lipSync.CurrentLevel);          // 口型律动音量每帧推给渲染层
+            _control.SetLipSyncWide(lipSync.CurrentWideLevel);  // 口型水平宽窄每帧推给渲染层
+            _control.SetGamepadInput(gamepad.State);            // 手柄输入快照喂给渲染层（服务内部 30Hz 轮询）
         };
         _renderTimer.Start();
 
@@ -207,10 +193,8 @@ public class NativePetWindow : Window, IPetWindow
             // 之后点击穿透只切换 WS_EX_TRANSPARENT 即可。
             EnsureLayered();
 
-            // 每次显示都刷新 vsync 基准（显示器刷新率可能被用户改过），
             // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
             // 避免托盘切换显示/隐藏把用户拖动过的窗口位置复原
-            UpdateVsyncHz();
             if (_positioned) return;
             _positioned = true;
 
@@ -218,21 +202,6 @@ public class NativePetWindow : Window, IPetWindow
             if (screen is null) return;
             var wa = screen.WorkingArea;
             Position = new PixelPoint(wa.Right - (int)Bounds.Width - 48, wa.Bottom - (int)Bounds.Height - 24);
-        };
-
-        // 拖到另一台刷新率不同的显示器时更新 vsync 基准。
-        // PositionChanged 在系统拖拽期间逐像素触发，GetDC 查询 + 日志每像素一次既浪费又刷屏，
-        // 用防抖定时器合并：位置变化不断重置计时，停止拖动约 800ms 后只查询一次。
-        _positionStableTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
-        _positionStableTimer.Tick += (_, _) =>
-        {
-            _positionStableTimer.Stop();
-            UpdateVsyncHz();
-        };
-        PositionChanged += (_, _) =>
-        {
-            _positionStableTimer.Stop();
-            _positionStableTimer.Start();
         };
     }
 
@@ -339,33 +308,7 @@ public class NativePetWindow : Window, IPetWindow
         _control.SetGamepadEnabled(enabled);
     }
 
-    /// <summary>GDI 设备上下文能力索引：垂直刷新率（Hz）。</summary>
-    private const int DeviceCapsVRefresh = 116;
-
-    /// <summary>
-    /// 查询本窗口所在显示器的刷新率传给渲染层（vsync 整数分频限帧的节拍基准）。
-    /// Avalonia 12 的 Screen 没有 RefreshRate 属性，走 Win32 GetDeviceCaps(VREFRESH)；
-    /// 返回 0/1 表示未知或隔行，一律视为未知（0，渲染层退回时间阈值法）。
-    /// </summary>
-    private void UpdateVsyncHz()
-    {
-        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        var hz = 0;
-        if (hwnd != IntPtr.Zero)
-        {
-            var hdc = GetDC(hwnd);
-            if (hdc != IntPtr.Zero)
-            {
-                var v = GetDeviceCaps(hdc, DeviceCapsVRefresh);
-                ReleaseDC(hwnd, hdc);
-                if (v > 1) hz = v;
-            }
-        }
-        _control.SetVsyncHz(hz);
-        Logger.Debug("vsync hz={Hz}", hz);
-    }
-
-    /// <summary>帧率统计：取走渲染层实际渲染的帧数，每满 1 秒刷新一次"当前/上限"。</summary>
+    /// <summary>帧率统计：取走渲染层这一秒渲染的帧数，刷新显示。</summary>
     private void UpdateFps()
     {
         if (!_fpsBadge.IsVisible) return;
@@ -374,8 +317,7 @@ public class NativePetWindow : Window, IPetWindow
         var elapsed = (now - _fpsSampleTime).TotalSeconds;
         if (elapsed < 1) return;
         _fpsSampleTime = now;
-        var fps = Math.Round(_fpsAccum / elapsed);
-        _fpsText.Text = _fpsCap > 0 ? $"{fps}/{_fpsCap}" : $"{fps}";
+        _fpsText.Text = $"{Math.Round(_fpsAccum / elapsed)}";
         _fpsAccum = 0;
     }
 

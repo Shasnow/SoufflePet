@@ -34,13 +34,6 @@ public class ShufuleiSettings : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    [Description("FPS上限")]
-    public int FpsCap
-    {
-        get;
-        set => Set(ref field, value);
-    } = 0;
-
     [Description("是否启用自动表情（检测到游戏/音乐应用自动切换表情，进程白名单见 autoexpression.json）")]
     public bool AutoExpressionEnabled
     {

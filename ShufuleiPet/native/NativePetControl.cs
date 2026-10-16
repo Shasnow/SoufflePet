@@ -93,22 +93,7 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>是否允许自续帧（窗口隐藏时置 false，避免看不见时仍满速空转）。</summary>
     private volatile bool _renderLoopEnabled = true;
 
-    /// <summary>帧率上限（0 = 不限制）。按 vsync 整数分频跳帧，实际帧率 = min(vsync, 上限)。</summary>
-    private volatile int _fpsCap;
-
-    /// <summary>当前显示器刷新率（窗口层查询传入；0 = 未知，退回时间阈值法）。</summary>
-    private volatile int _vsyncHz;
-
-    /// <summary>vsync 节拍计数：仅在渲染回调线程访问，每 N 拍渲染 1 帧实现整数分频。</summary>
-    private int _vsyncPhase;
-
-    /// <summary>设置帧率上限（0 表示不限制，跟随显示器 vsync）。渲染线程每帧读取。</summary>
-    public void SetFpsCap(int cap) => _fpsCap = cap;
-
-    /// <summary>设置显示器刷新率（窗口层在显示/跨屏移动时查询传入），用于 vsync 整数分频。</summary>
-    public void SetVsyncHz(int hz) => _vsyncHz = hz;
-
-    /// <summary>实际渲染帧计数（渲染线程累加，窗口层每秒取走一次用于统计 FPS）。</summary>
+    /// <summary>渲染帧计数（渲染线程累加，窗口层每秒取走一次用于统计 FPS）。</summary>
     private int _renderedFrames;
 
     /// <summary>光标下是否有模型的可见像素（每帧渲染后读取 1 像素 alpha 判定，供点击穿透用）。</summary>
@@ -117,7 +102,7 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>是否显示模型自带的水印层（默认关闭）。</summary>
     public bool ShowWatermark { get; set; }
 
-    /// <summary>取走自上次调用以来实际渲染的帧数并清零（跨线程安全）。</summary>
+    /// <summary>取走自上次调用以来渲染的帧数并清零（跨线程安全）。</summary>
     public int TakeRenderedFrames()
     {
         return Interlocked.Exchange(ref _renderedFrames, 0);
@@ -258,31 +243,6 @@ public class NativePetControl : OpenGlControlBase
     {
         if (_lapp == null) return;
 
-        // 帧率限制：优先按 vsync 节拍整数分频——每 N 个垂直同步渲染 1 帧
-        // （N = 刷新率/上限 向上取整，保证不超上限）。节拍严格均匀、相位锁定，
-        // 不会像时间阈值法那样因回调触发时间的毫秒级抖动把"该画"的帧误跳掉，
-        // 出现 2:1 间隔的运动拖影。上限 ≥ 刷新率时 N=1，每帧都画，与不限帧一致。
-        // 刷新率未知时退回时间阈值法（留 0.5ms 容差）。跳帧不改 _last，动画速度不受影响。
-        var cap = _fpsCap;
-        if (cap > 0)
-        {
-            var hz = _vsyncHz;
-            var skip = false;
-            if (hz > cap)
-            {
-                skip = ++_vsyncPhase % (int)Math.Ceiling((double)hz / cap) != 0;
-            }
-            else if (hz <= 0 && (DateTime.Now - _last).TotalMilliseconds < 1000.0 / cap - 0.5)
-            {
-                skip = true;
-            }
-            if (skip)
-            {
-                if (_renderLoopEnabled) RequestNextFrameRendering();
-                return;
-            }
-        }
-
         try
         {
             // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
@@ -291,6 +251,7 @@ public class NativePetControl : OpenGlControlBase
             var vpH = (int)(Bounds.Height * App.RenderScaling);
             gl.Viewport(0, 0, vpW, vpH);
 
+            // 帧步长：按真实经过时间推进动作/物理/眨眼，帧率高低不影响动画速度
             var now = DateTime.Now;
             var span = (float)(now - _last).TotalSeconds;
             _last = now;
@@ -310,11 +271,10 @@ public class NativePetControl : OpenGlControlBase
 
             Interlocked.Increment(ref _renderedFrames);
             _frames++;
-            if (_frames == 1 || _frames % 300 == 0)
+            if (_frames % 300 == 0)
                 Logger.Debug("render frames={Frames} span={Span:F3}", _frames, span);
 
-            // 自续帧：渲染完立刻请求下一帧，节奏交给合成器帧时钟（显示器 vsync），
-            // 避免固定周期定时器与高刷屏相位不同步导致的周期性掉帧。
+            // 自续帧：渲染完立刻请求下一帧，节奏交给合成器帧时钟（显示器 vsync），不限帧。
             if (_renderLoopEnabled) RequestNextFrameRendering();
         }
         catch (Exception ex)

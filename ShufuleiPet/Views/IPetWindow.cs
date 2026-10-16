@@ -1,4 +1,4 @@
-﻿namespace ShufuleiPet.Views;
+namespace ShufuleiPet.Views;
 
 /// <summary>桌宠窗口的托盘菜单操作接口（WebView 版与原生版共用）。</summary>
 public interface IPetWindow
@@ -12,7 +12,7 @@ public interface IPetWindow
     /// <summary>目光跟随开关：关闭时视线回正并停止跟随光标。</summary>
     void SetGazeFollow(bool enabled);
 
-    /// <summary>帧率显示开关：窗口右上角 当前/上限 叠加层的显示与否。</summary>
+    /// <summary>帧率显示开关：窗口右上角帧率叠加层的显示与否。</summary>
     void SetFpsVisible(bool visible);
 
     /// <summary>

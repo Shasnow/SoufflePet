@@ -63,7 +63,7 @@ public sealed class TrayService(
         var manualPadItem = NewToggle("常显手柄", settings.GamepadManual,
             v => settings.GamepadManual = v);
 
-        // 帧率显示：窗口右上角 当前/上限 叠加层
+        // 帧率显示：窗口右上角帧率叠加层
         var fpsItem = NewToggle("显示帧率", settings.IsShowFps,
             v => settings.IsShowFps = v);
 

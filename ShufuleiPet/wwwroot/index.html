@@ -63,14 +63,12 @@ async function main() {
   document.getElementById('stage').appendChild(app.view);
   app.stage.interactive = true;
 
-  // 帧率显示：上限与原生版 16ms 渲染定时器一致取 60（maxFPS=0 表示不限帧，
-  // 显式设为 60 让"当前/上限"与原生版口径相同）
-  const FPS_CAP = 60;
-  app.ticker.maxFPS = FPS_CAP;
+  // 帧率显示：不限帧（maxFPS=0 交给浏览器 RAF / 显示器刷新率），只显示当前帧率
+  app.ticker.maxFPS = 0;
   const fpsEl = document.getElementById('fps');
   app.ticker.add(() => {
     if (fpsEl.style.display !== 'none')
-      fpsEl.textContent = Math.round(app.ticker.FPS) + '/' + FPS_CAP;
+      fpsEl.textContent = Math.round(app.ticker.FPS).toString();
   });
 
   const model = await PIXI.live2d.Live2DModel.from(MODEL_URL, { autoInteract: false });
