@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Services;
 using ShufuleiPet.Views;
 
@@ -38,7 +39,7 @@ public partial class App : Application
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
-            services.AddSingleton(AutoExpressionConfig.Load());
+            services.AddSingleton(ShufuleiSettings.Load());
             services.AddSingleton<IProcessDetector, ProcessDetector>();
             services.AddSingleton<IForegroundDetector, ForegroundDetector>();
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
@@ -67,31 +68,68 @@ public partial class App : Application
 
             // 自动表情事件 → 窗口（订阅先于 DispatcherTimer 触发，无竞态）
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
-            var cfg0 = _provider.GetRequiredService<AutoExpressionConfig>();
+            var settings = _provider.GetRequiredService<ShufuleiSettings>();
 
             // 手柄联动：命中游戏（切到"手柄"表情）时开始把手柄/键鼠输入写进模型摇杆参数；
             // 手动模式下不看检测结果，一直驱动（方便没打游戏时调试/演示）。
             autoExpression.ExpressionChanged += name =>
             {
-                if (cfg0.GamepadManual) return; // 手动模式：表情由托盘控制，忽略自动切换
+                if (settings.GamepadManual) return; // 手动模式：表情由托盘控制，忽略自动切换
                 petOps.SetAutoExpression(name);
-                petOps.SetGamepadEnabled(cfg0.GamepadEnabled && name == cfg0.GameExpression);
+                petOps.SetGamepadEnabled(settings.GamepadEnabled && name == settings.AutoExpressionGameExpression);
             };
 
             // music 状态进出 → 口型律动采集启停（停用时不占音频设备）
             var lipSync = _provider.GetRequiredService<ILipSyncService>();
             autoExpression.MusicStateChanged += active => lipSync.Active = active;
 
-            // 应用持久化的初始状态：目光跟随与帧率显示（托盘勾选项，窗口默认开启）
-            petOps.SetGazeFollow(cfg0.GazeFollowEnabled);
-            petOps.SetFpsVisible(cfg0.FpsOverlayEnabled);
-
-            // 启动时若勾选了"常显手柄"，立即显示手柄并开始驱动
-            if (cfg0.GamepadManual)
+            // ===== 设置变化统一接线 =====
+            // ShufuleiSettings 是唯一事实源：任何写入方（托盘菜单/设置界面）只改属性，
+            // 持久化与运行时副作用全部在这一个订阅里处理，写入方不做 Save、不直接调服务。
+            settings.PropertyChanged += (_, e) =>
             {
-                petOps.SetAutoExpression(cfg0.GameExpression);
-                petOps.SetGamepadEnabled(cfg0.GamepadEnabled);
+                try { settings.Save(); } catch (Exception ex) { Logger.Warning(ex, "save settings failed"); }
+                switch (e.PropertyName)
+                {
+                    case nameof(ShufuleiSettings.GazeFollowEnabled):
+                        petOps.SetGazeFollow(settings.GazeFollowEnabled);
+                        break;
+                    case nameof(ShufuleiSettings.IsShowFps):
+                        petOps.SetFpsVisible(settings.IsShowFps);
+                        break;
+                    case nameof(ShufuleiSettings.GamepadEnabled):
+                        ApplyGamepadDriving();
+                        break;
+                    case nameof(ShufuleiSettings.GamepadManual):
+                        ApplyGamepadManual();
+                        break;
+                }
+            };
+
+            // 手柄驱动开关重算：总开关开 且（手动模式 或 当前正处于"手柄"表情）
+            void ApplyGamepadDriving() =>
+                petOps.SetGamepadEnabled(settings.GamepadEnabled
+                    && (settings.GamepadManual || autoExpression.CurrentExpression == settings.AutoExpressionGameExpression));
+
+            // 常显手柄切换：进入手动模式直接显示手柄表情；退出则清掉手动表情交回自动检测
+            void ApplyGamepadManual()
+            {
+                if (settings.GamepadManual)
+                {
+                    petOps.SetAutoExpression(settings.AutoExpressionGameExpression);
+                }
+                else
+                {
+                    petOps.SetAutoExpression(null);
+                    autoExpression.PollNow(); // 立刻轮询一次（命中游戏会马上切回来）
+                }
+                ApplyGamepadDriving();
             }
+
+            // 应用持久化的初始状态（订阅只响应变化，初始值需显式应用一次）
+            petOps.SetGazeFollow(settings.GazeFollowEnabled);
+            petOps.SetFpsVisible(settings.IsShowFps);
+            if (settings.GamepadManual) ApplyGamepadManual();
 
             try
             {

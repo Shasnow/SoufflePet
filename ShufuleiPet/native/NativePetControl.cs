@@ -402,9 +402,11 @@ public class NativePetControl : OpenGlControlBase
         _lapp?.View.ResetView();
     }
 
-    /// <summary>左键单击：随机切换一个表情。</summary>
+    /// <summary>左键单击：随机切换一个表情。手柄显示中（自动表情命中游戏或常显手柄）不轮换，
+    /// 否则点击会把手柄表情替换掉且没有任何机制切回来（手动模式下自动联动不再触发）。</summary>
     public void TapRandomExpression()
     {
+        if (_gamepadEnabled) return;
         _model?.SetRandomExpression();
     }
 

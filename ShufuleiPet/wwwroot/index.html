@@ -335,8 +335,9 @@ async function main() {
     model.scale.set(fitScale * zoom);
   }, { passive: false });
 
-  // 表情：单击模型轮换（与原生版 TapRandomExpression 一致），
-  // 自动表情联动走独立的 setExpr 状态，优先级高于单击轮换的任意表情
+  // 表情：单击模型轮换（与原生版 TapRandomExpression 一致）。
+  // 手柄显示中（padOn：游戏联动命中或托盘"常显手柄"）单击不轮换——
+  // 表情是替换制，点走手柄表情后没有任何机制切回来。
   let curExpr = null;                 // 当前单击轮换的任意表情名
   let autoExpr = null;                // 自动表情联动设置的表情名（null = 无）
 
@@ -353,7 +354,9 @@ async function main() {
 
   // 左键单击模型 -> 轮换表情（按 EXPRESSIONS 顺序循环）
   function cycleExpression() {
-    if (autoExpr) return; // 自动表情联动激活时，单击不覆盖
+    if (padOn) return;              // 手柄显示中不轮换（与原生版一致）
+    // 手动接管：清掉自动锁定；宿主只在检测状态变化时才重新推送自动表情
+    autoExpr = null;
     const i = curExpr == null ? -1 : EXPRESSIONS.indexOf(curExpr);
     setExpr(EXPRESSIONS[(i + 1) % EXPRESSIONS.length]);
   }

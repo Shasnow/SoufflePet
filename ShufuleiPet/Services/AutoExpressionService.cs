@@ -1,151 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Utils;
 
 namespace ShufuleiPet.Services;
 
-/// <summary>单个应用的检测条目（逐应用配置检测策略）。</summary>
-public class AppEntry
-{
-    /// <summary>目标进程名（不含 .exe，忽略大小写）。</summary>
-    public string Process { get; set; } = "";
-
-    /// <summary>类别：game（游戏）或 music（音乐），决定命中后切换的表情。</summary>
-    public string Category { get; set; } = "game";
-
-    /// <summary>检测方式：process（进程检测）或 foreground（前台窗口检测），缺省 process。</summary>
-    public string Method { get; set; } = "process";
-
-    /// <summary>
-    /// 前台窗口标题匹配模式（仅 method=foreground 时生效）：/…/ 形式为正则，否则忽略大小写子串。
-    /// foreground 模式只检测窗口标题，不做进程反查。
-    /// </summary>
-    public string TitlePattern { get; set; } = "";
-
-    /// <summary>条目在 Apps 列表中的索引（运行时由服务赋值，供检测器缓存等按条目定位）。</summary>
-    [JsonIgnore]
-    internal int Index;
-}
-
-/// <summary>自动表情联动的配置（存放在可执行目录下的 autoexpression.json，可手动增删应用条目）。</summary>
-public class AutoExpressionConfig
-{
-    /// <summary>功能总开关（托盘"自动表情"勾选项的状态）。</summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>音乐口型律动开关（托盘"口型律动"勾选项的状态）：仅在自动表情处于 music 状态时采集。</summary>
-    public bool LipSyncEnabled { get; set; } = true;
-
-    /// <summary>手柄联动开关（托盘"手柄联动"勾选项）：关闭后不再把手柄/键鼠输入写进模型参数。</summary>
-    public bool GamepadEnabled { get; set; } = true;
-
-    /// <summary>
-    /// 手动手柄模式（托盘"常显手柄"勾选项）：勾选后一直显示手柄并驱动摇杆，
-    /// 不再跟随游戏检测结果（方便没有游戏在跑时调试/演示）。
-    /// </summary>
-    public bool GamepadManual { get; set; } = false;
-
-    /// <summary>目光跟随开关（托盘"目光跟随"勾选项的状态）：关闭后视线回正并停止跟随光标。</summary>
-    public bool GazeFollowEnabled { get; set; } = true;
-
-    /// <summary>帧率显示开关（托盘"显示帧率"勾选项的状态）：窗口右上角显示 当前/上限。</summary>
-    public bool FpsOverlayEnabled { get; set; } = true;
-
-    /// <summary>轮询周期（秒）：进程枚举与前台窗口查询共用同一周期。</summary>
-    public float PollSeconds { get; set; } = 3f;
-
-    /// <summary>命中 game 类条目时切换的表情名。</summary>
-    public string GameExpression { get; set; } = "手柄";
-
-    /// <summary>命中 music 类条目时切换的表情名。</summary>
-    public string MusicExpression { get; set; } = "麦克风";
-
-    /// <summary>逐应用检测条目（进程名 + 类别 + 检测方式 + 标题模式）。</summary>
-    public List<AppEntry> Apps { get; set; } = BuildDefaults();
-
-    /// <summary>
-    /// 内置默认条目：全部使用进程检测。
-    /// 适用场景边界——游戏全屏时无稳定标题、音乐播放器常驻后台，进程存在性判定最可靠；
-    /// 需要"窗口在前台才有意义"的程序（视频播放器等）请自行改为 method=foreground 并配 titlePattern。
-    /// </summary>
-    public static List<AppEntry> BuildDefaults() =>
-    [
-        new() { Process = "steam", Category = "game", Method = "foreground", TitlePattern = "Steam" },
-        new() { Process = "LeagueClient", Category = "game" },
-        new() { Process = "LeagueClientUx", Category = "game" },
-        new() { Process = "RiotClientServices", Category = "game" },
-        new() { Process = "GenshinImpact", Category = "game" },
-        new() { Process = "YuanShen", Category = "game" },
-        new() { Process = "StarRail", Category = "game" },
-        new() { Process = "ZenlessZoneZero", Category = "game" },
-        new() { Process = "cs2", Category = "game" },
-        new() { Process = "dota2", Category = "game" },
-        new() { Process = "Warframe", Category = "game" },
-        new() { Process = "Minecraft", Category = "game" },
-        new() { Process = "QQMusic", Category = "music" },
-        new() { Process = "CloudMusic", Category = "music" },
-        new() { Process = "Kugou", Category = "music" },
-        new() { Process = "KwMusic", Category = "music" },
-        new() { Process = "spotify", Category = "music" },
-        new() { Process = "foobar2000", Category = "music" },
-        new() { Process = "AIMP", Category = "music" },
-        new() { Process = "MusicBee", Category = "music" },
-        new() { Process = "yesplaymusic", Category = "music" },
-    ];
-
-    private static readonly string ConfigPath =
-        Path.Combine(AppContext.BaseDirectory, "autoexpression.json");
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,          // 生成的模板文件方便用户手改
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 中文表情名不转义
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-    };
-
-    /// <summary>读取配置；文件缺失或解析失败时回退到内置默认并写回模板。</summary>
-    public static AutoExpressionConfig Load()
-    {
-        if (!File.Exists(ConfigPath)) return WriteFallback(new AutoExpressionConfig());
-
-        try
-        {
-            var cfg = JsonSerializer.Deserialize<AutoExpressionConfig>(File.ReadAllText(ConfigPath), JsonOptions);
-            if (cfg != null) return cfg;
-        }
-        catch (Exception ex)
-        {
-            Log.ForContext<AutoExpressionConfig>().Warning(ex, "load autoexpression.json failed, using built-in defaults");
-        }
-
-        return WriteFallback(new AutoExpressionConfig());
-    }
-
-    /// <summary>兜底：写回模板文件（失败不影响功能）并返回配置。</summary>
-    private static AutoExpressionConfig WriteFallback(AutoExpressionConfig cfg)
-    {
-        try { cfg.Save(); } catch { /* 写模板失败不影响功能 */ }
-        return cfg;
-    }
-
-    /// <summary>把当前配置写回 json 文件（开关切换时也会持久化）。</summary>
-    public void Save()
-    {
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(this, JsonOptions));
-    }
-}
-
 /// <summary>自动表情联动服务抽象（DI 注册用）。</summary>
 public interface IAutoExpressionService : IDisposable
 {
-    /// <summary>功能总开关（关闭时停止轮询并清除已设置的自动表情）。</summary>
-    bool Enabled { get; set; }
-
     /// <summary>检测结果变化事件：参数为要切换的表情名，null 表示恢复默认（无表情）。</summary>
     event Action<string?>? ExpressionChanged;
 
@@ -176,7 +40,7 @@ public class AutoExpressionService : IAutoExpressionService
         Music,  // 命中音乐
     }
 
-    private readonly AutoExpressionConfig _config;
+    private readonly ShufuleiSettings _settings;
     private readonly DispatcherTimer _timer;
 
     /// <summary>
@@ -205,29 +69,25 @@ public class AutoExpressionService : IAutoExpressionService
 
     private AppState _lastState = AppState.None;
 
-    /// <summary>功能总开关：关闭时停止轮询并清除已设置的自动表情，开启时立即轮询一次。</summary>
-    public bool Enabled
+    /// <summary>
+    /// 响应 AutoExpressionEnabled 属性变化（构造时订阅 ShufuleiSettings.PropertyChanged）：
+    /// 开启时启动轮询并立即检测一次；关闭时停止轮询并立即清除自动表情（无论之前处于什么状态）。
+    /// 持久化由 App 组合根统一处理，这里只管运行时行为。
+    /// </summary>
+    private void OnEnabledChanged()
     {
-        get => _config.Enabled;
-        set
+        if (_settings.AutoExpressionEnabled)
         {
-            if (_config.Enabled == value) return;
-            _config.Enabled = value;
-            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            if (value)
-            {
-                _timer.Start();
-                PollOnce();
-            }
-            else
-            {
-                _timer.Stop();
-                // 关闭开关 = 立即清除自动表情（无论之前处于什么状态）
-                var wasMusic = _lastState == AppState.Music;
-                _lastState = AppState.None;
-                ExpressionChanged?.Invoke(null);
-                if (wasMusic) MusicStateChanged?.Invoke(false);
-            }
+            _timer.Start();
+            PollOnce();
+        }
+        else
+        {
+            _timer.Stop();
+            var wasMusic = _lastState == AppState.Music;
+            _lastState = AppState.None;
+            ExpressionChanged?.Invoke(null);
+            if (wasMusic) MusicStateChanged?.Invoke(false);
         }
     }
 
@@ -240,8 +100,8 @@ public class AutoExpressionService : IAutoExpressionService
     /// <inheritdoc />
     public string? CurrentExpression => _lastState switch
     {
-        AppState.Game => _config.GameExpression,
-        AppState.Music => _config.MusicExpression,
+        AppState.Game => _settings.AutoExpressionGameExpression,
+        AppState.Music => _settings.AutoExpressionMusicExpression,
         _ => null,
     };
 
@@ -249,28 +109,33 @@ public class AutoExpressionService : IAutoExpressionService
     public void PollNow() => PollOnce();
 
     public AutoExpressionService(
-        AutoExpressionConfig config,
+        ShufuleiSettings settings,
         IProcessDetector processDetector,
         IForegroundDetector foregroundDetector)
     {
-        _config = config;
+        _settings = settings;
         _procDetector = processDetector;
         _fgDetector = foregroundDetector;
-        _entries = BuildEntries(config);
+        _entries = BuildEntries(settings);
         for (var i = 0; i < _entries.Count; i++) _entries[i].Index = i;
         _hasForegroundEntries = _entries.Exists(e => e.Method == "foreground");
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(1f, config.PollSeconds)) };
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(1f, settings.AutoExpressionPollSeconds)) };
         _timer.Tick += (_, _) => PollOnce();
-        if (config.Enabled) _timer.Start();
+        // 总开关属性变化（托盘/设置界面等任何写入方）→ 启停轮询与清除表情
+        settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ShufuleiSettings.AutoExpressionEnabled)) OnEnabledChanged();
+        };
+        if (settings.AutoExpressionEnabled) _timer.Start();
     }
 
     /// <summary>
     /// 组装本轮检测条目：配置文件条目在前（用户显式配置优先），随后追加 NVIDIA App 识别为游戏、
     /// 且配置文件里没有同进程名的条目。NVIDIA 库缺失或读取失败时只返回配置文件条目。
     /// </summary>
-    private static List<AppEntry> BuildEntries(AutoExpressionConfig config)
+    private static List<AppEntry> BuildEntries(ShufuleiSettings settings)
     {
-        var entries = new List<AppEntry>(config.Apps);
+        var entries = new List<AppEntry>(settings.AutoExpressionApps);
         try
         {
             var merged = 0;
@@ -313,8 +178,8 @@ public class AutoExpressionService : IAutoExpressionService
         _lastState = state;
         var expression = state switch
         {
-            AppState.Game => _config.GameExpression,
-            AppState.Music => _config.MusicExpression,
+            AppState.Game => _settings.AutoExpressionGameExpression,
+            AppState.Music => _settings.AutoExpressionMusicExpression,
             _ => null, // None = 恢复默认
         };
         Logger.Information("auto expression: {Prev} -> {Next} ({Expression})", prev, state, expression ?? "default");

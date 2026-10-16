@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Views;
 
 namespace ShufuleiPet.Services;
@@ -17,14 +18,13 @@ public interface ITrayService
 }
 
 /// <summary>
-/// 托盘服务：构建托盘图标与菜单（显示/隐藏、重置模型、自动表情开关、退出），
-/// 菜单项逻辑依赖 IPetWindow 与 IAutoExpressionService（构造注入）。
+/// 托盘服务：构建托盘图标与菜单。菜单项只负责把用户意图写进 ShufuleiSettings 属性，
+/// 持久化与运行时副作用（窗口/服务的应用）统一由 App 组合根的 settings.PropertyChanged
+/// 订阅处理，此处不做任何 Save 或服务调用。
 /// </summary>
 public sealed class TrayService(
     IPetWindow petOps,
-    IAutoExpressionService autoExpression,
-    ILipSyncService lipSync,
-    AutoExpressionConfig config)
+    ShufuleiSettings settings)
     : ITrayService, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<TrayService>();
@@ -43,103 +43,29 @@ public sealed class TrayService(
         var resetItem = new NativeMenuItem("重置模型");
         resetItem.Click += (_, _) => petOps.ResetModel();
 
-        // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 autoexpression.json）
-        var autoExprItem = new NativeMenuItem("自动表情")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = config.Enabled,
-        };
-        autoExprItem.Click += (_, _) =>
-        {
-            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            autoExpression.Enabled = autoExprItem.IsChecked;
-            Logger.Information("auto expression toggled enabled={Enabled}", autoExprItem.IsChecked);
-        };
+        // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 ShufuleiPet.json）
+        var autoExprItem = NewToggle("自动表情", settings.AutoExpressionEnabled,
+            v => settings.AutoExpressionEnabled = v);
 
         // 音乐口型律动：自动表情处于 music 状态时，系统播放声音驱动嘴部开合
-        var lipSyncItem = new NativeMenuItem("口型律动")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = lipSync.Enabled,
-        };
-        lipSyncItem.Click += (_, _) =>
-        {
-            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            lipSync.Enabled = lipSyncItem.IsChecked;
-        };
+        var lipSyncItem = NewToggle("口型律动", settings.LipSyncEnabled,
+            v => settings.LipSyncEnabled = v);
 
         // 目光跟随：视线持续朝向全局光标（关闭时视线回正）
-        var gazeItem = new NativeMenuItem("目光跟随")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = config.GazeFollowEnabled,
-        };
-        gazeItem.Click += (_, _) =>
-        {
-            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            var enabled = gazeItem.IsChecked;
-            config.GazeFollowEnabled = enabled;
-            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            petOps.SetGazeFollow(enabled);
-            Logger.Information("gaze follow toggled enabled={Enabled}", enabled);
-        };
+        var gazeItem = NewToggle("目光跟随", settings.GazeFollowEnabled,
+            v => settings.GazeFollowEnabled = v);
 
-        // 帧率显示：窗口右上角 当前/上限 叠加层
-        var fpsItem = new NativeMenuItem("显示帧率")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = config.FpsOverlayEnabled,
-        };
-        fpsItem.Click += (_, _) =>
-        {
-            // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
-            var visible = fpsItem.IsChecked;
-            config.FpsOverlayEnabled = visible;
-            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            petOps.SetFpsVisible(visible);
-            Logger.Information("fps overlay toggled visible={Visible}", visible);
-        };
-
-        // 手柄联动：命中游戏时把手柄（或 WASD + 鼠标）输入写进模型摇杆/按键参数
-        var gamepadItem = new NativeMenuItem("手柄联动")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = config.GamepadEnabled,
-        };
-        gamepadItem.Click += (_, _) =>
-        {
-            var enabled = gamepadItem.IsChecked;
-            config.GamepadEnabled = enabled;
-            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            RefreshGamepadDriving();
-            Logger.Information("gamepad linkage toggled enabled={Enabled}", enabled);
-        };
+        // 输入联动：命中游戏时把手柄（或 WASD + 鼠标）输入写进模型摇杆/按键参数
+        var gamepadItem = NewToggle("输入联动", settings.GamepadEnabled,
+            v => settings.GamepadEnabled = v);
 
         // 常显手柄：不等待游戏检测，直接显示手柄并驱动（没打游戏时调试/演示用）
-        var manualPadItem = new NativeMenuItem("常显手柄")
-        {
-            ToggleType = MenuItemToggleType.CheckBox,
-            IsChecked = config.GamepadManual,
-        };
-        manualPadItem.Click += (_, _) =>
-        {
-            var on = manualPadItem.IsChecked;
-            config.GamepadManual = on;
-            try { config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            if (on)
-            {
-                petOps.SetAutoExpression(config.GameExpression);
-            }
-            else
-            {
-                // 交回自动检测：先清掉手动设置的表情，再立刻轮询一次（命中游戏会马上切回来）
-                petOps.SetAutoExpression(null);
-                petOps.SetGamepadEnabled(false);
-                autoExpression.PollNow();
-            }
-            RefreshGamepadDriving();
-            Logger.Information("manual gamepad mode toggled on={On}", on);
-        };
+        var manualPadItem = NewToggle("常显手柄", settings.GamepadManual,
+            v => settings.GamepadManual = v);
+
+        // 帧率显示：窗口右上角 当前/上限 叠加层
+        var fpsItem = NewToggle("显示帧率", settings.IsShowFps,
+            v => settings.IsShowFps = v);
 
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
@@ -171,15 +97,16 @@ public sealed class TrayService(
         Logger.Information("Tray icon set, initialization completed");
     }
 
-    /// <summary>
-    /// 重新评估手柄驱动开关：总开关开 且（手动模式 或 当前正处于"手柄"表情）时才驱动。
-    /// 托盘切换开关后立即调用，不必等下一个自动检测周期。
-    /// </summary>
-    private void RefreshGamepadDriving()
+    /// <summary>构造勾选菜单项：初值取自 settings，点击只把新值写回 settings（副作用统一走订阅）。</summary>
+    private static NativeMenuItem NewToggle(string header, bool initial, Action<bool> apply)
     {
-        var on = config.GamepadEnabled
-              && (config.GamepadManual || autoExpression.CurrentExpression == config.GameExpression);
-        petOps.SetGamepadEnabled(on);
+        var item = new NativeMenuItem(header)
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = initial,
+        };
+        item.Click += (_, _) => apply(item.IsChecked); // 勾选状态变化也走 Click 事件，此时 IsChecked 已是新值
+        return item;
     }
 
     public void Dispose()

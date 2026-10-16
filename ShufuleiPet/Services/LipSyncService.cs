@@ -1,15 +1,13 @@
 using System;
 using NAudio.Wave;
 using Serilog;
+using ShufuleiPet.Models;
 
 namespace ShufuleiPet.Services;
 
 /// <summary>口型律动服务抽象（DI 注册用）。</summary>
 public interface ILipSyncService : IDisposable
 {
-    /// <summary>功能开关（托盘勾选项，持久化到 autoexpression.json）：关闭时不采集。</summary>
-    bool Enabled { get; set; }
-
     /// <summary>music 状态信号（由自动表情事件驱动）：true 表示当前处于 music 状态。</summary>
     bool Active { get; set; }
 
@@ -56,7 +54,17 @@ public sealed class LipSyncService : ILipSyncService
 
     private static readonly ILogger Logger = Log.ForContext<LipSyncService>();
 
-    private readonly AutoExpressionConfig _config;
+    private readonly ShufuleiSettings settings;
+
+    public LipSyncService(ShufuleiSettings settings)
+    {
+        this.settings = settings;
+        // 开关属性变化（托盘/设置界面等任何写入方）→ 启停采集；持久化由 App 组合根统一处理
+        settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ShufuleiSettings.LipSyncEnabled)) SyncCapture();
+        };
+    }
 
     private WasapiLoopbackCapture? _capture;
 
@@ -87,25 +95,6 @@ public sealed class LipSyncService : ILipSyncService
 
     private bool _warnedFail;
 
-    public LipSyncService(AutoExpressionConfig config)
-    {
-        _config = config;
-    }
-
-    /// <inheritdoc />
-    public bool Enabled
-    {
-        get => _config.LipSyncEnabled;
-        set
-        {
-            if (_config.LipSyncEnabled == value) return;
-            _config.LipSyncEnabled = value;
-            try { _config.Save(); } catch (Exception ex) { Logger.Warning(ex, "save config failed"); }
-            Logger.Information("lip sync toggled enabled={Enabled}", value);
-            SyncCapture();
-        }
-    }
-
     /// <inheritdoc />
     public bool Active
     {
@@ -121,7 +110,7 @@ public sealed class LipSyncService : ILipSyncService
     /// <summary>按"开关 且 music 状态"决定是否采集。</summary>
     private void SyncCapture()
     {
-        var want = _config.LipSyncEnabled && _musicActive;
+        var want = settings.LipSyncEnabled && _musicActive;
         if (_capturing == want) return;
         _capturing = want;
         if (want) StartCapture();

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Services;
 
 namespace ShufuleiPet.Utils;
