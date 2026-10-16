@@ -120,8 +120,11 @@ public partial class App : Application
                 }
                 else
                 {
-                    petOps.SetAutoExpression(null);
-                    autoExpression.PollNow(); // 立刻轮询一次（命中游戏会马上切回来）
+                    // 先恢复自动检测当前命中的表情（如 music 命中时的"麦克风"）：
+                    // 手动模式期间检测状态没变，PollNow 内部会因状态去重直接返回、不会重发
+                    // ExpressionChanged，只调 PollNow 的话表情会一直卡在默认（null）
+                    petOps.SetAutoExpression(autoExpression.CurrentExpression);
+                    autoExpression.PollNow(); // 命中状态期间若已变化，这里会切到最新表情
                 }
                 ApplyGamepadDriving();
             }
