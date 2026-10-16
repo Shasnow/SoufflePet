@@ -6,35 +6,12 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.native;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
 
 namespace ShufuleiPet.Views;
-
-/// <summary>桌宠窗口的托盘菜单操作接口（WebView 版与原生版共用）。</summary>
-public interface IPetWindow
-{
-    void ToggleVisible();
-    void ResetModel();
-
-    /// <summary>自动表情联动：传表情名切换，传 null 恢复默认（无表情）。</summary>
-    void SetAutoExpression(string? name);
-
-    /// <summary>目光跟随开关：关闭时视线回正并停止跟随光标。</summary>
-    void SetGazeFollow(bool enabled);
-
-    /// <summary>帧率显示开关：窗口右上角 当前/上限 叠加层的显示与否。</summary>
-    void SetFpsVisible(bool visible);
-
-    /// <summary>
-    /// 手柄参数驱动开关：开启后把手柄/键鼠输入写进模型的摇杆与按键参数。
-    /// 只在模型显示手柄时开启（自动表情命中游戏，或托盘手动开启手柄模式）。
-    /// </summary>
-    void SetGamepadEnabled(bool enabled);
-
-    void ExitForShutdown();
-}
 
 /// <summary>原生渲染版桌宠窗口：Live2DCSharpSDK + OpenGL，不依赖 WebView。</summary>
 public class NativePetWindow : Window, IPetWindow
@@ -50,7 +27,7 @@ public class NativePetWindow : Window, IPetWindow
     /// 帧率显示叠加层的上限：自续帧模式下实际节奏由显示器 vsync 决定，
     /// 因此上限就是主显示器刷新率（查询失败为 0，此时只显示当前帧率）。
     /// </summary>
-    private readonly int _fpsCap = 0;
+    private readonly int _fpsCap;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
@@ -91,7 +68,7 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
-    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad)
+    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad, ShufuleiSettings settings)
     {
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
@@ -104,7 +81,8 @@ public class NativePetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _control = new NativePetControl();
-        _control.SetFpsCap(_fpsCap); // 帧率上限：vsync 分频跳帧，实际帧率 = min(vsync, 上限)
+        _control.SetFpsCap(settings.FpsCap); // 帧率上限：vsync 分频跳帧，实际帧率 = min(vsync, 上限)
+        _fpsCap = settings.FpsCap;
 
         // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
         _fpsText = new TextBlock
