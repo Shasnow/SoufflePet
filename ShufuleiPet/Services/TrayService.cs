@@ -67,6 +67,10 @@ public sealed class TrayService(
         var fpsItem = NewToggle("显示帧率", settings.IsShowFps,
             v => settings.IsShowFps = v);
 
+        // 开机自启：写入/移除 HKCU Run 注册表项（副作用统一由 App 订阅处理）
+        var autoStartItem = NewToggle("开机自启", settings.StartWithWindows,
+            v => settings.StartWithWindows = v);
+
         var exitItem = new NativeMenuItem("退出");
         exitItem.Click += (_, _) =>
         {
@@ -82,6 +86,7 @@ public sealed class TrayService(
         menu.Items.Add(gamepadItem);
         menu.Items.Add(manualPadItem);
         menu.Items.Add(fpsItem);
+        menu.Items.Add(autoStartItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
 

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using ShufuleiPet.Models;
 using ShufuleiPet.Services;
+using ShufuleiPet.Utils;
 using ShufuleiPet.Views;
 
 namespace ShufuleiPet;
@@ -103,8 +104,25 @@ public partial class App : Application
                     case nameof(ShufuleiSettings.GamepadManual):
                         ApplyGamepadManual();
                         break;
+                    case nameof(ShufuleiSettings.StartWithWindows):
+                        ApplyAutoStart();
+                        break;
                 }
             };
+
+            // 开机自启：把设置写进/移出 HKCU Run 注册表项（失败只记警告，不影响应用运行）
+            void ApplyAutoStart()
+            {
+                try
+                {
+                    AutoStart.SetEnabled(settings.StartWithWindows);
+                    Logger.Debug("auto start applied enabled={Enabled}", settings.StartWithWindows);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "apply auto start failed");
+                }
+            }
 
             // 手柄驱动开关重算：总开关开 且（手动模式 或 当前正处于"手柄"表情）
             void ApplyGamepadDriving() =>
@@ -133,6 +151,7 @@ public partial class App : Application
             petOps.SetGazeFollow(settings.GazeFollowEnabled);
             petOps.SetFpsVisible(settings.IsShowFps);
             if (settings.GamepadManual) ApplyGamepadManual();
+            ApplyAutoStart(); // 开机自启：启动时按设置重写一次注册表项（exe 移动后自动刷新路径）
 
             try
             {
