@@ -215,7 +215,12 @@ public class WebViewPetWindow : Window, IPetWindow
         var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
         if (screen is null) return;
         var wa = screen.WorkingArea;
-        Position = new PixelPoint(wa.Right - (int)Bounds.Width - 48, wa.Bottom - (int)Bounds.Height - 24);
+        // Position 是物理像素，Bounds 是 DIP，必须乘 RenderScaling（125% 屏 → 1.25）：
+        // 否则按 DIP 尺寸算出的定位偏小，窗口底部/右侧会超出显示器
+        var scaling = RenderScaling <= 0 ? 1.0 : RenderScaling;
+        Position = new PixelPoint(
+            wa.Right - (int)(Bounds.Width * scaling),
+            wa.Bottom - (int)(Bounds.Height * scaling));
     }
 
     /// <summary>
