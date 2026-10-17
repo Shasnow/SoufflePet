@@ -49,6 +49,9 @@ public class NativePetWindow : Window, IPetWindow
     /// <summary>是否已完成首次定位（Opened 每次显示都会触发，位置只设一次）。</summary>
     private bool _positioned;
 
+    /// <summary>显示器电源状态（false=屏已关）：关屏期间停渲染链，亮屏恢复。</summary>
+    private bool _displayOn = true;
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
@@ -94,6 +97,7 @@ public class NativePetWindow : Window, IPetWindow
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) =>
         {
+            if (!_displayOn) return; // 关屏期间停掉输入轮询/统计（渲染链同样已停）
             TrackGlobalCursor();
             UpdateClickThrough();
             UpdateFps();                                        // 每满 1 秒刷新一次帧率显示
@@ -103,13 +107,11 @@ public class NativePetWindow : Window, IPetWindow
         };
         _renderTimer.Start();
 
-        // 窗口隐藏时停掉自续帧（否则看不见也在满速渲染），重新显示时立即拉起
+        // 窗口可见性 或 显示器电源：两者都允许才拉起渲染链（关屏/隐藏时停，恢复时立即拉起）。
+        // 用 ControlRenderLoop 而非直接读 IsVisible，状态门控集中在一处，避免两条路径互相覆盖
         PropertyChanged += (_, e) =>
         {
-            if (e.Property == IsVisibleProperty)
-            {
-                _control.SetRenderLoopEnabled(IsVisible);
-            }
+            if (e.Property == IsVisibleProperty) ControlRenderLoop();
         };
 
         // 交互：
@@ -312,6 +314,18 @@ public class NativePetWindow : Window, IPetWindow
     {
         _control.SetGamepadEnabled(enabled);
     }
+
+    /// <inheritdoc />
+    public void SetDisplayPower(bool on)
+    {
+        if (_displayOn == on) return;
+        _displayOn = on;
+        Logger.Information("display power render={On}", on);
+        ControlRenderLoop();
+    }
+
+    /// <summary>按"窗口可见 且 显示器亮"决定渲染链启停：关屏/隐藏都停，两者都恢复才拉起。</summary>
+    private void ControlRenderLoop() => _control.SetRenderLoopEnabled(IsVisible && _displayOn);
 
     /// <summary>帧率统计：取走渲染层这一秒渲染的帧数，刷新显示。</summary>
     private void UpdateFps()

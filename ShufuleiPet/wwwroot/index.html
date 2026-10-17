@@ -242,6 +242,21 @@ async function main() {
     fpsEl.style.display = visible ? 'block' : 'none';
   };
 
+  // 显示器电源（宿主注册 WM_POWERBROADCAST → GUID_CONSOLE_DISPLAY_STATE）：
+  // 关屏期间停掉 app.ticker（驱动渲染与模型内部 update）与 Ticker.shared（驱动
+  // 模型参数累积、水印部件压制），页面完全不绘制、不推进模型；亮屏恢复。
+  // pixi 的 deltaMS 有 100ms 上限，恢复时首帧不会时间跳变。
+  // 若该指令到达早于 ready（模型加载中），宿主会在收到 ready 后重放状态，
+  // 保证最终停在正确的电源状态。
+  window.onHostSetRenderPause = (paused) => {
+    try {
+      if (paused) { app.ticker.stop(); PIXI.Ticker.shared.stop(); }
+      else { app.ticker.start(); PIXI.Ticker.shared.start(); }
+    } catch (_) { /* 尚未初始化时忽略，ready 重放兜底 */ }
+    // 回执：把实际生效的 ticker 状态报给宿主，便于日志确认停/恢复已执行
+    tellHost({ type: 'renderpause', paused: !!paused, app: app.ticker.started, shared: PIXI.Ticker.shared.started });
+  };
+
   // 宿主托盘菜单"重置模型大小和位置"：缩放回 1，再按窗口重新居中
   window.onHostResetModel = () => { zoom = 1; layout(); };
 

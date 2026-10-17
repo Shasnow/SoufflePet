@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Serilog;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
 
@@ -18,6 +19,8 @@ namespace ShufuleiPet.Views;
 /// </summary>
 public class WebViewPetWindow : Window, IPetWindow
 {
+    private static readonly ILogger Logger = Log.ForContext<WebViewPetWindow>();
+
     private readonly NativeWebView _webView;
     private bool _exiting;
 
@@ -39,6 +42,9 @@ public class WebViewPetWindow : Window, IPetWindow
 
     /// <summary>是否已完成首次定位（Opened 每次显示都会触发，位置只设一次）。</summary>
     private bool _positioned;
+
+    /// <summary>显示器电源状态（false=屏已关）：推给页面停/启 ticker。</summary>
+    private bool _displayOn = true;
 
     /// <summary>帧率显示开关（托盘勾选项）：推给页面控制右上角叠加层显隐。</summary>
     private bool _fpsVisible = true;
@@ -101,6 +107,7 @@ public class WebViewPetWindow : Window, IPetWindow
         _cursorTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _cursorTimer.Tick += (_, _) =>
         {
+            if (!_displayOn) return; // 关屏期间不向页面转发输入/口型（页面 ticker 也已停）
             ForwardGlobalCursor();
             ForwardLipSync();
             ForwardGamepad();
@@ -337,6 +344,38 @@ public class WebViewPetWindow : Window, IPetWindow
         PushGamepadEnabled();
     }
 
+    /// <inheritdoc />
+    public void SetDisplayPower(bool on)
+    {
+        if (_displayOn == on) return;
+        _displayOn = on;
+        Logger.Information("display power render={On}", on);
+        PushDisplayPower();
+    }
+
+    /// <summary>把显示器电源状态推给页面（页面未加载完成时忽略，等 ready 消息重放）。</summary>
+    private async void PushDisplayPower()
+    {
+        try
+        {
+            // await 拿到真实执行结果：fire-and-forget 会丢掉脚本执行异常，页面没生效也无从得知。
+            // 布尔必须手动转小写：C# 插值生成 True/False，JS 里是未定义标识符直接抛错。
+            // IIFE 返回诊断串区分三种情况：nofunc=页面未定义该函数（旧缓存/未加载）、
+            // ok=已执行、err:=执行抛错
+            var arg = _displayOn ? "false" : "true";
+            var r = await _webView.InvokeScript(
+                "(function(){ if (typeof window.onHostSetRenderPause !== 'function') return 'nofunc';" +
+                $" try {{ window.onHostSetRenderPause({arg}); return 'ok'; }}" +
+                " catch (e) { return 'err:' + e.message; } })()");
+            Logger.Debug("render pause push result={Result}", r);
+        }
+        catch (Exception ex)
+        {
+            // 页面尚未加载完成时忽略，等 ready 消息重放
+            Logger.Warning(ex, "render pause push failed");
+        }
+    }
+
     /// <summary>把驱动开关推给页面（页面未加载完成时忽略，等 ready 消息重放）。</summary>
     private void PushGamepadEnabled()
     {
@@ -358,6 +397,7 @@ public class WebViewPetWindow : Window, IPetWindow
         try
         {
             if (string.IsNullOrEmpty(e.Body)) return;
+            Logger.Debug("web message body={Body}", e.Body);
             using var doc = JsonDocument.Parse(e.Body);
             if (!doc.RootElement.TryGetProperty("type", out var type)) return;
             var kind = type.GetString();
@@ -368,6 +408,17 @@ public class WebViewPetWindow : Window, IPetWindow
                 PushGazeFollow();
                 PushFpsVisible();
                 PushGamepadEnabled();
+                PushDisplayPower();
+                return;
+            }
+            if (kind == "renderpause")
+            {
+                // 页面回执：ticker 实际停/启状态（app/shared 分别是渲染与模型更新 ticker）
+                if (!doc.RootElement.TryGetProperty("paused", out var paused)) return;
+                var appStarted = doc.RootElement.TryGetProperty("app", out var a) && a.ValueKind == JsonValueKind.True;
+                var sharedStarted = doc.RootElement.TryGetProperty("shared", out var s) && s.ValueKind == JsonValueKind.True;
+                Logger.Information("page render pause applied={Paused} appTicker={App} sharedTicker={Shared}",
+                    paused.ValueKind == JsonValueKind.True, appStarted, sharedStarted);
                 return;
             }
             if (kind == "hit")

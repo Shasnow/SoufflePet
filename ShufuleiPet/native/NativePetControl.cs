@@ -251,10 +251,13 @@ public class NativePetControl : OpenGlControlBase
             var vpH = (int)(Bounds.Height * App.RenderScaling);
             gl.Viewport(0, 0, vpW, vpH);
 
-            // 帧步长：按真实经过时间推进动作/物理/眨眼，帧率高低不影响动画速度
+            // 帧步长：按真实经过时间推进动作/物理/眨眼，帧率高低不影响动画速度。
+            // 恢复钳位：显示器关闭/窗口隐藏期间渲染链停摆，恢复后首帧的经过时间可达
+            // 数分钟，直接当步长会让动作瞬间跳完（物理/眨眼状态突变），夹回正常步长
             var now = DateTime.Now;
             var span = (float)(now - _last).TotalSeconds;
             _last = now;
+            if (span > 0.25f) span = 1f / 60f;
             _frameSpan = span > 0f ? span : 1f / 60f; // 供手柄值平滑使用（帧率无关）
 
             // 口型律动：渲染前把最新音量写给模型，LAppModel.Update 的口型同步代码块

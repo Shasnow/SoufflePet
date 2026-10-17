@@ -47,6 +47,7 @@ public partial class App : Application
             services.AddSingleton<ILocalFileServer, LocalFileServer>();
             services.AddSingleton<ILipSyncService, LipSyncService>();
             services.AddSingleton<IGamepadService, GamepadService>();
+            services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
@@ -162,6 +163,14 @@ public partial class App : Application
             {
                 Logger.Error(ex, "window.Show() failed");
             }
+
+            // 显示器电源事件：复用桌宠窗口句柄注册，把回调挂进该窗口的 WndProc 钩子链。
+            // 必须在 Show() 之后启动——依赖已创建的 HWND；事件在 UI 线程消息泵中触发，
+            // 直接调用即可。关屏时无人观看，停掉渲染链省 CPU/GPU（微软 Power Setting
+            // GUIDs 文档的推荐用法）；亮屏恢复
+            var power = _provider.GetRequiredService<IPowerNotificationService>();
+            power.DisplayPowerChanged += on => petOps.SetDisplayPower(on);
+            power.Start(window);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
 

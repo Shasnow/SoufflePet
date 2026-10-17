@@ -21,5 +21,8 @@ public interface IPetWindow
     /// </summary>
     void SetGamepadEnabled(bool enabled);
 
+    /// <summary>显示器电源状态（true=亮屏，false=屏关闭）：关屏时停止渲染，亮屏恢复。</summary>
+    void SetDisplayPower(bool on);
+
     void ExitForShutdown();
 }

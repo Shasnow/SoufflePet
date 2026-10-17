@@ -97,7 +97,7 @@ public class ShufuleiSettings : INotifyPropertyChanged
         set => Set(ref field, value);
     }
 
-    [Description("是否开机自启动（写入当前用户 HKCU\\...\\Run 注册表项）")]
+    [Description("是否开机自启动（写入当前用户 HKCU/.../Run 注册表项）")]
     public bool StartWithWindows
     {
         get;
