@@ -75,7 +75,6 @@ public abstract class CubismClippingManager
     //（实测每次调用约 50ns，41 个遮罩组 × 3 次/组即占约 6µs/帧）
     private unsafe int* _drawableVertexCounts;
     private unsafe Vector2** _drawableVertexPositions;
-    private unsafe byte* _drawableDynamicFlags;
 
     public CubismClippingManager()
     {
@@ -109,7 +108,6 @@ public abstract class CubismClippingManager
         //（模型实例的 Model 指针仅在构造时赋值，其内部数组在实例存活期间不迁移）
         _drawableVertexCounts = CubismCore.GetDrawableVertexCounts(model.Model);
         _drawableVertexPositions = CubismCore.GetDrawableVertexPositions(model.Model);
-        _drawableDynamicFlags = CubismCore.GetDrawableDynamicFlags(model.Model);
 
         // レンダーテクスチャのクリアフラグの設定
         for (int i = 0; i < RenderTextureCount; ++i)
@@ -483,7 +481,6 @@ public abstract class CubismClippingManager
         // Initialize 时缓存的原生数组指针，循环内按索引读取
         int* vertexCounts = _drawableVertexCounts;
         Vector2** vertexPositions = _drawableVertexPositions;
-        byte* dynamicFlags = _drawableDynamicFlags;
 
         var clippedList = clippingContext.ClippedDrawableIndexList;
         int clippedDrawCount = clippedList.Count;
@@ -492,10 +489,10 @@ public abstract class CubismClippingManager
             // マスクを使用する描画オブジェクトの描画される矩形を求める
             int drawableIndex = clippedList[clippedDrawableIndex];
 
-            // 不可见的被裁剪对象本帧不会被绘制（DoDrawModel 按 IsVisible 跳过整个 drawable），
-            // 不参与总包围盒；恢复可见后的下一帧每帧重算会自然并入，不会漏出包围盒
-            if ((dynamicFlags[drawableIndex] & CsmEnum.CsmIsVisible) == 0) continue;
-
+            // 注意：此处不可按 IsVisible 跳过不可见对象。该跳过会使遮罩组的
+            // IsUsing/usingClipCount/AllClippedDrawRect 与消费端实际绘制判断产生错位，
+            // 导致翅膀等被遮罩部件贴图渲染异常（白翅）。包围盒必须与原版一致地
+            // 纳入组内全部对象，每帧重算本身就是最新状态，无需按可见性过滤
             int drawableVertexCount = vertexCounts[drawableIndex];
             var drawableVertexes = (float*)vertexPositions[drawableIndex];
 
