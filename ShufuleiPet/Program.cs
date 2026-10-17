@@ -1,9 +1,9 @@
-using Avalonia;
-using Serilog;
 using System;
 using System.IO;
+using Avalonia;
+using Serilog;
 
-namespace ShufuleiPet.Views;
+namespace ShufuleiPet;
 
 class Program
 {
@@ -50,9 +50,6 @@ class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
-#if DEBUG
-            .WithDeveloperTools()
-#endif
             .WithInterFont()
             .LogToTrace();
 }
