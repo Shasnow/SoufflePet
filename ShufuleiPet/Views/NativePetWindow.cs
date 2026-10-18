@@ -117,7 +117,6 @@ public class NativePetWindow : Window, IPetWindow
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
         // - 左键单击 → 随机切换表情
-        // - 右键单击 → 重播 Idle 动作
         // - 滚轮 → 缩放模型
         // - 中键按住拖动 → 移动模型在窗口内的位置（不移动窗口）
         Point? pressPoint = null;
@@ -175,12 +174,11 @@ public class NativePetWindow : Window, IPetWindow
                 e.Pointer.Capture(null);
                 return;
             }
+            // 右键已无绑定功能，即便左键按住期间误触右键释放也不响应
+            if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonReleased) return;
             if (pressPoint is null) return;
             pressPoint = null;
-            if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonReleased)
-                _control.ReplayMotion();
-            else
-                _control.TapRandomExpression();
+            _control.TapRandomExpression();
         };
         PointerWheelChanged += (_, e) =>
         {

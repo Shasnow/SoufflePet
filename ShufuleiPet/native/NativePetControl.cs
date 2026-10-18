@@ -537,12 +537,6 @@ public class NativePetControl : OpenGlControlBase
             model.GetCanvasWidth(), model.GetCanvasHeight());
     }
 
-    /// <summary>右键单击：重播 Idle 动作（该模型只带 Idle 这一个动作组）。</summary>
-    public void ReplayMotion()
-    {
-        _model?.StartMotion("Idle", 0, MotionPriority.PriorityNormal, (_, _) => PlayIdle());
-    }
-
     /// <summary>设置口型律动音量（0~1），驱动模型嘴部开合（ParamMouthOpenY）。</summary>
     public void SetLipSync(float value)
     {
