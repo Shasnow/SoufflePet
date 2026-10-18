@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using System.Text.Json;
@@ -44,7 +45,9 @@ public class NativePetControl : OpenGlControlBase
     private bool _inited;
 
     private LAppDelegateOpenGL? _lapp;
-    private DateTime _last;
+
+    /// <summary>上一帧的 Stopwatch 时间戳（QPC，单调且亚微秒分辨率，不受 NTP 校时拨动影响）。</summary>
+    private long _lastStamp;
 
     /// <summary>口型律动音量（0~1）：由窗口从 ILipSyncService 每帧推送，渲染前写给模型的 LipSyncValue。</summary>
     private volatile float _lipSyncValue;
@@ -96,11 +99,17 @@ public class NativePetControl : OpenGlControlBase
     /// <summary>渲染帧计数（渲染线程累加，窗口层每秒取走一次用于统计 FPS）。</summary>
     private int _renderedFrames;
 
-    /// <summary>光标下是否有模型的可见像素（每帧渲染后读取 1 像素 alpha 判定，供点击穿透用）。</summary>
+    /// <summary>光标下是否有模型的可见像素（渲染后定期读取 1 像素 alpha 判定，供点击穿透用）。</summary>
     public bool IsPointerOverModel { get; private set; }
 
+    /// <summary>点击穿透探测间隔（毫秒）：满帧渲染时不必每帧同步读回。</summary>
+    private const long ProbeIntervalMs = 100;
+
+    /// <summary>上次点击穿透探测的帧时间戳（Stopwatch 刻度，渲染线程独占读写，无需加锁）。</summary>
+    private long _lastProbeStamp;
+
     /// <summary>是否显示模型自带的水印层（默认关闭）。</summary>
-    public bool ShowWatermark { get; set; }
+    private const bool ShowWatermark = false;
 
     /// <summary>取走自上次调用以来渲染的帧数并清零（跨线程安全）。</summary>
     public int TakeRenderedFrames()
@@ -201,7 +210,7 @@ public class NativePetControl : OpenGlControlBase
             if (!ShowWatermark)
                 _model?.Model.SetPartOpacity("Part13", 0f);
             // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
-            if (_model != null) _model.GamepadValueUpdate = ApplyGamepadParams;
+            _model?.GamepadValueUpdate = ApplyGamepadParams;
 
             // 测量双眼中心
             MeasureEyeCenter(_model?.Model);
@@ -230,7 +239,7 @@ public class NativePetControl : OpenGlControlBase
                 _model?.EnableFaceTracking = _pendingGaze;
             }
 
-            _last = DateTime.Now;
+            _lastStamp = Stopwatch.GetTimestamp();
             Logger.Debug("OnOpenGlInit done");
         }
         catch (Exception ex)
@@ -254,9 +263,9 @@ public class NativePetControl : OpenGlControlBase
             // 帧步长：按真实经过时间推进动作/物理/眨眼，帧率高低不影响动画速度。
             // 恢复钳位：显示器关闭/窗口隐藏期间渲染链停摆，恢复后首帧的经过时间可达
             // 数分钟，直接当步长会让动作瞬间跳完（物理/眨眼状态突变），夹回正常步长
-            var now = DateTime.Now;
-            var span = (float)(now - _last).TotalSeconds;
-            _last = now;
+            var now = Stopwatch.GetTimestamp();
+            var span = (float)Stopwatch.GetElapsedTime(_lastStamp, now).TotalSeconds;
+            _lastStamp = now;
             if (span > 0.25f) span = 1f / 60f;
             _frameSpan = span > 0f ? span : 1f / 60f; // 供手柄值平滑使用（帧率无关）
 
@@ -270,7 +279,13 @@ public class NativePetControl : OpenGlControlBase
 
             _lapp.Run(span);
 
-            ProbeCursorPixel(fb, vpW, vpH);
+            // 点击穿透探测不随满帧渲染走：
+            // glReadPixels 是同步读回，每帧都做会强制排空 GPU 管线，高刷屏下与渲染抢资源
+            if (now - _lastProbeStamp >= Stopwatch.Frequency * ProbeIntervalMs / 1000)
+            {
+                _lastProbeStamp = now;
+                ProbeCursorPixel(fb, vpW, vpH);
+            }
 
             Interlocked.Increment(ref _renderedFrames);
             _frames++;

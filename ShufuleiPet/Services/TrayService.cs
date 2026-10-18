@@ -59,8 +59,8 @@ public sealed class TrayService(
         var gamepadItem = NewToggle("输入联动", settings.GamepadEnabled,
             v => settings.GamepadEnabled = v);
 
-        // 常显手柄：不等待游戏检测，直接显示手柄并驱动（没打游戏时调试/演示用）
-        var manualPadItem = NewToggle("常显手柄", settings.GamepadManual,
+        // 游戏模式：不等待游戏检测，直接进入游戏模式并驱动（没打游戏时调试/演示用）
+        var manualPadItem = NewToggle("游戏模式", settings.GamepadManual,
             v => settings.GamepadManual = v);
 
         // 帧率显示：窗口右上角帧率叠加层
@@ -80,6 +80,7 @@ public sealed class TrayService(
 
         menu.Items.Add(toggleItem);
         menu.Items.Add(resetItem);
+        menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
         menu.Items.Add(gazeItem);

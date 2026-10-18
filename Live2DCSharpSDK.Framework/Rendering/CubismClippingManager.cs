@@ -491,7 +491,7 @@ public abstract class CubismClippingManager
 
             // 注意：此处不可按 IsVisible 跳过不可见对象。该跳过会使遮罩组的
             // IsUsing/usingClipCount/AllClippedDrawRect 与消费端实际绘制判断产生错位，
-            // 导致翅膀等被遮罩部件贴图渲染异常（白翅）。包围盒必须与原版一致地
+            // 导致被遮罩部件贴图渲染异常。包围盒必须与原版一致地
             // 纳入组内全部对象，每帧重算本身就是最新状态，无需按可见性过滤
             int drawableVertexCount = vertexCounts[drawableIndex];
             var drawableVertexes = (float*)vertexPositions[drawableIndex];
