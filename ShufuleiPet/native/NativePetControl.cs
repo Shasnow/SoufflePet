@@ -12,7 +12,6 @@ using Avalonia.OpenGL.Controls;
 using Live2DCSharpSDK.App;
 using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Model;
-using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
@@ -142,25 +141,11 @@ public class NativePetControl : OpenGlControlBase
         _hwnd = TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
     }
 
-    /// <summary>暴露给外部：切换表情（参数为 model3.json 中的表情名，如 "哭哭"）。</summary>
-    public void SetExpression(string name)
-    {
-        _model?.SetExpression(name);
-    }
-
     /// <summary>自动表情联动入口：传表情名切换，传 null 恢复默认（无表情）。</summary>
-    public void SetAutoExpression(string? name)
+    public void SetExpression(string? name)
     {
-        if (_model == null)
-        {
-            // 模型在 OnOpenGlInit 才加载，先缓存，加载完成后补设
-            _pendingExpression = name;
-            _hasPendingExpression = true;
-            return;
-        }
-
-        if (name == null) _model.ResetExpression();
-        else _model.SetExpression(name);
+        if (name == null) _model?.ResetExpression();
+        else _model?.SetExpression(name);
     }
 
     /// <summary>目光跟随开关：转发给模型的 EnableFaceTracking；模型加载前先缓存。</summary>
@@ -303,12 +288,6 @@ public class NativePetControl : OpenGlControlBase
                 Logger.Error(ex, "OnOpenGlRender exception");
             }
         }
-    }
-
-    // Idle 动作循环播放（播完自动重播）
-    private void PlayIdle()
-    {
-        _model?.StartMotion("Idle", 0, MotionPriority.PriorityIdle, (_, _) => PlayIdle());
     }
 
     protected override void OnOpenGlDeinit(GlInterface gl)

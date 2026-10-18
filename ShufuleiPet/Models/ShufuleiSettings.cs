@@ -41,6 +41,9 @@ public class ShufuleiSettings : INotifyPropertyChanged
         set => Set(ref field, value);
     } = true;
 
+    /// <summary>
+    /// 自动表情轮询间隔（秒）
+    /// </summary>
     public float AutoExpressionPollSeconds
     {
         get;
@@ -60,7 +63,7 @@ public class ShufuleiSettings : INotifyPropertyChanged
     } = "麦克风";
 
     [Description("自动表情应用列表")]
-    public List<AppEntry> AutoExpressionApps { get; set; } = AppEntry.BuildDefaults();
+    public List<AppEntry> AutoExpressionApps { get; init; } = AppEntry.BuildDefaults();
 
     [Description("是否启用口型律动（自动表情处于 music 状态时，系统播放声音驱动嘴部开合）")]
     public bool LipSyncEnabled
@@ -85,6 +88,13 @@ public class ShufuleiSettings : INotifyPropertyChanged
 
     [Description("是否启用常显手柄（不等待游戏检测，直接显示手柄并驱动）")]
     public bool GamepadManual
+    {
+        get;
+        set => Set(ref field, value);
+    }
+
+    [Description("是否启用常显音乐模式（不等待音乐检测，直接显示音乐表情并驱动口型律动）")]
+    public bool MusicManual
     {
         get;
         set => Set(ref field, value);

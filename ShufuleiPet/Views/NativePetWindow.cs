@@ -289,9 +289,9 @@ public class NativePetWindow : Window, IPetWindow
     }
 
     /// <summary>自动表情联动：转发给控制层切换/清除表情。</summary>
-    public void SetAutoExpression(string? name)
+    public void SetExpression(string? name)
     {
-        _control.SetAutoExpression(name);
+        _control.SetExpression(name);
     }
 
     /// <summary>托盘菜单：目光跟随开关（关闭时视线回正并停止跟随光标）。</summary>

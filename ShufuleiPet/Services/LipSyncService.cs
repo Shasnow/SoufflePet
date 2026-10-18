@@ -8,8 +8,14 @@ namespace ShufuleiPet.Services;
 /// <summary>口型律动服务抽象（DI 注册用）。</summary>
 public interface ILipSyncService : IDisposable
 {
-    /// <summary>music 状态信号（由自动表情事件驱动）：true 表示当前处于 music 状态。</summary>
-    bool Active { get; set; }
+    /// <summary>
+    /// 开始口型律动：进入 music 状态时调用（自动检测命中或手动音乐模式）。
+    /// 重复调用无副作用；实际是否开始采集还受 LipSyncEnabled 开关控制。
+    /// </summary>
+    void Start();
+
+    /// <summary>停止口型律动：离开 music 状态时调用。重复调用无副作用；停用即闭嘴并释放音频设备。</summary>
+    void Stop();
 
     /// <summary>平滑后的音量（0~1），驱动 ParamMouthOpenY；采集线程写、渲染/UI 线程读。</summary>
     float CurrentLevel { get; }
@@ -54,11 +60,11 @@ public sealed class LipSyncService : ILipSyncService
 
     private static readonly ILogger Logger = Log.ForContext<LipSyncService>();
 
-    private readonly ShufuleiSettings settings;
+    private readonly ShufuleiSettings _settings;
 
     public LipSyncService(ShufuleiSettings settings)
     {
-        this.settings = settings;
+        _settings = settings;
         // 开关属性变化（托盘/设置界面等任何写入方）→ 启停采集；持久化由 App 组合根统一处理
         settings.PropertyChanged += (_, e) =>
         {
@@ -90,27 +96,31 @@ public sealed class LipSyncService : ILipSyncService
     /// <summary>实际是否正在采集（Enabled 且 Active）。</summary>
     private bool _capturing;
 
-    /// <summary>music 状态信号（自动表情事件驱动）。</summary>
+    /// <summary>music 状态信号（自动表情事件驱动）：Start/Stop 由 App 组合根按检测状态调用。</summary>
     private bool _musicActive;
 
     private bool _warnedFail;
 
     /// <inheritdoc />
-    public bool Active
+    public void Start()
     {
-        get => _musicActive;
-        set
-        {
-            if (_musicActive == value) return;
-            _musicActive = value;
-            SyncCapture();
-        }
+        if (_musicActive) return;
+        _musicActive = true;
+        SyncCapture();
+    }
+
+    /// <inheritdoc />
+    public void Stop()
+    {
+        if (!_musicActive) return;
+        _musicActive = false;
+        SyncCapture();
     }
 
     /// <summary>按"开关 且 music 状态"决定是否采集。</summary>
     private void SyncCapture()
     {
-        var want = settings.LipSyncEnabled && _musicActive;
+        var want = _settings.LipSyncEnabled && _musicActive;
         if (_capturing == want) return;
         _capturing = want;
         if (want) StartCapture();

@@ -143,7 +143,7 @@ public class WebViewPetWindow : Window, IPetWindow
     }
 
     /// <summary>自动表情联动：缓存状态后转发给页面；页面加载完成前先缓存，收到 ready 后重放。</summary>
-    public void SetAutoExpression(string? name)
+    public void SetExpression(string? name)
     {
         _autoExpression = name;
         PushAutoExpression();

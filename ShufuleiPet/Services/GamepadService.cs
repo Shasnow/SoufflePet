@@ -33,8 +33,16 @@ public sealed class GamepadState
     /// <summary>本轮是否检测到真实手柄（XInput 连接成功）。</summary>
     public bool HasGamepad;
 
-    /// <summary>本轮是否存在有效输入（有手柄，或有键盘/鼠标输入），供调用方决定是否驱动参数。</summary>
-    public bool AnyInput;
+    /// <summary>清零全部输入字段（停止轮询时调用，避免下游读到残留的偏转/按键）。</summary>
+    public void Reset()
+    {
+        LStickX = LStickY = RStickX = RStickY = 0f;
+        LTrigger = RTrigger = 0f;
+        LShoulder = RShoulder = LStickButton = RStickButton = false;
+        ButtonA = ButtonB = ButtonX = ButtonY = false;
+        DPadX = DPadY = 0;
+        HasGamepad = false;
+    }
 }
 
 /// <summary>手柄输入服务抽象（DI 注册）。</summary>
@@ -42,6 +50,19 @@ public interface IGamepadService : IDisposable
 {
     /// <summary>当前输入状态（就地更新的共享实例，只读字段）。</summary>
     GamepadState State { get; }
+
+    /// <summary>
+    /// 开始轮询手柄/键鼠输入：模型显示手柄时调用（自动命中游戏，或托盘手动开启游戏模式）。
+    /// 重复调用无副作用；恢复时重置平滑值与光标基准，不从旧值跳变。
+    /// </summary>
+    void Start();
+
+    /// <summary>
+    /// 停止轮询并清零输入状态：模型不显示手柄时调用。
+    /// 重复调用无副作用——不驱动时没有必要每 33ms 查一遍 XInput/键鼠/光标。
+    /// 与窗口侧参数驱动（IPetWindow.SetGamepadEnabled）同源，由 App 组合根统一调用。
+    /// </summary>
+    void Stop();
 }
 
 /// <summary>
@@ -52,6 +73,8 @@ public interface IGamepadService : IDisposable
 /// 十字键保持原位不参与对调。
 /// 轮询周期 33ms（约 30Hz）：对桌面宠物这种"跟着动"的输入已经足够，
 /// 且每轮只有几次 P/Invoke（XInputGetState / GetAsyncKeyState / GetCursorPos），资源占用可忽略。
+/// 轮询仅在 Start() 后进行、Stop() 后完全停转，不占 CPU；恢复时重置平滑值与光标基准，
+/// 避免带着旧值跳变。
 /// </summary>
 public sealed class GamepadService : IGamepadService
 {
@@ -61,6 +84,37 @@ public sealed class GamepadService : IGamepadService
     public GamepadState State { get; } = new();
 
     private readonly DispatcherTimer _timer;
+
+    /// <summary>驱动开关（false = 停转定时器，不轮询）。</summary>
+    private bool _active;
+
+    /// <inheritdoc />
+    public void Start()
+    {
+        if (_active) return;
+        _active = true;
+        ResetPollState(); // 丢弃旧光标基准与平滑值，恢复首帧不从残留值跳变
+        _timer.Start();
+        Logger.Information("gamepad polling started");
+    }
+
+    /// <inheritdoc />
+    public void Stop()
+    {
+        if (!_active) return;
+        _active = false;
+        _timer.Stop();
+        State.Reset(); // 清零，避免残留的偏转/按键被下游读到
+        Logger.Information("gamepad polling stopped");
+    }
+
+    /// <summary>复位轮询内部状态（光标基准与平滑值）：启动时调用，避免带着旧值跳变。</summary>
+    private void ResetPollState()
+    {
+        _mouseValid = false;
+        _smoothMouseX = _smoothMouseY = 0f;
+        _smoothKbX = _smoothKbY = 0f;
+    }
 
     /// <summary>已连接的手柄序号（-1 = 尚未找到）。优先查它，避免每轮扫描 4 个槽位。</summary>
     private int _padIndex = -1;
@@ -91,7 +145,7 @@ public sealed class GamepadService : IGamepadService
     {
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _timer.Tick += (_, _) => Poll();
-        _timer.Start();
+        // 不在此处启动：轮询由 Start()/Stop() 按需启停，见方法实现
     }
 
     /// <summary>轮询一轮：真实手柄 → 键鼠回退，结果写进 State。</summary>
@@ -104,7 +158,6 @@ public sealed class GamepadService : IGamepadService
             // 物理右侧同理映射到模型左侧（十字键与 ABXY 保持原位，不参与对调）。
             // 死区常量跟随物理轴：左摇杆轴用左摇杆死区，右摇杆轴用右摇杆死区。
             State.HasGamepad = true;
-            State.AnyInput = true;
             State.LStickX = NormAxis(pad.SThumbRX, RightThumbDeadZone);
             State.LStickY = NormAxis(pad.SThumbRY, RightThumbDeadZone);
             State.RStickX = NormAxis(pad.SThumbLX, LeftThumbDeadZone);
@@ -156,7 +209,6 @@ public sealed class GamepadService : IGamepadService
         s.RStickY = _smoothKbY;
 
         // ---- 左摇杆：鼠标位移 ----
-        var mouseActive = false;
         if (GetCursorPos(out var pt))
         {
             if (_mouseValid)
@@ -164,7 +216,7 @@ public sealed class GamepadService : IGamepadService
                 // 位移越大偏转越强，停住即回中（模拟松手回弹）
                 var tLx = Math.Clamp((pt.X - _lastMouseX) / MouseFullDeflectPx, -1f, 1f);
                 var tLy = Math.Clamp(-(pt.Y - _lastMouseY) / MouseFullDeflectPx, -1f, 1f);
-                if (tLx != 0f || tLy != 0f) mouseActive = true;
+
                 _smoothMouseX += (tLx - _smoothMouseX) * Smoothing;
                 _smoothMouseY += (tLy - _smoothMouseY) * Smoothing;
             }
@@ -186,12 +238,6 @@ public sealed class GamepadService : IGamepadService
         // 键鼠模式没有模拟量扳机/肩键，保持 0（模型物理里它们只贡献小幅晃动）
         s.LTrigger = s.RTrigger = 0f;
         s.LShoulder = s.RShoulder = s.LStickButton = s.RStickButton = false;
-
-        s.AnyInput = mouseActive
-                  || MathF.Abs(s.LStickX) > 0.01f || MathF.Abs(s.LStickY) > 0.01f
-                  || MathF.Abs(s.RStickX) > 0.01f || MathF.Abs(s.RStickY) > 0.01f
-                  || s.DPadX != 0 || s.DPadY != 0
-                  || s.ButtonA || s.ButtonB || s.ButtonX || s.ButtonY;
     }
 
     /// <summary>
@@ -272,6 +318,7 @@ public sealed class GamepadService : IGamepadService
     // ===== 虚拟键码 =====
     private const int WKey = 0x57, AKey = 0x41, SKey = 0x53, DKey = 0x44;
     private const int UpKey = 0x26, DownKey = 0x28, LeftKey = 0x25, RightKey = 0x27;
+    // ReSharper disable once InconsistentNaming
     private const int JKey = 0x4A, KKey = 0x4B, LKey = 0x4C, IKey = 0x49;
 
     // ===== XInput 常量 =====

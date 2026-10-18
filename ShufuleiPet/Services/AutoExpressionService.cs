@@ -13,14 +13,8 @@ public interface IAutoExpressionService : IDisposable
     /// <summary>检测结果变化事件：参数为要切换的表情名，null 表示恢复默认（无表情）。</summary>
     event Action<string?>? ExpressionChanged;
 
-    /// <summary>music 状态变化事件：true 表示进入 music（应开始口型律动），false 表示离开。</summary>
-    event Action<bool>? MusicStateChanged;
-
     /// <summary>当前生效的自动表情名（null = 无），供托盘菜单重新评估联动状态。</summary>
     string? CurrentExpression { get; }
-
-    /// <summary>立即轮询一次（托盘切换开关后不必等下一个轮询周期）。</summary>
-    void PollNow();
 }
 
 /// <summary>
@@ -84,18 +78,13 @@ public class AutoExpressionService : IAutoExpressionService
         else
         {
             _timer.Stop();
-            var wasMusic = _lastState == AppState.Music;
             _lastState = AppState.None;
             ExpressionChanged?.Invoke(null);
-            if (wasMusic) MusicStateChanged?.Invoke(false);
         }
     }
 
     /// <inheritdoc />
     public event Action<string?>? ExpressionChanged;
-
-    /// <inheritdoc />
-    public event Action<bool>? MusicStateChanged;
 
     /// <inheritdoc />
     public string? CurrentExpression => _lastState switch
@@ -104,9 +93,6 @@ public class AutoExpressionService : IAutoExpressionService
         AppState.Music => _settings.AutoExpressionMusicExpression,
         _ => null,
     };
-
-    /// <inheritdoc />
-    public void PollNow() => PollOnce();
 
     public AutoExpressionService(
         ShufuleiSettings settings,
@@ -180,14 +166,10 @@ public class AutoExpressionService : IAutoExpressionService
         {
             AppState.Game => _settings.AutoExpressionGameExpression,
             AppState.Music => _settings.AutoExpressionMusicExpression,
-            _ => null, // None = 恢复默认
+            _ => null // None = 恢复默认
         };
         Logger.Information("auto expression: {Prev} -> {Next} ({Expression})", prev, state, expression ?? "default");
         ExpressionChanged?.Invoke(expression);
-
-        // music 状态进出时通知口型律动启停（进入 music 开始采集，离开停止）
-        if (state == AppState.Music && prev != AppState.Music) MusicStateChanged?.Invoke(true);
-        else if (prev == AppState.Music && state != AppState.Music) MusicStateChanged?.Invoke(false);
     }
 
     /// <summary>

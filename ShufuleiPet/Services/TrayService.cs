@@ -63,6 +63,10 @@ public sealed class TrayService(
         var manualPadItem = NewToggle("游戏模式", settings.GamepadManual,
             v => settings.GamepadManual = v);
 
+        // 音乐模式：不等待音乐检测，直接进入音乐模式并驱动口型律动（没放音乐时调试/演示用）
+        var manualMusicItem = NewToggle("音乐模式", settings.MusicManual,
+            v => settings.MusicManual = v);
+
         // 帧率显示：窗口右上角帧率叠加层
         var fpsItem = NewToggle("显示帧率", settings.IsShowFps,
             v => settings.IsShowFps = v);
@@ -86,6 +90,7 @@ public sealed class TrayService(
         menu.Items.Add(gazeItem);
         menu.Items.Add(gamepadItem);
         menu.Items.Add(manualPadItem);
+        menu.Items.Add(manualMusicItem);
         menu.Items.Add(fpsItem);
         menu.Items.Add(autoStartItem);
         menu.Items.Add(new NativeMenuItemSeparator());
