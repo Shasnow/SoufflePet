@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./SoufflePet/Assets/pet.ico" alt="SoufflePet" width="128" height="128" style="border-radius: 10%;" />
+</p>
+
 # SoufflePet
 
 基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。
