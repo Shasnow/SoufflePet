@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Model;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Model;
 
 /// <summary>
 /// Jsonから読み込んだユーザデータを記録しておくための構造体

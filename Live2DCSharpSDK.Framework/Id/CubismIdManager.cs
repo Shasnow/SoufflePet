@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Id;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Id;
 
 /// <summary>
 /// ID名を管理する。

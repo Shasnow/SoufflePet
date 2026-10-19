@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.OpenGL;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.OpenGL;
 
 public abstract class OpenGLApi
 {

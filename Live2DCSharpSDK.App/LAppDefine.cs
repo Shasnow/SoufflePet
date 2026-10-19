@@ -1,4 +1,8 @@
-﻿using Live2DCSharpSDK.Framework;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+using Live2DCSharpSDK.Framework;
 
 namespace Live2DCSharpSDK.App;
 

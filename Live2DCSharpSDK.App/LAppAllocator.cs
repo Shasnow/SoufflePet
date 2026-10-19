@@ -1,4 +1,8 @@
-﻿using System.Runtime.InteropServices;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+using System.Runtime.InteropServices;
 using Live2DCSharpSDK.Framework;
 
 namespace Live2DCSharpSDK.App;

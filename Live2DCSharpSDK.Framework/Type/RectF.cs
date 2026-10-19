@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Type;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Type;
 
 /// <summary>
 /// 矩形形状(座標・長さはfloat値)を定義するクラス

@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Math;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Math;
 
 /// <summary>
 /// 顔の向きの制御機能を提供するクラス。

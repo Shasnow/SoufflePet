@@ -1,6 +1,8 @@
 # SoufflePet
 
-基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。提供两种渲染模式：WebView（WebGL）版与原生 OpenGL 版，共用同一套托盘、拖拽与全局鼠标追踪逻辑。
+基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。
+
+> **许可证**：主程序 [GPL-3.0-or-later](LICENSE)，内嵌 Live2DCSharpSDK 子项目 [MIT](Live2DCSharpSDK.Framework/LICENSE)，详见文末[「许可证」](#许可证)章节。
 
 ## 功能
 
@@ -135,6 +137,23 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 ```
 
 取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。**默认留空表示不切换表情**——表情名因模型而异，换模型后请按实际表情文件填写，否则自动表情不会生效。
+
+## 许可证
+
+本项目采用**双许可证**结构，两部分相互独立：
+
+| 范围 | 许可证 | 许可证文件 |
+| --- | --- | --- |
+| SoufflePet 主程序（`SoufflePet/` 目录及解决方案配置） | [GPL-3.0-or-later](LICENSE) | 根目录 `LICENSE` |
+| Live2DCSharpSDK 子项目（`Live2DCSharpSDK.App` / `.Framework` / `.OpenGL`） | [MIT](Live2DCSharpSDK.App/LICENSE) | 各子项目目录下的 `LICENSE` |
+
+说明：
+
+- 所有源文件头部均带 `SPDX-License-Identifier` 标注，与上表许可范围一一对应，便于工具自动识别
+- SDK 子项目源码来自上游 [Live2DCSharpSDK](https://github.com/Coloryr/Live2DCSharpSDK)（MIT License），本项目对其所做的本地修改同样以 MIT 发布，保留上游版权署名
+- 第三方 NuGet 依赖（Avalonia、NAudio、Serilog、SkiaSharp 等）各自遵循其上游许可证，不在本仓库许可证覆盖范围内
+- Live2D Cubism Core 原生库（`Live2DCubismCore.dll`）的使用受 Live2D 官方许可协议约束，不在上述许可证覆盖范围内
+- Live2D 模型资源的美术著作权归模型原作者所有，本仓库不附带、不分发任何模型资源（见[资源说明](#资源说明)）
 
 ## 鸣谢
 

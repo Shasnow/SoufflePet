@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Live2DCSharpSDK.Framework.Core;

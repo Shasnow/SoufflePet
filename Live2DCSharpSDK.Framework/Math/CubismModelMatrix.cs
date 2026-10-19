@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Math;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Math;
 
 /// <summary>
 /// モデル座標設定用の4x4行列クラス。

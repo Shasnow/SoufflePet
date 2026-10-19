@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Model;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Model;
 
 /// <summary>
 /// userdata3.json 反序列化 DTO。字段值由 JsonSerializer 填充，

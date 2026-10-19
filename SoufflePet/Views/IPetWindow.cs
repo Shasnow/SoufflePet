@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Shasnow
+
 namespace SoufflePet.Views;
 
 /// <summary>桌宠窗口的托盘菜单操作接口（WebView 版与原生版共用）。</summary>

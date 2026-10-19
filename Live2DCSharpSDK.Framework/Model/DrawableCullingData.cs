@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Model;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Model;
 
 /// <summary>
 /// テクスチャのカリング設定を管理するための構造体

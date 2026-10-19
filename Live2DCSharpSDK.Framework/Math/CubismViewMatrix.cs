@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Math;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Math;
 
 /// <summary>
 /// カメラの位置変更に使うと便利な4x4行列のクラス。

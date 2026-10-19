@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
 //IDで指定された目のパラメータが、0のときに閉じるなら true 、1の時に閉じるなら false 。
 //#define CloseIfZero
 

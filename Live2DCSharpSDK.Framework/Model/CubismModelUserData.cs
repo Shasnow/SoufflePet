@@ -1,4 +1,8 @@
-﻿using System.Text.Json;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+using System.Text.Json;
 
 namespace Live2DCSharpSDK.Framework.Model;
 

@@ -1,4 +1,8 @@
-﻿namespace Live2DCSharpSDK.Framework.Motion;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+namespace Live2DCSharpSDK.Framework.Motion;
 
 /// <summary>
 /// CubismMotionQueueManagerで再生している各モーションの管理クラス。

@@ -1,4 +1,8 @@
-﻿using System.ComponentModel;
+﻿// SPDX-License-Identifier: MIT
+// Copyright (c) 2024 Coloryr
+// Copyright (c) 2026 Shasnow
+
+using System.ComponentModel;
 
 namespace Live2DCSharpSDK.Framework;
 
