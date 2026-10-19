@@ -1,9 +1,9 @@
 using System;
 using NAudio.Wave;
 using Serilog;
-using ShufuleiPet.Models;
+using SoufflePet.Models;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>口型律动服务抽象（DI 注册用）。</summary>
 public interface ILipSyncService : IDisposable
@@ -60,15 +60,15 @@ public sealed class LipSyncService : ILipSyncService
 
     private static readonly ILogger Logger = Log.ForContext<LipSyncService>();
 
-    private readonly ShufuleiSettings _settings;
+    private readonly SouffleSettings _settings;
 
-    public LipSyncService(ShufuleiSettings settings)
+    public LipSyncService(SouffleSettings settings)
     {
         _settings = settings;
         // 开关属性变化（托盘/设置界面等任何写入方）→ 启停采集；持久化由 App 组合根统一处理
         settings.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ShufuleiSettings.LipSyncEnabled)) SyncCapture();
+            if (e.PropertyName == nameof(SouffleSettings.LipSyncEnabled)) SyncCapture();
         };
     }
 

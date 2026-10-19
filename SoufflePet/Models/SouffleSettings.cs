@@ -7,16 +7,16 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Serilog;
 
-namespace ShufuleiPet.Models;
+namespace SoufflePet.Models;
 
 /// <summary>
-/// 应用设置（ShufuleiPet.json）：唯一事实源。属性变化触发 PropertyChanged，
+/// 应用设置（SoufflePet.json）：唯一事实源。属性变化触发 PropertyChanged，
 /// 持久化与运行时副作用由订阅者统一处理（接线见 App 组合根），写入方（托盘菜单/
 /// 设置界面等）只需给属性赋值，不自行 Save、不直接操作服务或窗口。
 /// </summary>
-public class ShufuleiSettings : INotifyPropertyChanged
+public class SouffleSettings : INotifyPropertyChanged
 {
-    private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "ShufuleiPet.json");
+    private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "SoufflePet.json");
     private static readonly JsonSerializerOptions JsonSerializerOptions = new()
     {
         WriteIndented = true,
@@ -108,18 +108,18 @@ public class ShufuleiSettings : INotifyPropertyChanged
     [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；修改后重启生效）")]
     public string ModelName { get; init; } = "舒芙蕾";
 
-    public static ShufuleiSettings Load()
+    public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();
 
         try
         {
-            var settings = JsonSerializer.Deserialize<ShufuleiSettings>(File.ReadAllText(SettingsFilePath)) ?? new ShufuleiSettings();
+            var settings = JsonSerializer.Deserialize<SouffleSettings>(File.ReadAllText(SettingsFilePath)) ?? new SouffleSettings();
             return settings;
         }
         catch (Exception e)
         {
-            Log.ForContext<ShufuleiSettings>().Warning(e, "Failed to load settings");
+            Log.ForContext<SouffleSettings>().Warning(e, "Failed to load settings");
             return FallBackLoad();
         }
     }
@@ -130,9 +130,9 @@ public class ShufuleiSettings : INotifyPropertyChanged
         File.WriteAllText(SettingsFilePath, json);
     }
 
-    private static ShufuleiSettings FallBackLoad()
+    private static SouffleSettings FallBackLoad()
     {
-        var defaultSettings = new ShufuleiSettings();
+        var defaultSettings = new SouffleSettings();
         defaultSettings.Save();
         return defaultSettings;
     }

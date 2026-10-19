@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShufuleiPet", "ShufuleiPet\ShufuleiPet.csproj", "{44DF0D2F-0A59-454A-8B1F-D19CBB858344}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoufflePet", "SoufflePet\SoufflePet.csproj", "{44DF0D2F-0A59-454A-8B1F-D19CBB858344}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Live2DCSharpSDK.App", "Live2DCSharpSDK.App\Live2DCSharpSDK.App.csproj", "{3C5FCC45-7C7A-4479-9CD3-AD024550A6B2}"
 EndProject

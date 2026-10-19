@@ -1,7 +1,7 @@
 using System;
 using Microsoft.Win32;
 
-namespace ShufuleiPet.Utils;
+namespace SoufflePet.Utils;
 
 /// <summary>
 /// 开机自启管理：写入/读取 HKCU\Software\Microsoft\Windows\CurrentVersion\Run 注册表项。
@@ -11,7 +11,7 @@ namespace ShufuleiPet.Utils;
 public static class AutoStart
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "ShufuleiPet";
+    private const string ValueName = "SoufflePet";
 
     /// <summary>当前是否已注册开机自启（读注册表实时状态，不依赖内存标记）。</summary>
     public static bool IsEnabled()

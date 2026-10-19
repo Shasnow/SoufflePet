@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using Avalonia.Threading;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Utils;
+using SoufflePet.Models;
+using SoufflePet.Utils;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>自动表情联动服务抽象（DI 注册用）。</summary>
 public interface IAutoExpressionService : IDisposable
@@ -42,7 +42,7 @@ public class AutoExpressionService : IAutoExpressionService
         Music,  // 命中音乐
     }
 
-    private readonly ShufuleiSettings _settings;
+    private readonly SouffleSettings _settings;
     private readonly DispatcherTimer _timer;
 
     /// <summary>
@@ -72,7 +72,7 @@ public class AutoExpressionService : IAutoExpressionService
     private AppState _lastState = AppState.None;
 
     /// <summary>
-    /// 响应 AutoExpressionEnabled 属性变化（构造时订阅 ShufuleiSettings.PropertyChanged）：
+    /// 响应 AutoExpressionEnabled 属性变化（构造时订阅 SouffleSettings.PropertyChanged）：
     /// 开启时启动轮询并立即检测一次；关闭时停止轮询并立即清除自动表情（无论之前处于什么状态）。
     /// 持久化由 App 组合根统一处理，这里只管运行时行为。
     /// </summary>
@@ -106,7 +106,7 @@ public class AutoExpressionService : IAutoExpressionService
     public string? EffectiveExpression { get; set; } = null;
     
     public AutoExpressionService(
-        ShufuleiSettings settings,
+        SouffleSettings settings,
         IProcessDetector processDetector,
         IForegroundDetector foregroundDetector)
     {
@@ -121,7 +121,7 @@ public class AutoExpressionService : IAutoExpressionService
         // 总开关属性变化（托盘/设置界面等任何写入方）→ 启停轮询与清除表情
         settings.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ShufuleiSettings.AutoExpressionEnabled)) OnEnabledChanged();
+            if (e.PropertyName == nameof(SouffleSettings.AutoExpressionEnabled)) OnEnabledChanged();
         };
         if (settings.AutoExpressionEnabled) _timer.Start();
     }
@@ -130,7 +130,7 @@ public class AutoExpressionService : IAutoExpressionService
     /// 组装本轮检测条目：配置文件条目在前（用户显式配置优先），随后追加 NVIDIA App 识别为游戏、
     /// 且配置文件里没有同进程名的条目。NVIDIA 库缺失或读取失败时只返回配置文件条目。
     /// </summary>
-    private static List<AppEntry> BuildEntries(ShufuleiSettings settings)
+    private static List<AppEntry> BuildEntries(SouffleSettings settings)
     {
         var entries = new List<AppEntry>(settings.AutoExpressionApps);
         try

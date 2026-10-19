@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Serilog;
-using ShufuleiPet.Models;
+using SoufflePet.Models;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>
 /// 应用检测策略接口：两种独立方案（进程检测 / 前台窗口检测）各实现一份。

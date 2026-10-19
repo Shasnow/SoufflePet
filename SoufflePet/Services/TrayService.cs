@@ -5,10 +5,10 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Views;
+using SoufflePet.Models;
+using SoufflePet.Views;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>托盘图标与菜单服务抽象（DI 注册）。</summary>
 public interface ITrayService
@@ -18,13 +18,13 @@ public interface ITrayService
 }
 
 /// <summary>
-/// 托盘服务：构建托盘图标与菜单。菜单项只负责把用户意图写进 ShufuleiSettings 属性，
+/// 托盘服务：构建托盘图标与菜单。菜单项只负责把用户意图写进 SouffleSettings 属性，
 /// 持久化与运行时副作用（窗口/服务的应用）统一由 App 组合根的 settings.PropertyChanged
 /// 订阅处理，此处不做任何 Save 或服务调用。
 /// </summary>
 public sealed class TrayService(
     IPetWindow petOps,
-    ShufuleiSettings settings)
+    SouffleSettings settings)
     : ITrayService, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<TrayService>();
@@ -43,7 +43,7 @@ public sealed class TrayService(
         var resetItem = new NativeMenuItem("重置模型");
         resetItem.Click += (_, _) => petOps.ResetModel();
 
-        // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 ShufuleiPet.json）
+        // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 SoufflePet.json）
         var autoExprItem = NewToggle("自动表情", settings.AutoExpressionEnabled,
             v => settings.AutoExpressionEnabled = v);
 
@@ -96,7 +96,7 @@ public sealed class TrayService(
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(exitItem);
 
-        var icon = new Bitmap(AssetLoader.Open(new Uri("avares://ShufuleiPet/Assets/pet.ico")));
+        var icon = new Bitmap(AssetLoader.Open(new Uri("avares://SoufflePet/Assets/pet.ico")));
         var trayIcon = new TrayIcon
         {
             Icon = new WindowIcon(icon),

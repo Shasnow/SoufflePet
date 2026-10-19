@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace ShufuleiPet.Models;
+namespace SoufflePet.Models;
 
 /// <summary>单个应用的检测条目（逐应用配置检测策略）。</summary>
 public class AppEntry

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using Avalonia.Threading;
 using Serilog;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>
 /// 手柄输入状态快照：字段与模型 cdi3.json 的 ParamGroup3「手柄」一一对应，

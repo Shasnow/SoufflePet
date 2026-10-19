@@ -5,12 +5,12 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Services;
-using ShufuleiPet.Utils;
-using ShufuleiPet.Views;
+using SoufflePet.Models;
+using SoufflePet.Services;
+using SoufflePet.Utils;
+using SoufflePet.Views;
 
-namespace ShufuleiPet;
+namespace SoufflePet;
 
 public class App : Application
 {
@@ -40,7 +40,7 @@ public class App : Application
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
-            services.AddSingleton(ShufuleiSettings.Load());
+            services.AddSingleton(SouffleSettings.Load());
             services.AddSingleton<IProcessDetector, ProcessDetector>();
             services.AddSingleton<IForegroundDetector, ForegroundDetector>();
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
@@ -70,7 +70,7 @@ public class App : Application
 
             // 自动表情检测服务的事件订阅必须早于其内部 DispatcherTimer 首次触发，避免漏掉初始状态
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
-            var settings = _provider.GetRequiredService<ShufuleiSettings>();
+            var settings = _provider.GetRequiredService<SouffleSettings>();
             var lipSync = _provider.GetRequiredService<ILipSyncService>();
             var gamepad = _provider.GetRequiredService<IGamepadService>();
 
@@ -85,27 +85,27 @@ public class App : Application
             autoExpression.ExpressionChanged += _ => ApplyExpression();
 
             // ===== 设置变化统一接线 =====
-            // ShufuleiSettings 是唯一事实源：任何写入方（托盘菜单/设置界面）只改属性，
+            // SouffleSettings 是唯一事实源：任何写入方（托盘菜单/设置界面）只改属性，
             // 持久化与运行时副作用全部在这一个订阅里处理，写入方不做 Save、不直接调服务。
             settings.PropertyChanged += (_, e) =>
             {
                 try { settings.Save(); } catch (Exception ex) { Logger.Warning(ex, "save settings failed"); }
                 switch (e.PropertyName)
                 {
-                    case nameof(ShufuleiSettings.GazeFollowEnabled):
+                    case nameof(SouffleSettings.GazeFollowEnabled):
                         petOps.SetGazeFollow(settings.GazeFollowEnabled);
                         break;
-                    case nameof(ShufuleiSettings.IsShowFps):
+                    case nameof(SouffleSettings.IsShowFps):
                         petOps.SetFpsVisible(settings.IsShowFps);
                         break;
-                    case nameof(ShufuleiSettings.GamepadEnabled):
+                    case nameof(SouffleSettings.GamepadEnabled):
                         ApplyLinkage();
                         break;
-                    case nameof(ShufuleiSettings.GamepadManual):
-                    case nameof(ShufuleiSettings.MusicManual):
+                    case nameof(SouffleSettings.GamepadManual):
+                    case nameof(SouffleSettings.MusicManual):
                         ApplyExpression();
                         break;
-                    case nameof(ShufuleiSettings.StartWithWindows):
+                    case nameof(SouffleSettings.StartWithWindows):
                         ApplyAutoStart();
                         break;
                 }

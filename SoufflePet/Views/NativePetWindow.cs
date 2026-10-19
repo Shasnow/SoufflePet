@@ -6,12 +6,12 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.native;
-using ShufuleiPet.Services;
-using ShufuleiPet.Utils;
+using SoufflePet.Models;
+using SoufflePet.native;
+using SoufflePet.Services;
+using SoufflePet.Utils;
 
-namespace ShufuleiPet.Views;
+namespace SoufflePet.Views;
 
 /// <summary>原生渲染版桌宠窗口：Live2DCSharpSDK + OpenGL，不依赖 WebView。</summary>
 public class NativePetWindow : Window, IPetWindow
@@ -60,7 +60,7 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    public NativePetWindow(ShufuleiSettings settings, ILipSyncService lipSync, IGamepadService gamepad)
+    public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad)
     {
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;

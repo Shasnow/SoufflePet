@@ -4,7 +4,7 @@ using System.Net;
 using System.Threading.Tasks;
 using Serilog;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>本地静态文件服务器抽象（WebView 版加载 wwwroot 页面用，DI 注册）。</summary>
 public interface ILocalFileServer : IDisposable

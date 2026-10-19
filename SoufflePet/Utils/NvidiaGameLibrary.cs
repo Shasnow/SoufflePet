@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Services;
+using SoufflePet.Services;
+using SoufflePet.Models;
 
-namespace ShufuleiPet.Utils;
+namespace SoufflePet.Utils;
 
 /// <summary>
 /// NVIDIA App 游戏库读取器：从 NVIDIA App 的应用库文件里提取它识别为游戏的应用，转换为 game 类目的进程检测条目。

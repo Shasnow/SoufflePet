@@ -15,15 +15,14 @@ using Live2DCSharpSDK.Framework.Model;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Services;
-using ShufuleiPet.Utils;
-using ShufuleiPet.Views.native;
+using SoufflePet.Models;
+using SoufflePet.Services;
+using SoufflePet.Utils;
 
-namespace ShufuleiPet.native;
+namespace SoufflePet.native;
 
 /// <summary>用 Live2DCSharpSDK（官方 Native SDK 的 C# 移植）原生渲染 Live2D 模型的 GL 控件。</summary>
-public class NativePetControl(ShufuleiSettings settings) : OpenGlControlBase
+public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
 {
     /// <summary>拖拽时至少保留在窗口内的可见边条（DIP），保证拖到窗口边缘外仍能抓回来。</summary>
     private const float KeepVisibleDip = 64f;
@@ -112,7 +111,7 @@ public class NativePetControl(ShufuleiSettings settings) : OpenGlControlBase
     /// <summary>是否显示模型自带的水印层（默认关闭）。</summary>
     private const bool ShowWatermark = false;
 
-    /// <summary>构造：注入设置，模型目录/名称从 ShufuleiPet.json 读取（换模型不用改代码）。</summary>
+    /// <summary>构造：注入设置，模型目录/名称从 SoufflePet.json 读取（换模型不用改代码）。</summary>
 
     /// <summary>取走自上次调用以来渲染的帧数并清零（跨线程安全）。</summary>
     public int TakeRenderedFrames()
@@ -198,7 +197,7 @@ public class NativePetControl(ShufuleiSettings settings) : OpenGlControlBase
             };
             Logger.Debug("LAppDelegateOpenGL ok");
 
-            // 模型目录/名称来自设置（ShufuleiPet.json 的 ModelsDirectory / ModelName）：
+            // 模型目录/名称来自设置（SoufflePet.json 的 ModelsDirectory / ModelName）：
             // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码
             var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelName);
             _modelDir = modelDir;

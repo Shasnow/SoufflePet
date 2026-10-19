@@ -3,7 +3,7 @@ using System.IO;
 using Avalonia;
 using Serilog;
 
-namespace ShufuleiPet;
+namespace SoufflePet;
 
 class Program
 {

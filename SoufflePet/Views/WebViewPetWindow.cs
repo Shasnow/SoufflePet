@@ -7,11 +7,11 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
-using ShufuleiPet.Models;
-using ShufuleiPet.Services;
-using ShufuleiPet.Utils;
+using SoufflePet.Models;
+using SoufflePet.Services;
+using SoufflePet.Utils;
 
-namespace ShufuleiPet.Views;
+namespace SoufflePet.Views;
 
 /// <summary>
 /// WebView 版桌宠窗口：纯代码构建（无 XAML，与 NativePetWindow 风格一致），
@@ -67,7 +67,7 @@ public class WebViewPetWindow : Window, IPetWindow
     private int _lastPadDx, _lastPadDy, _lastPadMask = -1;
 
     /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务、设置。</summary>
-    public WebViewPetWindow(ShufuleiSettings settings, ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
+    public WebViewPetWindow(SouffleSettings settings, ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
     {
         _lipSync = lipSync;
         _gamepad = gamepad;
@@ -90,7 +90,7 @@ public class WebViewPetWindow : Window, IPetWindow
         if (server != null)
         {
             var port = server.Start();
-            // 模型 URL 走查询参数传给页面：换模型只改设置（ShufuleiPet.json 的
+            // 模型 URL 走查询参数传给页面：换模型只改设置（SoufflePet.json 的
             // ModelsDirectory / ModelName），页面脚本无需跟着改
             var modelUrl = $"{settings.ModelsDirectory}/{settings.ModelName}/{settings.ModelName}.model3.json";
             _webView.Source = new Uri($"http://localhost:{port}/index.html?model={Uri.EscapeDataString(modelUrl)}");

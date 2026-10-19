@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Serilog;
 
-namespace ShufuleiPet.Services;
+namespace SoufflePet.Services;
 
 /// <summary>显示器电源状态通知服务抽象（DI 注册用）。</summary>
 public interface IPowerNotificationService : IDisposable

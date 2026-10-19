@@ -1,4 +1,4 @@
-﻿namespace Live2DCSharpSDK;
+﻿namespace Live2DCSharpSDK.Framework;
 
 public static class SDKInfo
 {

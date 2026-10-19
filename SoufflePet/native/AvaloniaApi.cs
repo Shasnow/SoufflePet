@@ -4,7 +4,7 @@ using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
 using Live2DCSharpSDK.OpenGL;
 
-namespace ShufuleiPet.Views.native;
+namespace SoufflePet.native;
 public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
 {
     public override bool IsES2 => true;

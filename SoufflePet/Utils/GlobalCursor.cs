@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace ShufuleiPet.Utils;
+namespace SoufflePet.Utils;
 
 /// <summary>
 /// 全局光标位置查询：GetCursorPos + ClientToScreen 换算成指定窗口客户区内的坐标（物理像素）。

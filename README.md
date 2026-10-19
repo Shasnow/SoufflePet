@@ -1,4 +1,4 @@
-# 舒芙蕾桌宠（ShufuleiPet）
+# 舒芙蕾桌宠（SoufflePet）
 
 基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。提供两种渲染模式：WebView（WebGL）版与原生 OpenGL 版，共用同一套托盘、拖拽与全局鼠标追踪逻辑。
 
@@ -33,20 +33,20 @@
 
 ```powershell
 # 构建整个解决方案
-dotnet build ShufuleiPet.sln
+dotnet build SoufflePet.sln
 
 # 原生版（默认）
-dotnet run --project ShufuleiPet
+dotnet run --project SoufflePet
 
 # WebView 版
-dotnet run --project ShufuleiPet -- --webview
+dotnet run --project SoufflePet -- --webview
 ```
 
 ## 解决方案结构
 
 ```
-ShufuleiPet.sln
-├─ ShufuleiPet/                  # 主程序（Avalonia 桌面应用）
+SoufflePet.sln
+├─ SoufflePet/                  # 主程序（Avalonia 桌面应用）
 │  ├─ Views/                     # 窗口层
 │  │  ├─ WebViewPetWindow.cs    #   WebView 版窗口（纯代码，+ 本地静态服务器）
 │  │  └─ NativePetWindow.cs      #   原生版窗口（拖拽 / 穿透 / 全局光标）
@@ -97,22 +97,44 @@ ShufuleiPet.sln
 
 ## 资源说明
 
-Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，不随仓库分发，请自行放入合法授权的模型文件后再构建运行。
+Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发任何模型资源**：模型的美术著作权归原作者所有。使用者需自行获取**已获得合法授权**的模型并放入对应目录。
+
+### 首次使用
+
+1. 把获得授权的模型放入 `wwwroot/models/模型名/`（`ModelsDirectory` 默认为 `models`）。
+2. 确认该目录下存在 `模型名.model3.json`（目录名需与 `model3.json` 主文件名一致）。
+3. 在 `SoufflePet.json` 中把 `ModelName` 设为 `模型名`。
+4. 重启应用（模型仅在启动时加载）。
+
+未配置模型时应用**仍可正常启动**，只是窗口不渲染模型；WebView 版会在左上角显示缺少模型的提示。
 
 ### 配置模型
 
-修改 `ShufuleiPet.json`（首次运行自动生成，位于可执行文件同级目录）两个键即可：
+修改 `SoufflePet.json`（首次运行自动生成，位于可执行文件同级目录）两个键即可：
 
 ```json
 {
   "ModelsDirectory": "models",
-  "ModelName": "舒芙蕾"
+  "ModelName": "你的模型名"
 }
 ```
 
 - `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
-- `ModelName`：模型目录名，同时作为 `model3.json` 的主文件名（SDK 约定：目录名与 model3.json 主文件名一致，即 `wwwroot/models/舒芙蕾/舒芙蕾.model3.json`）
-- 两个键都在启动时读取，**修改后需重启生效**；原生版与 WebView 版通用（WebView 版由宿主以查询参数把模型地址传给页面，页面脚本无硬编码）
+- `ModelName`：模型目录名，同时作为 `model3.json` 的主文件名（SDK 约定：目录名与 model3.json 主文件名一致，即 `wwwroot/models/你的模型名/你的模型名.model3.json`）
+- 两个键都在启动时读取，**修改后需重启生效**
+
+### 模型相关的可配置项
+
+`SoufflePet.json` 中还有两个表情名配置：
+
+```json
+{
+  "AutoExpressionGameExpression": "游戏表情名",
+  "AutoExpressionMusicExpression": "音乐表情名"
+}
+```
+
+取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。**默认留空表示不切换表情**——表情名因模型而异，换模型后请按实际表情文件填写，否则自动表情不会生效。
 
 ## 鸣谢
 
