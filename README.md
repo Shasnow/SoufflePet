@@ -1,6 +1,6 @@
 # 舒芙蕾桌宠（ShufuleiPet）
 
-基于 [Avalonia](https://avaloniaui.net/) 的 Windows 桌面桌宠，展示 Live2D 模型「舒芙蕾」。提供两种渲染模式：WebView（WebGL）版与原生 OpenGL 版，共用同一套托盘、拖拽与全局鼠标追踪逻辑。
+基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。提供两种渲染模式：WebView（WebGL）版与原生 OpenGL 版，共用同一套托盘、拖拽与全局鼠标追踪逻辑。
 
 ## 功能
 
@@ -60,11 +60,40 @@ ShufuleiPet.sln
 └─ Live2DCSharpSDK.OpenGL/       # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）
 ```
 
-本项目对 Live2DCSharpSDK 进行了大量修改，以适应本项目的渲染需求，包括但不限于：
+## 对 Live2DCSharpSDK 的本地修改
 
-- 优化渲染循环，减少渲染次数
-- 支持 OpenGL ES2 渲染后端
-- 修复一些 bug，如模型加载失败、渲染错误等
+本项目内嵌的 SDK 子项目来自上游 [Live2DCSharpSDK](https://github.com/Coloryr/Live2DCSharpSDK)，其中解决方案实际编译三个：`Live2DCSharpSDK.App` / `.Framework` / `.OpenGL`。为适配桌宠场景，这三个项目有大量本地修改。
+
+### 构建与可空性
+
+- **目标框架**：`Live2DCSharpSDK.App` / `.Framework` / `.OpenGL` 三个项目 `net8.0` → `net10.0`
+- **行尾**：所有源文件为 CRLF（上游为 LF），未改动内容的文件在 `diff` 下也会显示差异，对比时需加 `--strip-trailing-cr`
+- **CS8618 清理**：DTO record（`ModelSettingObj` / `CubismMotionObj` / `CubismPhysicsObj` / `CubismModelUserDataObj`）及大量字段、委托、数组成员补 `= null!`（值由 JsonSerializer / 原生库填充），`TextureInfo.FileName` 改 `string?`
+
+### 为桌宠开放的能力（`Live2DCSharpSDK.App`）
+
+- `LAppModel.EnableFaceTracking`：目光跟随开关。关闭时跳过拖拽角度参数，`LoadParameters` 每帧重置为保存值，视线自然回正
+- `LAppModel.GamepadValueUpdate`：手柄参数钩子，在动作/表情之后、**物理演算之前**触发（模型作者把摇杆/扳机/ABXY 设计为物理输入源，推摇杆会带出身体晃动）。单独开钩子而非复用 `ValueUpdate`——后者与拖拽参数被 `CustomValueUpdate` 二选一门控，手柄需要两种情况下都能写入
+- `LAppModel.LipSyncValue` / `LipSyncWideValue`：口型音量外部输入（第 1 个口型参数写嘴开闭、其余写水平宽窄），替换官方示例里写死 `0` 的实现
+- `LAppModel.ResetExpression()`：清空表情队列并以 weight=0 写回基线，等价 Web SDK 的 `resetExpression()`
+- `LAppLive2DManager.ModelToClip()`：模型坐标 → 裁剪坐标换算（用上一帧累积的 MVP，须在渲染后调用），供逐像素命中检测与包围盒测量使用
+- `LAppView` 暴露视图矩阵操作：`AdjustScale` / `GetScale` / `AdjustTranslate` / `TranslateX/Y` / `ViewLeft/Right/Bottom/Top`。注意 `Render()` 每帧把 `_viewMatrix` 拷给 `manager.ViewMatrix`，缩放/平移必须落在 `_viewMatrix` 侧
+- `LAppDefine`：缩放范围放宽，`ViewMaxScale` 2.0 → 3.0、`ViewMinScale` 0.8 → 0.4
+
+### Bug 修复（`Live2DCSharpSDK.Framework`）
+
+- `CubismEyeBlink.DetermineNextBlinkingTiming`：原写法 `_random.Next() / int.MaxValue` 是整数除法恒为 0，眨眼间隔固定为 0（约每 0.3s 连眨一次）。改 `(float)_random.NextDouble()`
+- `CubismMotionQueueManager`：`Motions[0]` → `Motions[i]`，修复循环索引错误（原实现只处理队列第一个 motion）
+- `CubismCore.GetDrawableRenderOrders`：P/Invoke EntryPoint `csmGetDrawableRenderOrders` → `csmGetRenderOrders`，修正原生导出名（原名调用即 `EntryPointNotFoundException`）
+- `CubismExpressionMotion(_Manager)`：移除标记 `[Obsolete]` 的 `_fadeWeight` 成员，淡入淡出权重改由调用方经参数传入（成员状态在多实例间共享是隐患）；`StartMotion` 去掉多余的 `UserTimeSeconds` 参数
+
+### 性能优化
+
+- `CubismMatrix44.MultiplyByMatrix`：三重循环 → `System.Numerics.Matrix4x4`（内存布局逐元素一致，可直接 reinterpret 走 SIMD）。实测 ~60ns → ~9ns；先整体读入再相乘，天然处理 `a` 与 `_tr` 为同一数组的自乘别名
+- `CubismClippingManager.CalcClippedDrawTotalBounds`：① `Initialize` 时缓存 Core 原生数组指针，循环内按索引读取，免去逐次 `LibraryImport`（约 50ns/次 × 41 遮罩组）；② 极值归约改 `Vector<float>` 无分支 min/max（交错的 [x,y] 数据无需反交织，偶/奇 lane 分别累积两轴），原标量版 4 个数据相关分支每顶点约 15 周期误预测
+- `CubismRenderer_OpenGLES2`：每 drawable 独立网格缓冲——位置缓冲按固定容量分配、每帧 `BufferSubData` 原地更新；UV / 索引是静态数据，`STATIC_DRAW` 仅首次上传。替掉原实现"全局共用一对交错 AoS 的 VBO/IBO + 每帧逐顶点搬运重传"。同时去掉逐 drawable 的 `UseProgram(0)` / `BindBuffer(0)` / `BindVertexArray(0)` 后处理（下一帧绘制会自行绑定所需状态）
+- 配套改动：`OpenGLApi` 新增 `GL_DYNAMIC_DRAW` 与 `BufferSubData` 抽象（Avalonia `GlInterface` 未封装该函数，具体绑定在 `ShufuleiPet/native/AvaloniaApi.cs` 走 `GetProcAddress`）；`CubismShader_OpenGLES2.SetVertexAttributes` 增加 `renderer` / `index` 参数以支持每 drawable 缓冲绑定；`CubismClippingContext_OpenGLES2` 改主构造函数并移除未使用的 `model` 参数
+- `LAppModel.Update`：删掉只服务于眨眼门控的 `motionUpdated` 局部变量；待机动作是循环动作（每帧都更新参数），照搬官方示例的 `!motionUpdated` 门控会导致永远不眨眼，改为直接叠加眨眼值
 
 ## 资源说明
 
@@ -74,4 +103,4 @@ Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，�
 
 [Live2D Cubism](https://www.live2d.com/zh-CHS/)
 
-[Live2DCSharpSDK](https://github.com/live2d/Live2DCSharpSDK)
+[Live2DCSharpSDK](https://github.com/Coloryr/Live2DCSharpSDK)
