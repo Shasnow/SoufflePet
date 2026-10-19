@@ -141,11 +141,22 @@ public class NativePetControl : OpenGlControlBase
         _hwnd = TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
     }
 
-    /// <summary>自动表情联动入口：传表情名切换，传 null 恢复默认（无表情）。</summary>
+    /// <summary>
+    /// 自动表情联动入口：传表情名切换，传 null 恢复默认（无表情）。
+    /// 模型加载前先缓存：组合根在 window.Show() 之前就会应用持久化的初始状态，
+    /// 此刻 GL 尚未初始化、模型为空，必须缓存到 OnOpenGlInit 里补设（否则开启手动模式重启后会停在默认表情）。
+    /// </summary>
     public void SetExpression(string? name)
     {
-        if (name == null) _model?.ResetExpression();
-        else _model?.SetExpression(name);
+        if (_model == null)
+        {
+            _pendingExpression = name;
+            _hasPendingExpression = true;
+            return;
+        }
+
+        if (name == null) _model.ResetExpression();
+        else _model.SetExpression(name);
     }
 
     /// <summary>目光跟随开关：转发给模型的 EnableFaceTracking；模型加载前先缓存。</summary>
@@ -201,10 +212,9 @@ public class NativePetControl : OpenGlControlBase
             MeasureEyeCenter(_model?.Model);
             Logger.Debug("LoadModel ok textures={TextureCount}", _model?.Textures.Count);
 
-            // SDK会自动播放 Idle 动作，这里注释掉手动播放
-            // PlayIdle();
+            // Idle 组动作由 SDK 在 LAppModel.Update 里自动播放，无需手动触发
 
-            // 补设模型加载完成前缓存的自动表情（自动表情服务可能先于 GL 初始化触发）
+            // 补设模型加载完成前缓存的自动表情（组合根应用初始状态时模型还没加载）
             if (_hasPendingExpression)
             {
                 _hasPendingExpression = false;

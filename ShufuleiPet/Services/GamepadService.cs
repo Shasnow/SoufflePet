@@ -188,7 +188,7 @@ public sealed class GamepadService : IGamepadService
 
     /// <summary>
     /// 键鼠回退（用户指定的映射）：WASD 当视觉右摇杆（逻辑上是左摇杆，平滑推/回中），鼠标位移当视觉左摇杆（逻辑上是右摇杆）
-    /// （停下自动回中），方向键当十字键，J/K/L/I 当 A/B/X/Y。任何一项有输入即 AnyInput=true。
+    /// （停下自动回中），方向键当十字键，J/K/L/I 当 A/B/X/Y。
     /// 真实手柄接入时走 XInput 分支，左右摇杆与物理键位一致，不受这里的映射影响。
     /// </summary>
     private void ReadKeyboardMouseFallback(GamepadState s)

@@ -68,22 +68,21 @@ public class App : Application
             RenderScaling = window.RenderScaling;
             Logger.Debug("Main window assigned");
 
-            // 自动表情事件 → 窗口（订阅先于 DispatcherTimer 触发，无竞态）
+            // 自动表情检测服务的事件订阅必须早于其内部 DispatcherTimer 首次触发，避免漏掉初始状态
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
             var settings = _provider.GetRequiredService<ShufuleiSettings>();
             var lipSync = _provider.GetRequiredService<ILipSyncService>();
             var gamepad = _provider.GetRequiredService<IGamepadService>();
 
-            // 手柄联动：命中游戏（切到"手柄"表情）时开始把手柄/键鼠输入写进模型摇杆参数；
-            // 手动模式下不看检测结果，一直驱动（方便没打游戏时调试/演示）。
-            autoExpression.ExpressionChanged += name =>
-            {
-                if (settings.GamepadManual) return; // 手动模式：表情由托盘控制，忽略自动切换
-                if (settings.MusicManual) return;  // 手动音乐模式：表情由托盘控制，忽略自动切换
-                petOps.SetExpression(name);
-                ApplyGamepadDriving();
-                ApplyLipSync();
-            };
+            // ===== 表情结算漏斗 =====
+            // autoExpression.EffectiveExpression 是"当前实际生效的表情"的唯一事实源：手动模式 > 自动检测
+            // （game 优先于 music，与 AutoExpressionService 内部的汇总优先级一致）。
+            // 三个下游（窗口表情、手柄轮询、口型采集）全部基于它判定，
+            // 互斥天然成立，不再需要两侧服务互相 Stop 抢占。
+
+            // 自动检测结果变化 → 走漏斗重算。手动模式接管期间结算结果不变、
+            // 自动事件自然落到无变化的分支，因此不需要在事件里单独 early return。
+            autoExpression.ExpressionChanged += _ => ApplyExpression();
 
             // ===== 设置变化统一接线 =====
             // ShufuleiSettings 是唯一事实源：任何写入方（托盘菜单/设置界面）只改属性，
@@ -100,13 +99,11 @@ public class App : Application
                         petOps.SetFpsVisible(settings.IsShowFps);
                         break;
                     case nameof(ShufuleiSettings.GamepadEnabled):
-                        ApplyGamepadDriving();
+                        ApplyLinkage();
                         break;
                     case nameof(ShufuleiSettings.GamepadManual):
-                        ApplyGamepadManual();
-                        break;
                     case nameof(ShufuleiSettings.MusicManual):
-                        ApplyMusicManual();
+                        ApplyExpression();
                         break;
                     case nameof(ShufuleiSettings.StartWithWindows):
                         ApplyAutoStart();
@@ -128,76 +125,39 @@ public class App : Application
                 }
             }
 
-            // 手柄驱动开关重算：总开关开 且（手动模式 或 当前正处于"手柄"表情）。
-            // 同一路 driving 信号同时驱动窗口侧参数写入与服务侧轮询（gamepad.Start/Stop）——
-            // 不驱动时停掉 30Hz 轮询，不白查 XInput/键鼠/光标
-            void ApplyGamepadDriving()
+            // 结算当前生效的表情并同步到窗口。
+            // 「游戏模式 / 音乐模式」这两个托盘开关在此优先级最高：开启期间无论自动检测
+            // 命中什么都不改写表情；关闭后自动回落到 AutoExpressionService 当前命中的状态。
+            void ApplyExpression()
             {
-                var driving = settings.GamepadEnabled
-                    && (settings.GamepadManual || autoExpression.CurrentExpression == settings.AutoExpressionGameExpression);
-                petOps.SetGamepadEnabled(driving);
-                if (driving)
-                {
-                    gamepad.Start();
-                    lipSync.Stop(); // 手柄模式下不采集口型律动，避免干扰
-                }
-                else gamepad.Stop();
+                var next = settings.GamepadManual ? settings.AutoExpressionGameExpression
+                    : settings.MusicManual ? settings.AutoExpressionMusicExpression
+                    : autoExpression.CurrentExpression;
+                if (next == autoExpression.EffectiveExpression) return; // 无变化：不重复写参数、不重启服务
+                autoExpression.EffectiveExpression = next;
+                petOps.SetExpression(next);
+                ApplyLinkage();
             }
 
-            // 口型律动启停：music 检测状态或手动音乐模式 → 开始/停止采集
-            // （是否真正采集还受 LipSyncEnabled 开关控制，见 LipSyncService 内部）
-            void ApplyLipSync()
+            // 联动服务启停：同一时刻只有一个联动在跑（game > music），因此两者不会抢占。
+            // 手柄侧：随生效表情一起也决定服务是否轮询——停下后不再每 33ms 查 XInput/键鼠/光标。
+            // 口型侧：是否真的开始采集由 LipSyncService 内部按 LipSyncEnabled 把关，
+            //         这里不重复判断（重复判断会让总开关重新勾选时服务的 music 态已被清掉、采不回来）。
+            void ApplyLinkage()
             {
-                var on = settings.LipSyncEnabled
-                         && (autoExpression.CurrentExpression == settings.AutoExpressionMusicExpression
-                             || settings.MusicManual);
-                if (on)
-                {
-                    lipSync.Start();
-                    gamepad.Stop(); // 音乐模式下不采集手柄/键鼠，避免干扰
-                }
+                var pad = settings.GamepadEnabled && autoExpression.EffectiveExpression == settings.AutoExpressionGameExpression;
+                petOps.SetGamepadEnabled(pad);
+                if (pad) gamepad.Start(); else gamepad.Stop();
+
+                if (!pad && autoExpression.EffectiveExpression == settings.AutoExpressionMusicExpression) lipSync.Start();
                 else lipSync.Stop();
             }
 
-            // 常显手柄切换：进入手动模式直接显示手柄表情；退出则清掉手动表情交回自动检测
-            void ApplyGamepadManual()
-            {
-                if (settings.GamepadManual)
-                {
-                    petOps.SetExpression(settings.AutoExpressionGameExpression);
-                }
-                else
-                {
-                    // 先恢复自动检测当前命中的表情（如 music 命中时的"麦克风"）：
-                    // 手动模式期间检测状态没变，PollNow 内部会因状态去重直接返回、不会重发
-                    // ExpressionChanged，只调 PollNow 的话表情会一直卡在默认（null）
-                    petOps.SetExpression(autoExpression.CurrentExpression);
-                    if (autoExpression.CurrentExpression == settings.AutoExpressionMusicExpression) ApplyLipSync();
-                }
-                ApplyGamepadDriving();
-            }
-
-            // 常显音乐模式切换：进入直接显示音乐表情并开始口型律动；退出则清掉手动表情交回自动检测
-            void ApplyMusicManual()
-            {
-                if (settings.MusicManual)
-                {
-                    petOps.SetExpression(settings.AutoExpressionMusicExpression);
-                }
-                else
-                {
-                    // 先恢复自动检测当前命中的表情（如 game 命中时的"手柄"）
-                    petOps.SetExpression(autoExpression.CurrentExpression);
-                    if (autoExpression.CurrentExpression == settings.AutoExpressionGameExpression) ApplyGamepadDriving();
-                }
-                ApplyLipSync();
-            }
-
-            // 应用持久化的初始状态（订阅只响应变化，初始值需显式应用一次）
             petOps.SetGazeFollow(settings.GazeFollowEnabled);
             petOps.SetFpsVisible(settings.IsShowFps);
-            if (settings.GamepadManual) ApplyGamepadManual();
-            if (settings.MusicManual) ApplyMusicManual();
+            // 应用持久化的初始状态（订阅只响应变化，初始值需显式应用一次）。
+            // 此时模型尚未加载，表情由窗口侧缓存、模型就绪后补设（两类窗口都有该机制）。
+            ApplyExpression();
             ApplyAutoStart(); // 开机自启：启动时按设置重写一次注册表项（exe 移动后自动刷新路径）
 
             try

@@ -13,7 +13,8 @@
   - 滚轮 → 缩放模型
 - **托盘图标**：显示 / 隐藏、退出；关闭窗口默认隐藏到托盘
 - **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
-- **口型同步**：在音乐模式下，根据当前播放的音乐，自动同步模型的口型
+- **手动模式**：托盘可勾选「游戏模式」「音乐模式」，不等待检测直接进入对应状态（调试/演示用）
+- **口型同步**：在音乐模式（自动检测或手动开启）下，根据当前播放的音乐，自动同步模型的口型
 
 ## 两种运行模式
 
@@ -59,6 +60,12 @@ ShufuleiPet.sln
 └─ Live2DCSharpSDK.OpenGL/       # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）
 ```
 
+本项目对 Live2DCSharpSDK 进行了大量修改，以适应本项目的渲染需求，包括但不限于：
+
+- 优化渲染循环，减少渲染次数
+- 支持 OpenGL ES2 渲染后端
+- 修复一些 bug，如模型加载失败、渲染错误等
+
 ## 资源说明
 
 Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，不随仓库分发，请自行放入合法授权的模型文件后再构建运行。
@@ -66,4 +73,5 @@ Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，�
 ## 鸣谢
 
 [Live2D Cubism](https://www.live2d.com/zh-CHS/)
+
 [Live2DCSharpSDK](https://github.com/live2d/Live2DCSharpSDK)

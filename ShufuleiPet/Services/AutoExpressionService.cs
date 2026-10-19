@@ -13,8 +13,16 @@ public interface IAutoExpressionService : IDisposable
     /// <summary>检测结果变化事件：参数为要切换的表情名，null 表示恢复默认（无表情）。</summary>
     event Action<string?>? ExpressionChanged;
 
-    /// <summary>当前生效的自动表情名（null = 无），供托盘菜单重新评估联动状态。</summary>
+    /// <summary>
+    /// 当前命中的自动表情名（null = 无命中）。手动模式接管期间组合根结算会忽略它——
+    /// 它始终反映"原始检测结果"，不代表界面上实际显示的表情。
+    /// </summary>
     string? CurrentExpression { get; }
+    
+    /// <summary>
+    /// 当前生效的表情名（null = 无表情）。组合根结算时根据手动模式开关决定是用 CurrentExpression 还是手动模式的表情。
+    /// </summary>
+    string? EffectiveExpression { get; set; }
 }
 
 /// <summary>
@@ -94,6 +102,9 @@ public class AutoExpressionService : IAutoExpressionService
         _ => null,
     };
 
+    /// <inheritdoc />
+    public string? EffectiveExpression { get; set; } = null;
+    
     public AutoExpressionService(
         ShufuleiSettings settings,
         IProcessDetector processDetector,

@@ -1,9 +1,10 @@
 .idea
 .trae
+.workbuddy
 obj
 bin
 **/wwwroot/*
 !**/wwwroot/index.html
 *.DotSettings.user
 *.Vulkan*
-**/*Test/*
+**/*Test
