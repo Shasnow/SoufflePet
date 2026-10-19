@@ -65,7 +65,7 @@ public class NativePetWindow : Window, IPetWindow
 
     public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad)
     {
-        Title = "舒芙蕾桌宠（原生）";
+        Title = "SoufflePet";
         Width = 480;
         Height = 680;
         TransparencyLevelHint = [WindowTransparencyLevel.Transparent];

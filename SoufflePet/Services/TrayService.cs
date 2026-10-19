@@ -103,7 +103,7 @@ public sealed class TrayService(
         var trayIcon = new TrayIcon
         {
             Icon = new WindowIcon(icon),
-            ToolTipText = "舒芙蕾桌宠",
+            ToolTipText = "SoufflePet",
             Menu = menu,
         };
         _trayIcons = [trayIcon];

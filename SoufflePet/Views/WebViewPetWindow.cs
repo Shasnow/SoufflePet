@@ -75,7 +75,7 @@ public class WebViewPetWindow : Window, IPetWindow
         _lipSync = lipSync;
         _gamepad = gamepad;
 
-        Title = "舒芙蕾桌宠（WebView）";
+        Title = "SoufflePet（WebView）";
         Width = 480;
         Height = 680;
         MinWidth = 200;
