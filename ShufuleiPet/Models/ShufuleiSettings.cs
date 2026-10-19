@@ -44,23 +44,11 @@ public class ShufuleiSettings : INotifyPropertyChanged
     /// <summary>
     /// 自动表情轮询间隔（秒）
     /// </summary>
-    public float AutoExpressionPollSeconds
-    {
-        get;
-        set => Set(ref field, value);
-    } = 3f;
+    public float AutoExpressionPollSeconds { get; init; } = 3f;
 
-    public string AutoExpressionGameExpression
-    {
-        get;
-        set => Set(ref field, value);
-    } = "手柄";
+    public string AutoExpressionGameExpression { get; init; } = "手柄";
 
-    public string AutoExpressionMusicExpression
-    {
-        get;
-        set => Set(ref field, value);
-    } = "麦克风";
+    public string AutoExpressionMusicExpression { get; init; } = "麦克风";
 
     [Description("自动表情应用列表")]
     public List<AppEntry> AutoExpressionApps { get; init; } = AppEntry.BuildDefaults();
@@ -113,6 +101,12 @@ public class ShufuleiSettings : INotifyPropertyChanged
         get;
         set => Set(ref field, value);
     }
+
+    [Description("模型根目录（应用目录下 wwwroot 内的相对路径，默认 models）")]
+    public string ModelsDirectory { get; init; } = "models";
+
+    [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；修改后重启生效）")]
+    public string ModelName { get; init; } = "舒芙蕾";
 
     public static ShufuleiSettings Load()
     {

@@ -99,6 +99,21 @@ ShufuleiPet.sln
 
 Live2D 模型资源位于 `wwwroot/models/`，模型版权归原作者所有，不随仓库分发，请自行放入合法授权的模型文件后再构建运行。
 
+### 配置模型
+
+修改 `ShufuleiPet.json`（首次运行自动生成，位于可执行文件同级目录）两个键即可：
+
+```json
+{
+  "ModelsDirectory": "models",
+  "ModelName": "舒芙蕾"
+}
+```
+
+- `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
+- `ModelName`：模型目录名，同时作为 `model3.json` 的主文件名（SDK 约定：目录名与 model3.json 主文件名一致，即 `wwwroot/models/舒芙蕾/舒芙蕾.model3.json`）
+- 两个键都在启动时读取，**修改后需重启生效**；原生版与 WebView 版通用（WebView 版由宿主以查询参数把模型地址传给页面，页面脚本无硬编码）
+
 ## 鸣谢
 
 [Live2D Cubism](https://www.live2d.com/zh-CHS/)

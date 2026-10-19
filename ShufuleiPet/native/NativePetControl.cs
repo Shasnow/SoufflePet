@@ -15,6 +15,7 @@ using Live2DCSharpSDK.Framework.Model;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
 using ShufuleiPet.Views.native;
@@ -22,12 +23,13 @@ using ShufuleiPet.Views.native;
 namespace ShufuleiPet.native;
 
 /// <summary>用 Live2DCSharpSDK（官方 Native SDK 的 C# 移植）原生渲染 Live2D 模型的 GL 控件。</summary>
-public class NativePetControl : OpenGlControlBase
+public class NativePetControl(ShufuleiSettings settings) : OpenGlControlBase
 {
     /// <summary>拖拽时至少保留在窗口内的可见边条（DIP），保证拖到窗口边缘外仍能抓回来。</summary>
     private const float KeepVisibleDip = 64f;
 
     private static readonly ILogger Logger = Log.ForContext<NativePetControl>();
+
     private bool _bboxMeasured;
 
     /// <summary>模型包围盒（视图空间，缩放 1 且未平移时测得）：中键拖拽时据此保证模型不会整体移出窗口。</summary>
@@ -109,6 +111,8 @@ public class NativePetControl : OpenGlControlBase
 
     /// <summary>是否显示模型自带的水印层（默认关闭）。</summary>
     private const bool ShowWatermark = false;
+
+    /// <summary>构造：注入设置，模型目录/名称从 ShufuleiPet.json 读取（换模型不用改代码）。</summary>
 
     /// <summary>取走自上次调用以来渲染的帧数并清零（跨线程安全）。</summary>
     public int TakeRenderedFrames()
@@ -194,9 +198,12 @@ public class NativePetControl : OpenGlControlBase
             };
             Logger.Debug("LAppDelegateOpenGL ok");
 
-            var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "models", "舒芙蕾");
+            // 模型目录/名称来自设置（ShufuleiPet.json 的 ModelsDirectory / ModelName）：
+            // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码
+            var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelName);
             _modelDir = modelDir;
-            _model = _lapp.Live2dManager.LoadModel(modelDir, "舒芙蕾");
+            Logger.Debug("loading model dir={Dir} name={Name}", modelDir, settings.ModelName);
+            _model = _lapp.Live2dManager.LoadModel(modelDir, settings.ModelName);
             // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
             // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
             // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。

@@ -33,7 +33,11 @@
   <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
 
 <script>
-const MODEL_URL = 'models/舒芙蕾/舒芙蕾.model3.json';
+// 模型地址由宿主通过查询参数传入（ShufuleiPet.json 的 ModelsDirectory / ModelName），
+// 直接打开页面（无参数）时回退到默认模型
+const params = new URLSearchParams(location.search);
+const MODEL_URL = params.get('model') || 'models/舒芙蕾/舒芙蕾.model3.json';
+const CDI_URL = MODEL_URL.replace(/\.model3\.json$/, '.cdi3.json');
 const EXPRESSIONS = ['哭哭', '手柄', '星星', '水印', '爱心', '猫猫手', '生气', '眼罩', '眼镜', '脸红', '麦克风', '黑脸'];
 
 const errEl = document.getElementById('err');
@@ -168,7 +172,7 @@ async function main() {
       // cdi3.json 的 Parts[].{Id,Name} 提供部件 ID 到显示名的映射
       const names = new Map();
       try {
-        const res = await fetch('models/舒芙蕾/舒芙蕾.cdi3.json');
+        const res = await fetch(CDI_URL);
         const json = await res.json();
         for (const p of (json.Parts || [])) names.set(p.Id, p.Name);
       } catch (_) { /* 读不到就退化为画布中心 */ }

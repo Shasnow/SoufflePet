@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.native;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
@@ -59,7 +60,7 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    public NativePetWindow(ILipSyncService lipSync, IGamepadService gamepad)
+    public NativePetWindow(ShufuleiSettings settings, ILipSyncService lipSync, IGamepadService gamepad)
     {
         Title = "舒芙蕾桌宠（原生）";
         Width = 480;
@@ -71,7 +72,7 @@ public class NativePetWindow : Window, IPetWindow
         ShowInTaskbar = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
 
-        _control = new NativePetControl();
+        _control = new NativePetControl(settings);
 
         // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
         _fpsText = new TextBlock

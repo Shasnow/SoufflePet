@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Serilog;
+using ShufuleiPet.Models;
 using ShufuleiPet.Services;
 using ShufuleiPet.Utils;
 
@@ -65,8 +66,8 @@ public class WebViewPetWindow : Window, IPetWindow
     private float _lastPadLx, _lastPadLy, _lastPadRx, _lastPadRy, _lastPadLt, _lastPadRt;
     private int _lastPadDx, _lastPadDy, _lastPadMask = -1;
 
-    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务。</summary>
-    public WebViewPetWindow(ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
+    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务、设置。</summary>
+    public WebViewPetWindow(ShufuleiSettings settings, ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
     {
         _lipSync = lipSync;
         _gamepad = gamepad;
@@ -89,7 +90,11 @@ public class WebViewPetWindow : Window, IPetWindow
         if (server != null)
         {
             var port = server.Start();
-            _webView.Source = new Uri($"http://localhost:{port}/index.html");
+            // 模型 URL 走查询参数传给页面：换模型只改设置（ShufuleiPet.json 的
+            // ModelsDirectory / ModelName），页面脚本无需跟着改
+            var modelUrl = $"{settings.ModelsDirectory}/{settings.ModelName}/{settings.ModelName}.model3.json";
+            _webView.Source = new Uri($"http://localhost:{port}/index.html?model={Uri.EscapeDataString(modelUrl)}");
+            Logger.Debug("webview model url={Url}", modelUrl);
         }
 
         // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
