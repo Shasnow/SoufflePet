@@ -1,4 +1,4 @@
-# 舒芙蕾桌宠（SoufflePet）
+# SoufflePet
 
 基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。提供两种渲染模式：WebView（WebGL）版与原生 OpenGL 版，共用同一套托盘、拖拽与全局鼠标追踪逻辑。
 
