@@ -111,8 +111,11 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// <summary>上次点击穿透探测的帧时间戳（Stopwatch 刻度，渲染线程独占读写，无需加锁）。</summary>
     private long _lastProbeStamp;
 
-    /// <summary>是否显示模型自带的水印层（默认关闭）。</summary>
-    private const bool ShowWatermark = false;
+    /// <summary>缓存的视口像素尺寸（仅渲染线程读写）。</summary>
+    private int _vpW, _vpH;
+
+    /// <summary>视口尺寸失效标志：UI 线程在 Bounds 变化处置位，渲染线程重算后清除（volatile 保证跨线程可见）。</summary>
+    private volatile bool _vpDirty = true;
 
     /// <summary>构造：注入设置，模型目录/名称从 SoufflePet.json 读取（换模型不用改代码）。</summary>
 
@@ -145,6 +148,13 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     {
         base.OnAttachedToVisualTree(e);
         _hwnd = TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+    }
+
+    /// <summary>布局改变 Bounds（UI 线程）时标记视口尺寸失效，渲染线程下帧才重算，避免每帧轮询。</summary>
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == BoundsProperty) _vpDirty = true;
     }
 
     /// <summary>
@@ -212,8 +222,8 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             _model.Renderer?.Anisotropy = 16f;
             // 水印是独立部件 "Part13"（cdi3.json 显示名"水印.png"），部件透明度
             // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
-            if (!ShowWatermark)
-                _model?.Model.SetPartOpacity("Part13", 0f);
+            if (!string.IsNullOrEmpty(settings.ModelWatermarkPartId))
+                _model?.Model.SetPartOpacity(settings.ModelWatermarkPartId, 0f);
             // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
             _model?.GamepadValueUpdate = ApplyGamepadParams;
 
@@ -260,9 +270,15 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         {
             // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
             // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。
-            var vpW = (int)(Bounds.Width * App.RenderScaling);
-            var vpH = (int)(Bounds.Height * App.RenderScaling);
-            gl.Viewport(0, 0, vpW, vpH);
+            // 视口尺寸只在 Bounds 变化（OnPropertyChanged 置 _vpDirty）时重算，不做每帧轮询；
+            // gl.Viewport 每帧仍照常下发，避免共享上下文里被其他绘制改掉视口状态。
+            if (_vpDirty)
+            {
+                _vpDirty = false;
+                _vpW = (int)(Bounds.Width * App.RenderScaling);
+                _vpH = (int)(Bounds.Height * App.RenderScaling);
+            }
+            gl.Viewport(0, 0, _vpW, _vpH);
 
             // 帧步长：按真实经过时间推进动作/物理/眨眼，帧率高低不影响动画速度。
             // 恢复钳位：显示器关闭/窗口隐藏期间渲染链停摆，恢复后首帧的经过时间可达
@@ -288,7 +304,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             if (now - _lastProbeStamp >= Stopwatch.Frequency * ProbeIntervalMs / 1000)
             {
                 _lastProbeStamp = now;
-                ProbeCursorPixel(fb, vpW, vpH);
+                ProbeCursorPixel(fb, _vpW, _vpH);
             }
 
             Interlocked.Increment(ref _renderedFrames);

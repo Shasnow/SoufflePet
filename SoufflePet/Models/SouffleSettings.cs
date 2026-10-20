@@ -110,6 +110,9 @@ public class SouffleSettings : INotifyPropertyChanged
 
     [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；修改后重启生效）")]
     public string ModelName { get; init; } = "舒芙蕾";
+    
+    [Description("模型水印资源 ID")]
+    public string ModelWatermarkPartId { get; init; } = "watermark";
 
     public static SouffleSettings Load()
     {
