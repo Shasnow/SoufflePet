@@ -104,6 +104,9 @@ public partial class SouffleSettings : ObservableObject
     [Description("最大工具调用轮数")]
     public int MaxToolRounds { get; init; } = 10;
 
+    [Description("MCP 服务器列表（启用的服务器会在首次对话时连接，其工具交给模型调用；修改后重启生效）")]
+    public List<McpServerConfig> McpServers { get; init; } = [];
+
     public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();

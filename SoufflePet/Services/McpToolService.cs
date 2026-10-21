@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Shasnow
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
+using ModelContextProtocol.Client;
+using Serilog;
+using SoufflePet.Models;
+
+namespace SoufflePet.Services;
+
+/// <summary>向对话提供 MCP 服务器上的工具。</summary>
+public interface IMcpToolService
+{
+    /// <summary>
+    /// 返回所有已配置且连接成功的 MCP 工具（首次调用时逐个连接服务器并缓存结果）。
+    /// 单个服务器失败只记日志、不影响其它服务器，不向调用方抛出网络/进程错误；
+    /// 仅当取消时抛 <see cref="OperationCanceledException"/>。
+    /// </summary>
+    Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// MCP 客户端管理：按 <see cref="SouffleSettings.McpServers"/> 懒连接各个服务器，
+/// 缓存工具列表，并把工具名统一改成「服务器名__工具名」以避免跨服务器重名。
+/// </summary>
+public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, IDisposable
+{
+    private static readonly ILogger Logger = Log.ForContext<McpToolService>();
+
+    /// <summary>多数模型接口对工具名长度的限制是 64 个字符。</summary>
+    private const int MaxToolNameLength = 64;
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly List<McpClient> _clients = [];
+    private IReadOnlyList<AITool>? _tools;
+    private bool _disposed;
+
+    public async Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken)
+    {
+        if (_tools is { } cached) return cached;
+
+        // 懒连接只做一次：并发请求（如多个对话窗口同时发消息）在这里排队
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _tools ??= await ConnectAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<IReadOnlyList<AITool>> ConnectAsync(CancellationToken cancellationToken)
+    {
+        var servers = settings.McpServers
+            .Where(server => server.Enabled && !string.IsNullOrWhiteSpace(server.Name))
+            .ToList();
+        if (servers.Count == 0) return [];
+
+        var tools = new List<AITool>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var server in servers)
+            await AddServerToolsAsync(server, tools, usedNames, cancellationToken).ConfigureAwait(false);
+
+        Logger.Debug("MCP tools loaded servers={Servers} tools={Tools}", servers.Count, tools.Count);
+        return tools;
+    }
+
+    private async Task AddServerToolsAsync(
+        McpServerConfig server,
+        List<AITool> tools,
+        HashSet<string> usedNames,
+        CancellationToken cancellationToken)
+    {
+        McpClient? client = null;
+        IClientTransport? transport = null;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, server.TimeoutSeconds)));
+
+            transport = CreateTransport(server);
+            client = await McpClient.CreateAsync(transport, cancellationToken: timeout.Token).ConfigureAwait(false);
+            var serverTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+
+            // 连接成功：交给 _clients 统一释放，finally 不再处理
+            _clients.Add(client);
+            client = null;
+            transport = null;
+
+            foreach (var tool in serverTools)
+                tools.Add(tool.WithName(UniqueToolName(server.Name, tool.Name, usedNames)));
+
+            Logger.Debug("MCP server {Server} connected tools={Tools}", server.Name, serverTools.Count);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            Logger.Warning(ex, "MCP server {Server} timed out after {Seconds}s", server.Name, server.TimeoutSeconds);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "MCP server {Server} unavailable", server.Name);
+        }
+        finally
+        {
+            if (client is not null) await DisposeQuietlyAsync(client).ConfigureAwait(false);
+            else if (transport is IAsyncDisposable disposable) await DisposeQuietlyAsync(disposable).ConfigureAwait(false);
+        }
+    }
+
+    private static IClientTransport CreateTransport(McpServerConfig server) =>
+        server.Transport == McpTransportType.Http
+            ? new HttpClientTransport(new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(server.Url.Trim()),
+                Name = server.Name,
+                TransportMode = HttpTransportMode.AutoDetect,
+                AdditionalHeaders = server.Headers,
+            })
+            : new StdioClientTransport(new StdioClientTransportOptions
+            {
+                Name = server.Name,
+                Command = server.Command.Trim(),
+                Arguments = server.Arguments,
+                WorkingDirectory = string.IsNullOrWhiteSpace(server.WorkingDirectory)
+                    ? Environment.CurrentDirectory
+                    : server.WorkingDirectory,
+                InheritEnvironmentVariables = true,
+                EnvironmentVariables = server.Environment.ToDictionary(kv => kv.Key, kv => (string?)kv.Value),
+                StandardErrorLines = line => Logger.Debug("MCP {Server} stderr: {Line}", server.Name, line),
+            });
+
+    /// <summary>工具名加服务器前缀并做 ASCII 净化（含中文/空格等字符的服务器名或工具名会变成下划线）。</summary>
+    private static string UniqueToolName(string serverName, string toolName, HashSet<string> usedNames)
+    {
+        var raw = $"{SanitizeName(serverName, "server")}__{SanitizeName(toolName, "tool")}";
+        if (raw.Length > MaxToolNameLength) raw = raw[..MaxToolNameLength];
+
+        var name = raw;
+        for (var i = 2; !usedNames.Add(name); i++)
+        {
+            var suffix = $"_{i}";
+            name = raw.Length + suffix.Length <= MaxToolNameLength
+                ? raw + suffix
+                : raw[..(MaxToolNameLength - suffix.Length)] + suffix;
+        }
+
+        return name;
+    }
+
+    private static string SanitizeName(string value, string fallback)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var c in value)
+            builder.Append(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' ? c : '_');
+
+        var name = builder.ToString().Trim('_');
+        return name.Length == 0 ? fallback : name;
+    }
+
+    private static async Task DisposeQuietlyAsync(IAsyncDisposable disposable)
+    {
+        try
+        {
+            await disposable.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Dispose MCP resource failed");
+        }
+    }
+
+    /// <summary>
+    /// 退出时关闭所有 MCP 连接（stdio 服务器会随之结束子进程）。DI 容器是同步释放的，
+    /// 这里对每个连接限时等待，避免个别服务器卡住应用退出。
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        foreach (var client in _clients)
+        {
+            try
+            {
+                client.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Dispose MCP client failed");
+            }
+        }
+
+        _clients.Clear();
+        _gate.Dispose();
+    }
+}

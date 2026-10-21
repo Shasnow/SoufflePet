@@ -58,15 +58,13 @@ public sealed class LlmChatService : ILlmChatService
 
     private readonly SouffleSettings _settings;
     private readonly ChatMemory _memory;
-    private readonly IReadOnlyList<AITool> _tools;
-    private readonly Dictionary<string, AIFunction> _functions;
+    private readonly ChatTools _chatTools;
 
     public LlmChatService(SouffleSettings settings, ChatTools tools, ChatMemory memory)
     {
         _settings = settings;
         _memory = memory;
-        _tools = tools.Tools;
-        _functions = tools.Tools.OfType<AIFunction>().ToDictionary(f => f.Name, StringComparer.Ordinal);
+        _chatTools = tools;
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -141,10 +139,15 @@ public sealed class LlmChatService : ILlmChatService
 
         messages.AddRange(history);
 
+        // 本地工具 + MCP 工具：MCP 服务器在首次对话时连接，失败只记日志、不影响本地工具
+        var tools = await _chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
+        var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
+        foreach (var function in tools.OfType<AIFunction>()) functions.TryAdd(function.Name, function);
+
         var chatOptions = new ChatOptions
         {
             ModelId = model.ModelId,
-            Tools = [.. _tools],
+            Tools = [.. tools],
         };
 
         for (var round = 0; ; round++)
@@ -192,16 +195,19 @@ public sealed class LlmChatService : ILlmChatService
             messages.AddMessages(response);
             foreach (var call in calls)
             {
-                var result = await InvokeToolAsync(call, cancellationToken).ConfigureAwait(false);
+                var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
                 yield return new LlmToolCallEvent(call.Name, FormatArguments(call.Arguments), FormatResult(result));
             }
         }
     }
 
-    private async Task<object?> InvokeToolAsync(FunctionCallContent call, CancellationToken cancellationToken)
+    private async Task<object?> InvokeToolAsync(
+        FunctionCallContent call,
+        IReadOnlyDictionary<string, AIFunction> functions,
+        CancellationToken cancellationToken)
     {
-        if (!_functions.TryGetValue(call.Name, out var function))
+        if (!functions.TryGetValue(call.Name, out var function))
         {
             Logger.Warning("Unknown tool {Tool}", call.Name);
             return $"未知工具：{call.Name}";

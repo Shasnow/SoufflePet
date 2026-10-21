@@ -55,6 +55,7 @@ public class App : Application
             services.AddSingleton<PetExpressionService>();
             services.AddSingleton<ChatToolAccess>();
             services.AddSingleton<ChatMemory>();
+            services.AddSingleton<IMcpToolService, McpToolService>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
