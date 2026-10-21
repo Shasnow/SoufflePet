@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,24 +28,30 @@ public sealed class ChatTools
     /// <summary>命令输出回传给模型的最大长度，超出截断。</summary>
     private const int ShellOutputMaxLength = 4000;
 
+    /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
+    private const int SkillContentMaxLength = 8000;
+
     private readonly SouffleSettings _settings;
     private readonly PetExpressionService _expressions;
     private readonly ChatToolAccess _access;
     private readonly ChatMemory _memory;
     private readonly IMcpToolService _mcp;
+    private readonly ISkillService _skills;
 
     public ChatTools(
         SouffleSettings settings,
         PetExpressionService expressions,
         ChatToolAccess access,
         ChatMemory memory,
-        IMcpToolService mcp)
+        IMcpToolService mcp,
+        ISkillService skills)
     {
         _settings = settings;
         _expressions = expressions;
         _access = access;
         _memory = memory;
         _mcp = mcp;
+        _skills = skills;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -78,7 +85,16 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 Recall,
                 "recall",
-                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。")
+                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。"),
+            AIFunctionFactory.Create(
+                GetSkills,
+                "get_skills",
+                "列出当前可用的技能（名称与用途）。技能是用户放在工作目录 .agents/skills 或 .souffle/skills 下的操作说明，"
+                + "任务与某个技能相关时，先用 read_skill 读取该技能内容，再按说明执行。"),
+            AIFunctionFactory.Create(
+                ReadSkill,
+                "read_skill",
+                "读取指定技能的完整说明。技能名必须来自 get_skills 的返回值。")
         ];
     }
 
@@ -127,6 +143,40 @@ public sealed class ChatTools
     private string Recall(
         [Description("检索关键词，可以是用户问题里的关键词")] string query)
         => _memory.Recall(query);
+
+    /// <summary>已启用的技能（DisabledSkills 里的名字忽略大小写）。</summary>
+    private IReadOnlyList<SkillInfo> EnabledSkills() =>
+        [.. _skills.Discover().Where(s => !_settings.DisabledSkills.Any(d => string.Equals(d, s.Name, StringComparison.OrdinalIgnoreCase)))];
+
+    private string GetSkills()
+    {
+        var skills = EnabledSkills();
+        if (skills.Count == 0) return "当前没有可用的技能。";
+
+        var builder = new StringBuilder($"当前可用技能共 {skills.Count} 个：");
+        foreach (var skill in skills)
+        {
+            builder.Append("\n- ").Append(skill.Name);
+            if (skill.HasDescription) builder.Append("：").Append(skill.Description);
+        }
+
+        return builder.ToString();
+    }
+
+    private string ReadSkill(
+        [Description("技能名称，必须是 get_skills 返回的名字")] string name)
+    {
+        if (EnabledSkills().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
+            return $"没有名为「{name}」的可用技能，请先调用 get_skills 查看可用技能。";
+
+        var content = _skills.ReadContent(skill);
+        if (content.Length == 0) return $"技能「{skill.Name}」没有正文内容。";
+
+        var builder = new StringBuilder($"技能「{skill.Name}」（{skill.Source}）：\n");
+        return content.Length <= SkillContentMaxLength
+            ? builder.Append(content).ToString()
+            : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
+    }
 
     private async Task<string> RunShellCommand(
         [Description(

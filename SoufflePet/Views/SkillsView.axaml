@@ -1,0 +1,178 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             x:Class="SoufflePet.Views.SkillsView"
+             x:DataType="vm:SkillsViewModel"
+             x:CompileBindings="True">
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="技"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="技能" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：技能列表 -->
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,2">
+                            <TextBlock Text="技能" Classes="section" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="重新扫描技能目录"
+                                        Command="{Binding RefreshCommand}">
+                                    <TextBlock Text="刷新" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="在资源管理器中打开技能目录"
+                                        Command="{Binding OpenFolderCommand}">
+                                    <TextBlock Text="打开" Classes="muted" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding Status}"
+                                   Classes="label"
+                                   Margin="4,0,4,6"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <ListBox Grid.Row="2"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Skills}"
+                                 SelectedItem="{Binding SelectedSkill, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SkillItemViewModel">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                        <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip.Tip="停用后模型无法读取该技能" />
+                                        <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="12.5"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Source}"
+                                                       FontSize="10.5"
+                                                       Foreground="#66FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：技能详情与正文 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0">
+
+                        <StackPanel VerticalAlignment="Center"
+                                    Spacing="4"
+                                    IsVisible="{Binding !HasSelection}">
+                            <TextBlock Text="没有找到技能"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding SearchHint, StringFormat='在 {0} 下放置 SKILL.md'}"
+                                       FontSize="10.5"
+                                       Foreground="#66FFFFFF"
+                                       HorizontalAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Grid RowDefinitions="Auto,Auto,*" IsVisible="{Binding HasSelection}">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="{Binding SelectedSkill.Name}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="#F2FFFFFF"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding SelectedSkill.Description}"
+                                           IsVisible="{Binding SelectedSkill.HasDescription}"
+                                           FontSize="11"
+                                           Foreground="#8CFFFFFF"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding SelectedSkill.FilePath}"
+                                           FontSize="10.5"
+                                           Foreground="#59FFFFFF"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip.Tip="{Binding SelectedSkill.FilePath}" />
+                            </StackPanel>
+
+                            <Border Grid.Row="1" Height="1" Background="#14FFFFFF" Margin="0,8" />
+
+                            <ScrollViewer Grid.Row="2"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto">
+                                <SelectableTextBlock Text="{Binding SelectedSkill.Content}"
+                                                     IsVisible="{Binding SelectedSkill.HasContent}"
+                                                     FontSize="11.5"
+                                                     Foreground="#D9FFFFFF"
+                                                     LineHeight="18"
+                                                     TextWrapping="Wrap"
+                                                     Margin="0,0,8,0" />
+                            </ScrollViewer>
+
+                            <TextBlock Grid.Row="2"
+                                       Text="该技能没有正文内容"
+                                       Classes="muted"
+                                       IsVisible="{Binding !SelectedSkill.HasContent}"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
+</UserControl>

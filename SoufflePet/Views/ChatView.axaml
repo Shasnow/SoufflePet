@@ -76,6 +76,7 @@
                                 <Border Classes="bubble"
                                         Classes.user="{Binding IsUser}"
                                         Classes.tool="{Binding IsTool}"
+                                        Classes.thinking="{Binding IsReasoning}"
                                         Classes.approval="{Binding IsApproval}">
                                     <StackPanel Spacing="7">
                                         <TextBlock Text="{Binding Text}" />
@@ -226,7 +227,7 @@
                                 </Border>
                             </Popup>
 
-                            <!-- 更多操作浮层：MCP 服务器配置入口 -->
+                            <!-- 更多操作浮层：MCP 服务器与技能配置入口 -->
                             <Popup Grid.Column="0" IsOpen="{Binding IsMoreOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding #MoreButton}"
                                    Placement="TopEdgeAlignedLeft"
@@ -249,6 +250,15 @@
                                             <StackPanel Spacing="1">
                                                 <TextBlock Text="MCP 服务器…" FontSize="12.5" Foreground="#F2FFFFFF" />
                                                 <TextBlock Text="配置模型可调用的外部工具"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding OpenSkillsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="技能…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="管理模型可读取的技能说明"
                                                            FontSize="10.5"
                                                            Foreground="#66FFFFFF" />
                                             </StackPanel>

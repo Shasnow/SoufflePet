@@ -1,0 +1,90 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        MCP 工具折叠面板：标题为紧凑的单行（工具名），默认无强调色，
+        展开后在下方以缩进展示说明文字；替代 Fluent 默认 48px 高的大号标题。
+    -->
+    <Styles.Resources>
+        <!-- 标题行：单独成主题，这样悬停/选中样式只需一层 /template/ -->
+        <ControlTheme x:Key="ToolExpanderHeader" TargetType="ToggleButton">
+            <Setter Property="Background" Value="#0DFFFFFF" />
+            <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="9,0,5,0" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Foreground" Value="#D9FFFFFF" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border x:Name="HeaderBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <ContentPresenter x:Name="PART_ContentPresenter"
+                                              Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Center"
+                                              Foreground="{TemplateBinding Foreground}" />
+                            <Path x:Name="Chevron"
+                                  Grid.Column="1"
+                                  Data="M0,0 L4,4 L8,0"
+                                  Stroke="#66FFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  StrokeJoin="Round"
+                                  Margin="8,0,8,0"
+                                  VerticalAlignment="Center"
+                                  RenderTransformOrigin="50%,50%" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+
+            <Style Selector="^:pointerover /template/ Border#HeaderBorder">
+                <Setter Property="Background" Value="#1AFFFFFF" />
+                <Setter Property="BorderBrush" Value="#33FFFFFF" />
+            </Style>
+            <Style Selector="^:pointerover /template/ Path#Chevron">
+                <Setter Property="Stroke" Value="#D9FFFFFF" />
+            </Style>
+            <!-- 展开时箭头转向下 -->
+            <Style Selector="^:checked /template/ Path#Chevron">
+                <Setter Property="RenderTransform" Value="rotate(180deg)" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="ToolExpander" TargetType="Expander">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="11,4,8,7" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="#D9FFFFFF" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <StackPanel Background="{TemplateBinding Background}">
+                        <ToggleButton x:Name="Header"
+                                      Theme="{StaticResource ToolExpanderHeader}"
+                                      Content="{TemplateBinding Header}"
+                                      ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                      IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}" />
+
+                        <ContentPresenter x:Name="PART_ContentPresenter"
+                                          Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          IsVisible="{TemplateBinding IsExpanded}"
+                                          Margin="{TemplateBinding Padding}" />
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter>
+        </ControlTheme>
+    </Styles.Resources>
+</Styles>

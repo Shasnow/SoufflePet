@@ -37,6 +37,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ChatToolAccess _toolAccess;
     private readonly ChatMemory _memory;
     private readonly IMcpSettingsWindowService _mcpSettings;
+    private readonly ISkillsWindowService _skillsWindow;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -58,13 +59,15 @@ public partial class ChatViewModel : ViewModelBase
         ILlmChatService llm,
         ChatToolAccess toolAccess,
         ChatMemory memory,
-        IMcpSettingsWindowService mcpSettings)
+        IMcpSettingsWindowService mcpSettings,
+        ISkillsWindowService skillsWindow)
     {
         _settings = settings;
         _llm = llm;
         _toolAccess = toolAccess;
         _memory = memory;
         _mcpSettings = mcpSettings;
+        _skillsWindow = skillsWindow;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
 
@@ -125,7 +128,7 @@ public partial class ChatViewModel : ViewModelBase
         IsModelPickerOpen = false;
     }
 
-    /// <summary>命令执行审批规则（本次运行有效，不持久化）。</summary>
+    /// <summary>命令执行审批规则（修改后写入设置文件）。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ApprovalButtonText))]
     [NotifyPropertyChangedFor(nameof(IsManualApproval))]
@@ -223,6 +226,14 @@ public partial class ChatViewModel : ViewModelBase
         _mcpSettings.Show();
     }
 
+    /// <summary>打开技能管理窗口（每次打开前重新扫描技能目录）。</summary>
+    [RelayCommand]
+    private void OpenSkills()
+    {
+        IsMoreOpen = false;
+        _skillsWindow.Show();
+    }
+
     [RelayCommand]
     private void OpenAddModel()
     {
@@ -308,12 +319,23 @@ public partial class ChatViewModel : ViewModelBase
 
         var answer = string.Empty;   // 整轮回复（写入历史）
         var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
+        Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
         try
         {
             await foreach (var evt in _llm.StreamAsync(model, [.. _history], cts.Token))
             {
                 switch (evt)
                 {
+                    case LlmReasoningDelta reasoning:
+                        if (thinking is null)
+                        {
+                            thinking = new Models.ChatMessage(string.Empty, isUser: false, isReasoning: true);
+                            Messages.Insert(Messages.IndexOf(reply), thinking);
+                        }
+
+                        thinking.Text += reasoning.Text;
+                        break;
+
                     case LlmTextDelta delta:
                         answer += delta.Text;
                         segment += delta.Text;
@@ -322,6 +344,9 @@ public partial class ChatViewModel : ViewModelBase
 
                     case LlmToolCallEvent call:
                         var record = new Models.ChatMessage(FormatToolCall(call), isUser: false, isTool: true);
+                        // 工具调用同样写入长期记忆（只参与检索，不参与界面恢复与请求历史）
+                        _memory.AddTurn(ChatMemory.ToolRole, record.Text);
+                        thinking = null; // 下一轮思考另起气泡，排在后续回复之前
                         var index = Messages.IndexOf(reply);
                         if (segment.Length == 0)
                         {
