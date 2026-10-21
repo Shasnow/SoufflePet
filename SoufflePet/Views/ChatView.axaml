@@ -196,7 +196,8 @@
                 <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
 
                 <!-- 消息区 -->
-                <ScrollViewer Grid.Row="2"
+                <ScrollViewer Name="MessageScroll"
+                              Grid.Row="2"
                               HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
                               AllowAutoHide="True">
@@ -265,7 +266,15 @@
                             <Button Grid.Column="3"
                                     Classes="primary"
                                     Content="发送"
+                                    IsVisible="{Binding !IsGenerating}"
                                     Command="{Binding SendCommand}" />
+
+                            <!-- 生成期间同一位置换成停止按钮 -->
+                            <Button Grid.Column="3"
+                                    Classes="primary"
+                                    Content="停止"
+                                    IsVisible="{Binding IsGenerating}"
+                                    Command="{Binding StopCommand}" />
 
                             <!-- 模型选择浮层：列表底部固定一个「添加模型」入口 -->
                             <Popup IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"

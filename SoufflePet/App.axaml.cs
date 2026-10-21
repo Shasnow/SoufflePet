@@ -52,6 +52,7 @@ public class App : Application
             services.AddSingleton<ILipSyncService, LipSyncService>();
             services.AddSingleton<IGamepadService, GamepadService>();
             services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
+            services.AddSingleton<ILlmChatService, LlmChatService>();
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
             services.AddSingleton<IChatWindowService, ChatWindowService>();
             services.AddTransient<WebViewPetWindow>();
