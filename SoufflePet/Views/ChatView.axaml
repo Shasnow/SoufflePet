@@ -83,6 +83,47 @@
             <Setter Property="Foreground" Value="#99FFFFFF" />
         </Style>
 
+        <!-- 待审批的工具调用：气泡描边点亮强调色，内部带允许/拒绝按钮 -->
+        <Style Selector="Border.bubble.approval">
+            <Setter Property="BorderBrush" Value="#4DE8879B" />
+        </Style>
+
+        <Style Selector="Button.approval">
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.approval.accept">
+            <Setter Property="Background" Value="#E8879B" />
+            <Setter Property="Foreground" Value="#2A141B" />
+        </Style>
+        <Style Selector="Button.approval.accept:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#F09CAE" />
+        </Style>
+        <Style Selector="Button.approval.reject">
+            <Setter Property="Background" Value="#1FFFFFFF" />
+            <Setter Property="Foreground" Value="#D9FFFFFF" />
+        </Style>
+        <Style Selector="Button.approval.reject:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#33FFFFFF" />
+        </Style>
+
+        <!-- 审批规则浮层里的可选项 -->
+        <Style Selector="Button.modeItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.modeItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+        </Style>
+
         <Style Selector="TextBlock.muted">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Foreground" Value="#8CFFFFFF" />
@@ -223,8 +264,25 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ChatMessage">
-                                <Border Classes="bubble" Classes.user="{Binding IsUser}" Classes.tool="{Binding IsTool}">
-                                    <TextBlock Text="{Binding Text}" />
+                                <Border Classes="bubble"
+                                        Classes.user="{Binding IsUser}"
+                                        Classes.tool="{Binding IsTool}"
+                                        Classes.approval="{Binding IsApproval}">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="{Binding Text}" />
+
+                                        <!-- 手动审批：等待用户决定时才显示按钮 -->
+                                        <StackPanel Orientation="Horizontal"
+                                                    Spacing="7"
+                                                    IsVisible="{Binding IsPending}">
+                                            <Button Classes="approval accept"
+                                                    Content="允许"
+                                                    Command="{Binding ApproveCommand}" />
+                                            <Button Classes="approval reject"
+                                                    Content="拒绝"
+                                                    Command="{Binding RejectCommand}" />
+                                        </StackPanel>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -256,7 +314,7 @@
                                  MinHeight="62"
                                  MaxHeight="132" />
 
-                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="Auto,Auto,*,Auto">
+                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="Auto,Auto,Auto,*,Auto">
                             <Button Classes="ghost" ToolTip.Tip="上传附件">
                                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                     <Path Data="M0,6 L12,6 M6,0 L6,12"
@@ -277,21 +335,33 @@
                                 <TextBlock Text="{Binding ModelButtonText}" Classes="muted" />
                             </Button>
 
-                            <Button Grid.Column="3"
+                            <Button Name="ApprovalButton"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Classes="ghost"
+                                    ToolTip.Tip="命令执行审批规则"
+                                    Command="{Binding ToggleApprovalPickerCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Ellipse Width="6" Height="6" Fill="#E8879B" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding ApprovalButtonText}" Classes="muted" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Grid.Column="4"
                                     Classes="primary"
                                     Content="发送"
                                     IsVisible="{Binding !IsGenerating}"
                                     Command="{Binding SendCommand}" />
 
                             <!-- 生成期间同一位置换成停止按钮 -->
-                            <Button Grid.Column="3"
+                            <Button Grid.Column="4"
                                     Classes="primary"
                                     Content="停止"
                                     IsVisible="{Binding IsGenerating}"
                                     Command="{Binding StopCommand}" />
 
                             <!-- 模型选择浮层：列表底部固定一个「添加模型」入口 -->
-                            <Popup IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"
+                            <Popup Grid.Column="0" IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding #ModelButton}"
                                    Placement="TopEdgeAlignedLeft"
                                    VerticalOffset="-4"
@@ -343,6 +413,63 @@
                                     </StackPanel>
                                 </Border>
                             </Popup>
+
+                            <!-- 审批规则浮层：手动审批逐个确认，完全访问直接执行 -->
+                            <Popup Grid.Column="2"
+                                   IsOpen="{Binding IsApprovalPickerOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #ApprovalButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="212"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="命令执行权限"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <Button Classes="modeItem" Command="{Binding UseManualApprovalCommand}">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="手动审批" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="每次执行命令前询问"
+                                                               FontSize="10.5"
+                                                               Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="✓"
+                                                           FontSize="12"
+                                                           Foreground="#E8879B"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding IsManualApproval}" />
+                                            </Grid>
+                                        </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding UseFullAccessCommand}">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="完全访问" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="不再询问，直接执行"
+                                                               FontSize="10.5"
+                                                               Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="✓"
+                                                           FontSize="12"
+                                                           Foreground="#E8879B"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding IsFullAccess}" />
+                                            </Grid>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
                         </Grid>
                     </Grid>
                 </Border>
@@ -365,6 +492,13 @@
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="#F2FFFFFF" />
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="提供商（可选）" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelProvider, Mode=TwoWay}"
+                                         PlaceholderText="例如：DeepSeek" />
+                            </StackPanel>
 
                             <StackPanel Spacing="4">
                                 <TextBlock Text="名称" FontSize="11" Foreground="#8CFFFFFF" />

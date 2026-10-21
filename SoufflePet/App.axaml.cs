@@ -52,6 +52,8 @@ public class App : Application
             services.AddSingleton<ILipSyncService, LipSyncService>();
             services.AddSingleton<IGamepadService, GamepadService>();
             services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
+            services.AddSingleton<PetExpressionService>();
+            services.AddSingleton<ChatToolAccess>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
@@ -75,6 +77,9 @@ public class App : Application
             desktop.MainWindow = window;
             RenderScaling = window.RenderScaling;
             Logger.Debug("Main window assigned");
+
+            // 表情工具需要窗口才能生效；ChatTools 先于窗口解析，所以在这里补挂（避免 DI 循环）
+            _provider.GetRequiredService<PetExpressionService>().Attach(petOps);
 
             // 自动表情检测服务的事件订阅必须早于其内部 DispatcherTimer 首次触发，避免漏掉初始状态
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();

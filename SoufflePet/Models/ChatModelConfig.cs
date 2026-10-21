@@ -7,10 +7,12 @@ namespace SoufflePet.Models;
 
 /// <summary>
 /// 一个 LLM 对话模型的配置（名称 + 接口信息）。
-/// 目前只用于对话窗口的模型选择与持久化，尚未真正发起请求。
 /// </summary>
 public class ChatModelConfig
 {
+    [Description("提供商（可选，如 OpenAI、DeepSeek、Ollama）")]
+    public string Provider { get; set; } = string.Empty;
+
     [Description("显示名称（对话窗口模型列表中的名字）")]
     public string Name { get; set; } = string.Empty;
 

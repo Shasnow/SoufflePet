@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Avalonia.Threading;
 using Microsoft.Extensions.AI;
 using Serilog;
 using SoufflePet.Models;
@@ -33,6 +34,7 @@ public partial class ChatViewModel : ViewModelBase
 
     private readonly SouffleSettings _settings;
     private readonly ILlmChatService _llm;
+    private readonly ChatToolAccess _toolAccess;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -40,16 +42,22 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>当前流式请求的取消源；生成结束后置空。</summary>
     private CancellationTokenSource? _cts;
 
+    /// <summary>本轮回复的占位气泡：审批气泡与工具记录都要插在它之前。</summary>
+    private Models.ChatMessage? _reply;
+
     /// <summary>
     /// 对话历史：统一用 Microsoft.Extensions.AI.ChatMessage 记录，
     /// 只包含真实对话（不含工具调用记录、思考占位与错误提示）。
     /// </summary>
     private readonly List<ChatMessage> _history = [];
 
-    public ChatViewModel(SouffleSettings settings, ILlmChatService llm)
+    public ChatViewModel(SouffleSettings settings, ILlmChatService llm, ChatToolAccess toolAccess)
     {
         _settings = settings;
         _llm = llm;
+        _toolAccess = toolAccess;
+        ApprovalMode = toolAccess.ApprovalMode;
+        toolAccess.ApprovalRequested += OnApprovalRequested;
 
         // 首次启动列表为空且没有已保存的模型名，此时保持未选中状态。
         SelectedModel = settings.ChatModelName is { Length: > 0 } name
@@ -82,7 +90,7 @@ public partial class ChatViewModel : ViewModelBase
     public partial ChatModelConfig? SelectedModel { get; set; }
 
     /// <summary>模型按钮上显示的文案。</summary>
-    public string ModelButtonText => $"模型 · {SelectedModel?.Name ?? "请选择模型"} ▾";
+    public string ModelButtonText => SelectedModel is null? "请选择模型 ▾" : $"{SelectedModel.Provider} · {SelectedModel.Name} ▾";
 
     partial void OnSelectedModelChanged(ChatModelConfig? value)
     {
@@ -92,6 +100,60 @@ public partial class ChatViewModel : ViewModelBase
         IsModelPickerOpen = false;
     }
 
+    /// <summary>命令执行审批规则（本次运行有效，不持久化）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ApprovalButtonText))]
+    [NotifyPropertyChangedFor(nameof(IsManualApproval))]
+    [NotifyPropertyChangedFor(nameof(IsFullAccess))]
+    public partial ToolApprovalMode ApprovalMode { get; set; } = ToolApprovalMode.Manual;
+
+    partial void OnApprovalModeChanged(ToolApprovalMode value) => _toolAccess.ApprovalMode = value;
+
+    /// <summary>审批按钮上显示的当前规则。</summary>
+    public string ApprovalButtonText =>
+        ApprovalMode == ToolApprovalMode.Manual ? "手动审批" : "完全访问";
+
+    public bool IsManualApproval => ApprovalMode == ToolApprovalMode.Manual;
+
+    public bool IsFullAccess => ApprovalMode == ToolApprovalMode.FullAccess;
+
+    /// <summary>审批规则选择浮层是否展开。</summary>
+    [ObservableProperty]
+    public partial bool IsApprovalPickerOpen { get; set; }
+
+    [RelayCommand]
+    private void ToggleApprovalPicker() => IsApprovalPickerOpen = !IsApprovalPickerOpen;
+
+    [RelayCommand]
+    private void UseManualApproval() => SelectApprovalMode(ToolApprovalMode.Manual);
+
+    [RelayCommand]
+    private void UseFullAccess() => SelectApprovalMode(ToolApprovalMode.FullAccess);
+
+    private void SelectApprovalMode(ToolApprovalMode mode)
+    {
+        ApprovalMode = mode;
+        IsApprovalPickerOpen = false;
+    }
+
+    /// <summary>工具执行线程发起审批请求：回到 UI 线程插入带按钮的气泡。</summary>
+    private void OnApprovalRequested(ToolApprovalRequest request)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var message = new Models.ChatMessage(
+                $"模型请求执行命令，等待你的确认：\n{request.Arguments}",
+                isUser: false,
+                isTool: true,
+                approval: request);
+
+            // 和工具记录一样插在回复气泡之前，保持「确认 → 执行结果 → 回复」的顺序
+            var index = _reply is { } reply ? Messages.IndexOf(reply) : -1;
+            if (index >= 0) Messages.Insert(index, message);
+            else Messages.Add(message);
+        });
+    }
+
     /// <summary>模型选择列表是否展开。</summary>
     [ObservableProperty]
     public partial bool IsModelPickerOpen { get; set; }
@@ -99,6 +161,9 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>「添加模型」表单是否显示。</summary>
     [ObservableProperty]
     public partial bool IsAddingModel { get; set; }
+
+    [ObservableProperty]
+    public partial string NewModelProvider { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string NewModelName { get; set; } = string.Empty;
@@ -127,6 +192,7 @@ public partial class ChatViewModel : ViewModelBase
     private void OpenAddModel()
     {
         IsModelPickerOpen = false;
+        NewModelProvider = string.Empty;
         NewModelName = string.Empty;
         NewModelModelId = string.Empty;
         NewModelBaseUrl = string.Empty;
@@ -156,6 +222,7 @@ public partial class ChatViewModel : ViewModelBase
 
         var model = new ChatModelConfig
         {
+            Provider = NewModelProvider.Trim(),
             Name = name,
             ModelId = NewModelModelId.Trim(),
             BaseUrl = NewModelBaseUrl.Trim(),
@@ -195,6 +262,7 @@ public partial class ChatViewModel : ViewModelBase
 
         // 占位气泡：收到第一段内容时整体替换，避免出现空气泡
         var reply = new Models.ChatMessage(ThinkingText, isUser: false);
+        _reply = reply;
         Messages.Add(reply);
 
         using var cts = new CancellationTokenSource();
@@ -239,6 +307,7 @@ public partial class ChatViewModel : ViewModelBase
             // 只有真正生成出的内容才写回历史；停止时保留已收到的部分
             if (answer.Length > 0) _history.Add(new ChatMessage(ChatRole.Assistant, answer));
             _cts = null;
+            _reply = null;
             IsGenerating = false;
         }
     }
