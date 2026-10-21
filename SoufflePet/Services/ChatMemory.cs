@@ -21,11 +21,20 @@ public readonly record struct MemoryTurn(DateTimeOffset Time, string Role, strin
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
 /// 数据保存在 %AppData%\SoufflePet 下（不随安装目录变化）：
-/// conversations.jsonl 记录每轮问答，profile.json 保存模型用 remember 写入的事实。
+/// conversations.jsonl 记录每轮问答与工具调用，profile.json 保存模型用 remember 写入的事实。
 /// 检索使用中文 2-gram + BM25，不依赖分词库与向量服务。
 /// </summary>
 public sealed class ChatMemory
 {
+    /// <summary>用户角色。</summary>
+    public const string UserRole = "user";
+
+    /// <summary>助手角色。</summary>
+    public const string AssistantRole = "assistant";
+
+    /// <summary>工具调用记录（只在长期记忆里保留，不参与界面恢复与请求历史）。</summary>
+    public const string ToolRole = "tool";
+
     /// <summary>内存里保留的最大历史轮数，也是启动时读取的行数。</summary>
     private const int MaxTurnsInMemory = 2000;
 
@@ -88,7 +97,7 @@ public sealed class ChatMemory
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
     public bool Enabled => _settings.ChatMemoryEnabled;
 
-    /// <summary>追加一轮对话并落盘；role 只用 user / assistant。</summary>
+    /// <summary>追加一条记录并落盘；role 为 user / assistant / tool。</summary>
     public void AddTurn(string role, string text)
     {
         text = text.Trim();
@@ -114,13 +123,19 @@ public sealed class ChatMemory
         }
     }
 
-    /// <summary>最近若干轮对话（用于界面恢复）；会裁掉开头的助手消息，避免从半截对话开始。</summary>
+    /// <summary>
+    /// 最近若干轮对话（用于界面恢复）；会跳过工具调用记录，并裁掉开头的助手消息，
+    /// 避免从半截对话开始。
+    /// </summary>
     public IReadOnlyList<MemoryTurn> RecentTurns(int maxTurns)
     {
         lock (_gate)
         {
             var skip = Math.Max(0, _turns.Count - maxTurns);
-            var turns = _turns.Skip(skip).Select(t => new MemoryTurn(t.Time, t.Role, t.Text)).ToList();
+            var turns = _turns.Skip(skip)
+                .Where(t => !IsToolRole(t.Role))
+                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text))
+                .ToList();
             while (turns.Count > 0 && !IsUserRole(turns[0].Role)) turns.RemoveAt(0);
             return turns;
         }
@@ -196,7 +211,7 @@ public sealed class ChatMemory
             builder.Append("- [")
                 .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
                 .Append("] ")
-                .Append(IsUserRole(turn.Role) ? "用户" : "你")
+                .Append(RoleLabel(turn.Role))
                 .Append('：')
                 .AppendLine(Truncate(turn.Text, MaxSnippetChars * 2));
         }
@@ -250,7 +265,7 @@ public sealed class ChatMemory
                 builder.Append("- [")
                     .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
                     .Append("] ")
-                    .Append(IsUserRole(turn.Role) ? "用户" : "你")
+                    .Append(RoleLabel(turn.Role))
                     .Append('：')
                     .AppendLine(Truncate(turn.Text, MaxSnippetChars));
             }
@@ -402,7 +417,13 @@ public sealed class ChatMemory
     }
 
     private static bool IsUserRole(string role) =>
-        !string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase);
+        string.Equals(role, UserRole, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsToolRole(string role) =>
+        string.Equals(role, ToolRole, StringComparison.OrdinalIgnoreCase);
+
+    private static string RoleLabel(string role) =>
+        IsUserRole(role) ? "用户" : IsToolRole(role) ? "工具" : "你";
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";

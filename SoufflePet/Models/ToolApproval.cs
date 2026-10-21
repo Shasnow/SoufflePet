@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace SoufflePet.Models;
 
-/// <summary>工具调用的人工审批规则（只在本次运行内有效）。</summary>
+/// <summary>工具调用的人工审批规则（保存在设置文件中）。</summary>
 public enum ToolApprovalMode
 {
     /// <summary>每次执行前都要用户点击允许。</summary>

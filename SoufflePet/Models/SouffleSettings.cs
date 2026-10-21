@@ -8,6 +8,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Serilog;
 
@@ -108,6 +109,11 @@ public partial class SouffleSettings : ObservableObject
     [ObservableProperty]
     [Description("是否启用长期记忆（对话落盘、档案注入与关键词检索）")]
     public partial bool ChatMemoryEnabled { get; set; } = true;
+
+    [ObservableProperty]
+    [Description("命令执行审批规则（Manual 每次询问，FullAccess 直接执行）")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public partial ToolApprovalMode ToolApproval { get; set; } = ToolApprovalMode.Manual;
     
     [Description("最大工具调用轮数")]
     public int MaxToolRounds { get; init; } = 10;
@@ -115,6 +121,10 @@ public partial class SouffleSettings : ObservableObject
     [ObservableProperty]
     [Description("MCP 服务器列表（启用的服务器会在下一次对话时连接，其工具交给模型调用；修改后即时生效）")]
     public partial List<McpServerConfig> McpServers { get; set; } = [];
+
+    [ObservableProperty]
+    [Description("已停用的技能名称（未列出的技能默认启用；技能自动从 .agents/skills 与 .souffle/skills 读取）")]
+    public partial List<string> DisabledSkills { get; set; } = [];
 
     public static SouffleSettings Load()
     {

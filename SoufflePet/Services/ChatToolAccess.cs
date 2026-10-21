@@ -9,13 +9,21 @@ using SoufflePet.Models;
 namespace SoufflePet.Services;
 
 /// <summary>
-/// 工具审批规则：只在本次运行内有效，不写入设置文件。
+/// 工具审批规则：保存在设置文件（<see cref="SouffleSettings.ToolApproval"/>）里，修改后立即生效。
 /// 手动审批时通过 <see cref="ApprovalRequested"/> 交给对话界面弹出确认，工具执行侧等待结果。
 /// </summary>
 public sealed class ChatToolAccess
 {
+    private readonly SouffleSettings _settings;
+
+    public ChatToolAccess(SouffleSettings settings) => _settings = settings;
+
     /// <summary>当前审批规则，默认每次询问。</summary>
-    public ToolApprovalMode ApprovalMode { get; set; } = ToolApprovalMode.Manual;
+    public ToolApprovalMode ApprovalMode
+    {
+        get => _settings.ToolApproval;
+        set => _settings.ToolApproval = value;
+    }
 
     /// <summary>需要用户确认时触发；没有订阅者（界面不可用）时视为拒绝。</summary>
     public event Action<ToolApprovalRequest>? ApprovalRequested;

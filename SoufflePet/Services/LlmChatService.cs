@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -24,6 +24,9 @@ public abstract record LlmStreamEvent;
 
 /// <summary>一段助手文本增量。</summary>
 public sealed record LlmTextDelta(string Text) : LlmStreamEvent;
+
+/// <summary>一段思考过程增量（推理模型返回；只用于界面展示，不进入请求历史与长期记忆）。</summary>
+public sealed record LlmReasoningDelta(string Text) : LlmStreamEvent;
 
 /// <summary>模型发起的一次工具调用（已执行，附带参数与结果）。</summary>
 public sealed record LlmToolCallEvent(string Name, string Arguments, string Result) : LlmStreamEvent;
@@ -172,6 +175,13 @@ public sealed class LlmChatService : ILlmChatService
                     }
 
                     updates.Add(update);
+                    // 思考内容与正文分开产出，界面上各自展示
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is TextReasoningContent { Text: { Length: > 0 } reasoning })
+                            yield return new LlmReasoningDelta(reasoning);
+                    }
+
                     if (update.Text is { Length: > 0 } text) yield return new LlmTextDelta(text);
                 }
             }

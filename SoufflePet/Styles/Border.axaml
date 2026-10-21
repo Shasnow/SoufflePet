@@ -38,6 +38,20 @@
         <Setter Property="Foreground" Value="#99FFFFFF" />
     </Style>
 
+    <!-- 思考过程：左侧强调条 + 更淡的文字，与正式回复区分开 -->
+    <Style Selector="Border.bubble.thinking">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="#40E8879B" />
+        <Setter Property="BorderThickness" Value="2,0,0,0" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="Padding" Value="9,1,0,3" />
+    </Style>
+    <Style Selector="Border.bubble.thinking TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="LineHeight" Value="17" />
+        <Setter Property="Foreground" Value="#80FFFFFF" />
+    </Style>
+
     <!-- 待审批的工具调用：气泡描边点亮强调色 -->
     <Style Selector="Border.bubble.approval">
         <Setter Property="BorderBrush" Value="#4DE8879B" />
