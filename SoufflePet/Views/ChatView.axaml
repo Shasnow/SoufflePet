@@ -171,7 +171,8 @@
         <Style Selector="ListBox.modelList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#33E8879B" />
         </Style>
-        <Style Selector="ListBox.modelList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Style
+            Selector="ListBox.modelList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#40E8879B" />
         </Style>
 
@@ -314,47 +315,47 @@
                                  MinHeight="62"
                                  MaxHeight="132" />
 
-                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="Auto,Auto,Auto,*,Auto">
-                            <Button Classes="ghost" ToolTip.Tip="上传附件">
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <!-- 左侧操作项允许收缩裁剪，发送按钮固定在右侧，永远不会被顶出窗口 -->
+                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="*,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
+                                <Button Classes="ghost" ToolTip.Tip="添加文件">
                                     <Path Data="M0,6 L12,6 M6,0 L6,12"
-                                          Stroke="#8CFFFFFF"
-                                          StrokeThickness="1.4"
-                                          StrokeLineCap="Round"
-                                          VerticalAlignment="Center" />
-                                    <TextBlock Text="附件" Classes="muted" />
-                                </StackPanel>
-                            </Button>
+                                            Stroke="#8CFFFFFF"
+                                            StrokeThickness="1.4"
+                                            StrokeLineCap="Round"
+                                            VerticalAlignment="Center" />
+                                </Button>
+                                <Button Name="ApprovalButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="命令执行审批规则"
+                                        Command="{Binding ToggleApprovalPickerCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <Ellipse Width="6" Height="6" Fill="#E8879B" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding ApprovalButtonText}" Classes="muted" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Name="ModelButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="选择模型"
+                                        Command="{Binding ToggleModelPickerCommand}">
+                                    <TextBlock Text="{Binding ModelButtonText}"
+                                               Classes="muted"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Button>
 
-                            <Button Name="ModelButton"
-                                    Grid.Column="1"
+
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
                                     Margin="6,0,0,0"
-                                    Classes="ghost"
-                                    ToolTip.Tip="选择模型"
-                                    Command="{Binding ToggleModelPickerCommand}">
-                                <TextBlock Text="{Binding ModelButtonText}" Classes="muted" />
-                            </Button>
-
-                            <Button Name="ApprovalButton"
-                                    Grid.Column="2"
-                                    Margin="6,0,0,0"
-                                    Classes="ghost"
-                                    ToolTip.Tip="命令执行审批规则"
-                                    Command="{Binding ToggleApprovalPickerCommand}">
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <Ellipse Width="6" Height="6" Fill="#E8879B" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding ApprovalButtonText}" Classes="muted" />
-                                </StackPanel>
-                            </Button>
-
-                            <Button Grid.Column="4"
                                     Classes="primary"
                                     Content="发送"
                                     IsVisible="{Binding !IsGenerating}"
                                     Command="{Binding SendCommand}" />
 
                             <!-- 生成期间同一位置换成停止按钮 -->
-                            <Button Grid.Column="4"
+                            <Button Grid.Column="1"
+                                    Margin="6,0,0,0"
                                     Classes="primary"
                                     Content="停止"
                                     IsVisible="{Binding IsGenerating}"
@@ -415,8 +416,7 @@
                             </Popup>
 
                             <!-- 审批规则浮层：手动审批逐个确认，完全访问直接执行 -->
-                            <Popup Grid.Column="2"
-                                   IsOpen="{Binding IsApprovalPickerOpen, Mode=TwoWay}"
+                            <Popup Grid.Column="0" IsOpen="{Binding IsApprovalPickerOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding #ApprovalButton}"
                                    Placement="TopEdgeAlignedLeft"
                                    VerticalOffset="-4"
@@ -475,7 +475,7 @@
                 </Border>
 
                 <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
-                <Grid Grid.RowSpan="4"
+                <Grid Grid.Row="0" Grid.RowSpan="4"
                       IsVisible="{Binding IsAddingModel}"
                       Background="#A6000000">
                     <Border Width="344"

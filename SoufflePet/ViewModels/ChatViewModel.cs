@@ -90,7 +90,7 @@ public partial class ChatViewModel : ViewModelBase
     public partial ChatModelConfig? SelectedModel { get; set; }
 
     /// <summary>模型按钮上显示的文案。</summary>
-    public string ModelButtonText => SelectedModel is null? "请选择模型 ▾" : $"{SelectedModel.Provider} · {SelectedModel.Name} ▾";
+    public string ModelButtonText => SelectedModel is null? "请选择模型" : $"{SelectedModel.Provider} · {SelectedModel.Name}";
 
     partial void OnSelectedModelChanged(ChatModelConfig? value)
     {
@@ -105,7 +105,7 @@ public partial class ChatViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(ApprovalButtonText))]
     [NotifyPropertyChangedFor(nameof(IsManualApproval))]
     [NotifyPropertyChangedFor(nameof(IsFullAccess))]
-    public partial ToolApprovalMode ApprovalMode { get; set; } = ToolApprovalMode.Manual;
+    private partial ToolApprovalMode ApprovalMode { get; set; }
 
     partial void OnApprovalModeChanged(ToolApprovalMode value) => _toolAccess.ApprovalMode = value;
 
