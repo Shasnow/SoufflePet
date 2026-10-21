@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -55,12 +55,12 @@ public sealed class ChatMemory
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private static readonly JsonSerializerOptions LineJsonOptions = new()
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private readonly Lock _gate = new();
@@ -103,7 +103,8 @@ public sealed class ChatMemory
 
             try
             {
-                File.AppendAllText(_conversationsPath, JsonSerializer.Serialize(turn, LineJsonOptions) + Environment.NewLine);
+                File.AppendAllText(_conversationsPath,
+                    JsonSerializer.Serialize(turn, LineJsonOptions) + Environment.NewLine);
                 if (_turns.Count % 50 == 0) TrimConversationFile();
             }
             catch (Exception ex)
@@ -417,7 +418,8 @@ public sealed class ChatMemory
         {
             if (cjkRun.Length == 1) tokens.Add(cjkRun.ToString());
             else
-                for (var i = 0; i + 1 < cjkRun.Length; i++) tokens.Add(cjkRun.ToString(i, 2));
+                for (var i = 0; i + 1 < cjkRun.Length; i++)
+                    tokens.Add(cjkRun.ToString(i, 2));
             cjkRun.Clear();
         }
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -13,7 +13,7 @@ public enum ToolApprovalMode
     Manual,
 
     /// <summary>不再询问，直接执行。</summary>
-    FullAccess,
+    FullAccess
 }
 
 /// <summary>一次审批的最终结果。</summary>
@@ -22,7 +22,7 @@ public enum ToolApprovalOutcome
     Pending,
     Approved,
     Rejected,
-    Canceled,
+    Canceled
 }
 
 /// <summary>

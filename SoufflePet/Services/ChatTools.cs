@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -78,12 +78,12 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 Recall,
                 "recall",
-                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。"),
+                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。")
         ];
     }
 
     /// <summary>可传给 ChatOptions.Tools 的工具列表。</summary>
-    public IReadOnlyList<AITool> Tools { get; }
+    private IReadOnlyList<AITool> Tools { get; }
 
     /// <summary>
     /// 本次请求可用的全部工具：本地工具 + 已连接 MCP 服务器的工具（首次调用时连接）。
@@ -110,11 +110,13 @@ public sealed class ChatTools
     }
 
     private Task<string> SetExpression(
-        [Description("表情名称，必须是 get_expressions 列出的名字；空字符串表示清除表情、恢复默认")] string? name)
+        [Description("表情名称，必须是 get_expressions 列出的名字；空字符串表示清除表情、恢复默认")]
+        string? name)
         => _expressions.SetExpressionAsync(name);
 
     private string Remember(
-        [Description("记忆的键，简短中文词，例如「称呼」「常用项目路径」")] string key,
+        [Description("记忆的键，简短中文词，例如「称呼」「常用项目路径」")]
+        string key,
         [Description("记忆的内容，一句话，例如「主人」")] string value)
         => _memory.Remember(key, value);
 
@@ -127,7 +129,9 @@ public sealed class ChatTools
         => _memory.Recall(query);
 
     private async Task<string> RunShellCommand(
-        [Description("要执行的 PowerShell 命令，例如 Get-ChildItem C:\\ 或 Get-Process | Sort-Object CPU -Descending | Select-Object -First 5")] string command,
+        [Description(
+            "要执行的 PowerShell 命令，例如 Get-ChildItem C:\\ 或 Get-Process | Sort-Object CPU -Descending | Select-Object -First 5")]
+        string command,
         CancellationToken cancellationToken)
     {
         // 命令执行按当前审批规则处理：手动审批时阻塞等待用户点击允许
@@ -145,7 +149,7 @@ public sealed class ChatTools
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
         startInfo.ArgumentList.Add("-NoProfile");
         startInfo.ArgumentList.Add("-NonInteractive");
@@ -176,7 +180,15 @@ public sealed class ChatTools
         }
         catch (OperationCanceledException)
         {
-            try { process.Kill(entireProcessTree: true); } catch { /* 已退出则忽略 */ }
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                /* 已退出则忽略 */
+            }
+
             return cancellationToken.IsCancellationRequested
                 ? "命令已取消。"
                 : $"命令超过 {ShellTimeoutSeconds} 秒未结束，已终止。";

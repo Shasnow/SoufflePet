@@ -80,7 +80,7 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>消息列表（首次打开即包含一条助手问候）。</summary>
     public ObservableCollection<Models.ChatMessage> Messages { get; } =
     [
-        new("今天想聊点什么呀？", isUser: false),
+        new("今天想聊点什么呀？", isUser: false)
     ];
 
     /// <summary>可选的对话模型（与设置共享同一集合，添加后直接持久化）。</summary>
@@ -101,7 +101,8 @@ public partial class ChatViewModel : ViewModelBase
     public partial ChatModelConfig? SelectedModel { get; set; }
 
     /// <summary>模型按钮上显示的文案。</summary>
-    public string ModelButtonText => SelectedModel is null? "请选择模型" : $"{SelectedModel.Provider} · {SelectedModel.Name}";
+    public string ModelButtonText =>
+        SelectedModel is null ? "请选择模型" : $"{SelectedModel.Provider} · {SelectedModel.Name}";
 
     partial void OnSelectedModelChanged(ChatModelConfig? value)
     {
@@ -173,20 +174,15 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsAddingModel { get; set; }
 
-    [ObservableProperty]
-    public partial string NewModelProvider { get; set; } = string.Empty;
+    [ObservableProperty] public partial string NewModelProvider { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial string NewModelName { get; set; } = string.Empty;
+    [ObservableProperty] public partial string NewModelName { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial string NewModelModelId { get; set; } = string.Empty;
+    [ObservableProperty] public partial string NewModelModelId { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial string NewModelBaseUrl { get; set; } = string.Empty;
+    [ObservableProperty] public partial string NewModelBaseUrl { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial string NewModelApiKey { get; set; } = string.Empty;
+    [ObservableProperty] public partial string NewModelApiKey { get; set; } = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAddModelError))]
@@ -252,7 +248,7 @@ public partial class ChatViewModel : ViewModelBase
             Name = name,
             ModelId = NewModelModelId.Trim(),
             BaseUrl = NewModelBaseUrl.Trim(),
-            ApiKey = NewModelApiKey.Trim(),
+            ApiKey = NewModelApiKey.Trim()
         };
 
         Models.Add(model);
@@ -297,7 +293,8 @@ public partial class ChatViewModel : ViewModelBase
         _cts = cts;
         IsGenerating = true;
 
-        var answer = string.Empty;
+        var answer = string.Empty;   // 整轮回复（写入历史）
+        var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
         try
         {
             await foreach (var evt in _llm.StreamAsync(model, [.. _history], cts.Token))
@@ -306,27 +303,45 @@ public partial class ChatViewModel : ViewModelBase
                 {
                     case LlmTextDelta delta:
                         answer += delta.Text;
-                        reply.Text = answer;
+                        segment += delta.Text;
+                        reply.Text = segment;
                         break;
 
-                    // 工具记录插在占位气泡之前，保证「工具调用 → 最终回复」的阅读顺序
                     case LlmToolCallEvent call:
                         var record = new Models.ChatMessage(FormatToolCall(call), isUser: false, isTool: true);
-                        Messages.Insert(Messages.IndexOf(reply), record);
+                        var index = Messages.IndexOf(reply);
+                        if (segment.Length == 0)
+                        {
+                            // 还没输出正文：工具记录插在占位气泡之前即可
+                            Messages.Insert(index, record);
+                            break;
+                        }
+
+                        // 正文已经显示在当前气泡里：先截断它，工具记录排在后面，
+                        // 再为后续回复新开一个气泡，避免工具记录把一段话切成上下两半。
+                        Messages.Insert(index + 1, record);
+                        reply = new Models.ChatMessage(ThinkingText, isUser: false);
+                        _reply = reply;
+                        Messages.Insert(index + 2, reply);
+                        segment = string.Empty;
                         break;
                 }
             }
 
-            if (answer.Length == 0) reply.Text = "（没有收到回复）";
+            if (segment.Length == 0)
+            {
+                if (answer.Length == 0) reply.Text = "（没有收到回复）";
+                else Messages.Remove(reply); // 最后一轮只有工具调用，没有正文可显示
+            }
         }
         catch (OperationCanceledException)
         {
-            if (answer.Length == 0) reply.Text = "（已停止）";
+            if (segment.Length == 0) reply.Text = "（已停止）";
         }
         catch (Exception ex)
         {
             var error = $"请求失败：{ex.Message}";
-            reply.Text = answer.Length == 0 ? error : $"{answer}\n\n[{error}]";
+            reply.Text = segment.Length == 0 ? error : $"{segment}\n\n[{error}]";
         }
         finally
         {
@@ -337,6 +352,7 @@ public partial class ChatViewModel : ViewModelBase
                 _memory.AddTurn("assistant", answer);
                 TrimHistory();
             }
+
             _cts = null;
             _reply = null;
             IsGenerating = false;

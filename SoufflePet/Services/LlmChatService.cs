@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -53,7 +53,7 @@ public sealed class LlmChatService : ILlmChatService
     /// <summary>工具参数/结果的序列化选项：保留中文原样，不转成 \\uXXXX。</summary>
     private static readonly JsonSerializerOptions ToolJsonOptions = new()
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private readonly SouffleSettings _settings;
@@ -119,7 +119,7 @@ public sealed class LlmChatService : ILlmChatService
         {
             Endpoint = new Uri(endpoint),
             // 流式回复可能持续很久，放宽默认的 100 秒网络超时
-            NetworkTimeout = TimeSpan.FromMinutes(10),
+            NetworkTimeout = TimeSpan.FromMinutes(10)
         };
         var openAiClient = new ChatClient(
             model.ModelId,
@@ -147,10 +147,10 @@ public sealed class LlmChatService : ILlmChatService
         var chatOptions = new ChatOptions
         {
             ModelId = model.ModelId,
-            Tools = [.. tools],
+            Tools = [.. tools]
         };
 
-        for (var round = 0; ; round++)
+        for (var round = 0;; round++)
         {
             // 文本增量即时产出，同时留存完整流以便汇总工具调用
             var updates = new List<ChatResponseUpdate>();
@@ -237,7 +237,7 @@ public sealed class LlmChatService : ILlmChatService
         null => string.Empty,
         string text => text,
         JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
-        _ => JsonSerializer.Serialize(result, ToolJsonOptions),
+        _ => JsonSerializer.Serialize(result, ToolJsonOptions)
     };
 
     /// <summary>BaseUrl 视为 base 地址；如果用户填了完整接口路径，去掉 /chat/completions 再交给 SDK。</summary>

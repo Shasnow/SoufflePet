@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+﻿// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -31,8 +31,7 @@ public sealed partial class ChatMessage : ObservableObject
         else OnApprovalResolved();
     }
 
-    [ObservableProperty]
-    public partial string Text { get; set; }
+    [ObservableProperty] public partial string Text { get; set; }
 
     public bool IsUser { get; }
 
@@ -62,7 +61,7 @@ public sealed partial class ChatMessage : ObservableObject
         {
             ToolApprovalOutcome.Approved => "已允许执行",
             ToolApprovalOutcome.Rejected => "已拒绝执行",
-            _ => "已取消",
+            _ => "已取消"
         };
         Text = $"{_baseText}\n→ {status}";
     }
