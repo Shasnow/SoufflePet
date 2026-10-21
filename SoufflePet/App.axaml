@@ -1,8 +1,14 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:SoufflePet"
              x:Class="SoufflePet.App"
              RequestedThemeVariant="Default">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <!-- 视图定位器：按命名约定把 ViewModel 映射成 View -->
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
 
     <Application.Styles>
         <FluentTheme />

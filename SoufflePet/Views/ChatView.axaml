@@ -1,0 +1,397 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             xmlns:models="using:SoufflePet.Models"
+             x:Class="SoufflePet.Views.ChatView"
+             x:DataType="vm:ChatViewModel"
+             x:CompileBindings="True">
+
+    <!-- 深色玻璃面板的全部外观收在这一层；窗口外壳（ChatWindow）只负责透明/置顶/尺寸 -->
+    <UserControl.Styles>
+        <!-- 无底色的弱化按钮：悬停时叠一层淡淡的白 -->
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+        </Style>
+
+        <!-- 强调色主按钮（发送） -->
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#E8879B" />
+            <Setter Property="Foreground" Value="#2A141B" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="16,6" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#F09CAE" />
+        </Style>
+        <!-- 草稿为空时按钮禁用：保留强调色的淡出效果，而不是主题的灰色底 -->
+        <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#3DE8879B" />
+        </Style>
+        <Style Selector="Button.primary:disabled">
+            <Setter Property="Foreground" Value="#8C2A141B" />
+        </Style>
+
+        <!-- 消息气泡：助手靠左浅色，用户靠右强调色 -->
+        <Style Selector="Border.bubble">
+            <Setter Property="Background" Value="#17FFFFFF" />
+            <Setter Property="CornerRadius" Value="12,12,12,4" />
+            <Setter Property="Padding" Value="11,8" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="MaxWidth" Value="292" />
+        </Style>
+        <Style Selector="Border.bubble.user">
+            <Setter Property="Background" Value="#E8879B" />
+            <Setter Property="CornerRadius" Value="12,12,4,12" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+        <Style Selector="Border.bubble TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="LineHeight" Value="20" />
+            <Setter Property="Foreground" Value="#F2FFFFFF" />
+        </Style>
+        <Style Selector="Border.bubble.user TextBlock">
+            <Setter Property="Foreground" Value="#2A141B" />
+        </Style>
+
+        <Style Selector="TextBlock.muted">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="#8CFFFFFF" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- 无边框输入框：Fluent 主题会把底色/描边直接设在模板内部 Border 上，必须一起覆盖 -->
+        <Style Selector="TextBox.bare">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bare /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.bare:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <!-- 模型选择列表：去掉默认白底，用强调色淡底表示选中 -->
+        <Style Selector="ListBox.modelList">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBox.modelList ListBoxItem">
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ListBox.modelList ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="ListBox.modelList ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+        </Style>
+        <Style Selector="ListBox.modelList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#33E8879B" />
+        </Style>
+        <Style Selector="ListBox.modelList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#40E8879B" />
+        </Style>
+
+        <!-- 添加模型表单里的输入框：深色底 + 细描边，聚焦时描边染成强调色 -->
+        <Style Selector="TextBox.field">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="#F2FFFFFF" />
+            <Setter Property="CaretBrush" Value="#E8879B" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="MinHeight" Value="32" />
+        </Style>
+        <Style Selector="TextBox.field /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="#12FFFFFF" />
+            <Setter Property="BorderBrush" Value="#22FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="#40FFFFFF" />
+        </Style>
+        <Style Selector="TextBox.field:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="#E8879B" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- 留出 ShadowMargin，避免面板阴影被窗口边界裁掉 -->
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="舒"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="舒芙蕾" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="LLM 对话" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <!-- 消息区 -->
+                <ScrollViewer Grid.Row="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              AllowAutoHide="True">
+                    <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="10" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ChatMessageViewModel">
+                                <Border Classes="bubble" Classes.user="{Binding IsUser}">
+                                    <TextBlock Text="{Binding Text}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <!-- 输入区：多行文本框 + 下方「附件 / 模型 / 发送」操作行 -->
+                <Border Grid.Row="3"
+                        Margin="12,4,12,12"
+                        Padding="10,8"
+                        CornerRadius="12"
+                        Background="#0FFFFFFF"
+                        BorderBrush="#22FFFFFF"
+                        BorderThickness="1">
+                    <Grid RowDefinitions="Auto,Auto">
+                        <!-- 外观交给 .bare 样式覆盖主题底色，并去掉聚焦时的蓝色装饰层 -->
+                        <TextBox Name="InputBox"
+                                 Classes="bare"
+                                 Text="{Binding Draft, Mode=TwoWay}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 PlaceholderText="和舒芙蕾说点什么…"
+                                 FocusAdorner="{x:Null}"
+                                 Foreground="#F2FFFFFF"
+                                 CaretBrush="#E8879B"
+                                 FontSize="13"
+                                 LineHeight="20"
+                                 Padding="2"
+                                 MinHeight="62"
+                                 MaxHeight="132" />
+
+                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="Auto,Auto,*,Auto">
+                            <Button Classes="ghost" ToolTip.Tip="上传附件">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Path Data="M0,6 L12,6 M6,0 L6,12"
+                                          Stroke="#8CFFFFFF"
+                                          StrokeThickness="1.4"
+                                          StrokeLineCap="Round"
+                                          VerticalAlignment="Center" />
+                                    <TextBlock Text="附件" Classes="muted" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Name="ModelButton"
+                                    Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    Classes="ghost"
+                                    ToolTip.Tip="选择模型"
+                                    Command="{Binding ToggleModelPickerCommand}">
+                                <TextBlock Text="{Binding ModelButtonText}" Classes="muted" />
+                            </Button>
+
+                            <Button Grid.Column="3"
+                                    Classes="primary"
+                                    Content="发送"
+                                    Command="{Binding SendCommand}" />
+
+                            <!-- 模型选择浮层：列表底部固定一个「添加模型」入口 -->
+                            <Popup IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #ModelButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="236"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="选择模型"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <ListBox Name="ModelList"
+                                                 Classes="modelList"
+                                                 ItemsSource="{Binding Models}"
+                                                 SelectedItem="{Binding SelectedModel, Mode=TwoWay}"
+                                                 MaxHeight="190"
+                                                 PointerReleased="OnModelListPointerReleased">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="models:ChatModelConfig">
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontSize="12.5"
+                                                               Foreground="#F2FFFFFF" />
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <Border Height="1" Background="#14FFFFFF" Margin="4,3" />
+
+                                        <Button Classes="ghost"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Padding="8,6"
+                                                Command="{Binding OpenAddModelCommand}">
+                                            <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                                <Path Data="M0,6 L12,6 M6,0 L6,12"
+                                                      Stroke="#8CFFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      VerticalAlignment="Center" />
+                                                <TextBlock Text="添加模型" Classes="muted" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
+                <Grid Grid.RowSpan="4"
+                      IsVisible="{Binding IsAddingModel}"
+                      Background="#A6000000">
+                    <Border Width="344"
+                            Padding="18"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#F21B1C22"
+                            BorderBrush="#26FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            BoxShadow="0 14 34 0 #80000000">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="添加模型"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F2FFFFFF" />
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="名称" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelName, Mode=TwoWay}"
+                                         PlaceholderText="例如：DeepSeek" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="模型标识" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelModelId, Mode=TwoWay}"
+                                         PlaceholderText="例如：deepseek-chat" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="接口地址" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelBaseUrl, Mode=TwoWay}"
+                                         PlaceholderText="https://api.example.com/v1" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="API 密钥" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelApiKey, Mode=TwoWay}"
+                                         PasswordChar="●"
+                                         PlaceholderText="可留空" />
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding AddModelError}"
+                                       IsVisible="{Binding HasAddModelError}"
+                                       FontSize="11"
+                                       Foreground="#FF9E9E" />
+
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Spacing="8"
+                                        Margin="0,2,0,0">
+                                <Button Classes="ghost"
+                                        Content="取消"
+                                        Command="{Binding CancelAddModelCommand}" />
+                                <Button Classes="primary"
+                                        Content="添加"
+                                        Command="{Binding ConfirmAddModelCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
+</UserControl>

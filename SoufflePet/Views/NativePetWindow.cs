@@ -23,6 +23,7 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
+    private readonly IChatWindowService _chat;
     private DateTime _lastMoveLog;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
@@ -63,8 +64,10 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad)
+    public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad,
+        IChatWindowService chat)
     {
+        _chat = chat;
         Title = "SoufflePet";
         Width = 480;
         Height = 680;
@@ -121,6 +124,7 @@ public class NativePetWindow : Window, IPetWindow
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
         // - 左键单击 → 随机切换表情
+        // - 右键 → 呼出 / 收起 LLM 对话窗口
         // - 滚轮 → 缩放模型
         // - 中键按住拖动 → 移动模型在窗口内的位置（不移动窗口）
         Point? pressPoint = null;
@@ -131,6 +135,10 @@ public class NativePetWindow : Window, IPetWindow
             if (props.IsLeftButtonPressed)
             {
                 pressPoint = e.GetPosition(this);
+            }
+            else if (props.IsRightButtonPressed)
+            {
+                _chat.Toggle(this);
             }
             else if (props.IsMiddleButtonPressed)
             {
@@ -178,7 +186,7 @@ public class NativePetWindow : Window, IPetWindow
                 e.Pointer.Capture(null);
                 return;
             }
-            // 右键已无绑定功能，即便左键按住期间误触右键释放也不响应
+            // 右键在按下时已呼出对话窗口，释放这里不再触发其他动作
             if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonReleased) return;
             if (pressPoint is null) return;
             pressPoint = null;

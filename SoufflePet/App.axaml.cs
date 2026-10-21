@@ -11,6 +11,7 @@ using Serilog;
 using SoufflePet.Models;
 using SoufflePet.Services;
 using SoufflePet.Utils;
+using SoufflePet.ViewModels;
 using SoufflePet.Views;
 
 namespace SoufflePet;
@@ -51,6 +52,8 @@ public class App : Application
             services.AddSingleton<ILipSyncService, LipSyncService>();
             services.AddSingleton<IGamepadService, GamepadService>();
             services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
+            services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
+            services.AddSingleton<IChatWindowService, ChatWindowService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
@@ -180,6 +183,9 @@ public class App : Application
             var power = _provider.GetRequiredService<IPowerNotificationService>();
             power.DisplayPowerChanged += petOps.SetDisplayPower;
             power.Start(window);
+
+            // 对话窗口热键（Ctrl+Alt+Space）：同样复用桌宠窗口句柄，须在 Show() 之后注册
+            _provider.GetRequiredService<IChatWindowService>().Start(window);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
 
