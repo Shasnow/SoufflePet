@@ -48,9 +48,6 @@ public interface ILlmChatService
 /// </summary>
 public sealed class LlmChatService : ILlmChatService
 {
-    /// <summary>单次回复内最多连续执行几轮工具调用，防止模型陷入死循环。</summary>
-    private const int MaxToolRounds = 4;
-
     private static readonly ILogger Logger = Log.ForContext<LlmChatService>();
 
     /// <summary>工具参数/结果的序列化选项：保留中文原样，不转成 \\uXXXX。</summary>
@@ -60,12 +57,14 @@ public sealed class LlmChatService : ILlmChatService
     };
 
     private readonly SouffleSettings _settings;
+    private readonly ChatMemory _memory;
     private readonly IReadOnlyList<AITool> _tools;
     private readonly Dictionary<string, AIFunction> _functions;
 
-    public LlmChatService(SouffleSettings settings, ChatTools tools)
+    public LlmChatService(SouffleSettings settings, ChatTools tools, ChatMemory memory)
     {
         _settings = settings;
+        _memory = memory;
         _tools = tools.Tools;
         _functions = tools.Tools.OfType<AIFunction>().ToDictionary(f => f.Name, StringComparer.Ordinal);
     }
@@ -75,9 +74,49 @@ public sealed class LlmChatService : ILlmChatService
         IReadOnlyList<ChatMessage> history,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var endpoint = BuildEndpoint(model.BaseUrl);
-        Logger.Debug("LLM request {Endpoint} model={Model}", endpoint, model.ModelId);
+        Logger.Debug("LLM request {Endpoint} model={Model}", BuildEndpoint(model.BaseUrl), model.ModelId);
 
+        var chars = 0;
+        var events = StreamCoreAsync(model, history, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            while (true)
+            {
+                LlmStreamEvent current;
+                try
+                {
+                    if (!await events.MoveNextAsync().ConfigureAwait(false)) break;
+                    current = events.Current;
+                }
+                catch (OperationCanceledException)
+                {
+                    Logger.Debug("LLM request cancelled model={Model} chars={Length}", model.ModelId, chars);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "LLM request failed model={Model}", model.ModelId);
+                    throw;
+                }
+
+                if (current is LlmTextDelta delta) chars += delta.Text.Length;
+                yield return current;
+            }
+
+            Logger.Debug("LLM reply finished model={Model} chars={Length}", model.ModelId, chars);
+        }
+        finally
+        {
+            await events.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> history,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var endpoint = BuildEndpoint(model.BaseUrl);
         var options = new OpenAIClientOptions
         {
             Endpoint = new Uri(endpoint),
@@ -91,9 +130,15 @@ public sealed class LlmChatService : ILlmChatService
         using var chatClient = openAiClient.AsIChatClient();
 
         // 系统提示词只作为本次请求的首条消息，不进入界面历史
-        var messages = new List<ChatMessage>(history.Count + 1);
+        var messages = new List<ChatMessage>(history.Count + 2);
         if (_settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
+
+        // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）
+        var memoryBlock = _memory.BuildMemoryBlock(history.LastOrDefault(m => m.Role == ChatRole.User)?.Text);
+        if (memoryBlock.Length > 0)
+            messages.Add(new ChatMessage(ChatRole.System, memoryBlock));
+
         messages.AddRange(history);
 
         var chatOptions = new ChatOptions
@@ -137,9 +182,9 @@ public sealed class LlmChatService : ILlmChatService
                 .ToList();
 
             if (calls.Count == 0) yield break;
-            if (round >= MaxToolRounds)
+            if (round >= _settings.MaxToolRounds)
             {
-                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, stop requesting", MaxToolRounds);
+                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, stop requesting", _settings.MaxToolRounds);
                 yield break;
             }
 

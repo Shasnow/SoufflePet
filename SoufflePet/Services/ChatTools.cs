@@ -30,12 +30,18 @@ public sealed class ChatTools
     private readonly SouffleSettings _settings;
     private readonly PetExpressionService _expressions;
     private readonly ChatToolAccess _access;
+    private readonly ChatMemory _memory;
 
-    public ChatTools(SouffleSettings settings, PetExpressionService expressions, ChatToolAccess access)
+    public ChatTools(
+        SouffleSettings settings,
+        PetExpressionService expressions,
+        ChatToolAccess access,
+        ChatMemory memory)
     {
         _settings = settings;
         _expressions = expressions;
         _access = access;
+        _memory = memory;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -49,19 +55,31 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 GetExpressions,
                 "get_expressions",
-                "列出当前 Live2D 模型可用的表情名称。想给用户换表情前先调用它，避免猜错名字。"),
+                "列出当前 Live2D 模型可用的表情名称。"),
             AIFunctionFactory.Create(
                 SetExpression,
                 "set_expression",
-                "切换桌宠的 Live2D 表情，立刻显示在桌面上。表情名必须是 get_expressions 返回的之一；"
-                + "传空字符串表示清除表情、恢复默认。用户让你换表情、做表情（哭、生气、脸红、比心等）时调用。"),
+                "切换桌宠的 Live2D 表情。表情名必须是 get_expressions 返回的之一；"
+                + "传空字符串表示清除表情、恢复默认。"),
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
                 "在用户的 Windows 电脑上执行 PowerShell 命令，返回退出码、标准输出和错误输出（30 秒超时）。"
-                + "用户处于「手动审批」规则时，执行前需要用户在对话里点击允许，请耐心等待结果。"
                 + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
                 + "不要执行删除、格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
+            AIFunctionFactory.Create(
+                Remember,
+                "remember",
+                "把值得长期记住的用户信息写入长期记忆（跨会话保留），例如称呼、喜好、常用路径、约定。"
+                + "key 用简短中文词，value 用一句话；同一个 key 再写会覆盖旧值。"),
+            AIFunctionFactory.Create(
+                Forget,
+                "forget",
+                "删除长期记忆里的一条记录。用户说「忘掉…」「别再记得…」时调用。"),
+            AIFunctionFactory.Create(
+                Recall,
+                "recall",
+                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。"),
         ];
     }
 
@@ -97,6 +115,19 @@ public sealed class ChatTools
     private Task<string> SetExpression(
         [Description("表情名称，必须是 get_expressions 列出的名字；空字符串表示清除表情、恢复默认")] string? name)
         => _expressions.SetExpressionAsync(name);
+
+    private string Remember(
+        [Description("记忆的键，简短中文词，例如「称呼」「常用项目路径」")] string key,
+        [Description("记忆的内容，一句话，例如「主人」")] string value)
+        => _memory.Remember(key, value);
+
+    private string Forget(
+        [Description("要删除的记忆键")] string key)
+        => _memory.Forget(key);
+
+    private string Recall(
+        [Description("检索关键词，可以是用户问题里的关键词")] string query)
+        => _memory.Recall(query);
 
     private async Task<string> RunShellCommand(
         [Description("要执行的 PowerShell 命令，例如 Get-ChildItem C:\\ 或 Get-Process | Sort-Object CPU -Descending | Select-Object -First 5")] string command,

@@ -310,7 +310,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             Interlocked.Increment(ref _renderedFrames);
             _frames++;
             if (_frames % 300 == 0)
-                Logger.Debug("render frames={Frames} span={Span:F3}", _frames, span);
+                Logger.Verbose("render frames={Frames} span={Span:F3}", _frames, span);
 
             // 自续帧：渲染完立刻请求下一帧，节奏交给合成器帧时钟（显示器 vsync），不限帧。
             if (_renderLoopEnabled) RequestNextFrameRendering();

@@ -11,7 +11,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
 using Microsoft.Extensions.AI;
-using Serilog;
 using SoufflePet.Models;
 using SoufflePet.Services;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -24,17 +23,19 @@ namespace SoufflePet.ViewModels;
 /// </summary>
 public partial class ChatViewModel : ViewModelBase
 {
-    private static readonly ILogger Logger = Log.ForContext<ChatViewModel>();
-
     /// <summary>助手气泡在收到第一段内容前的占位文案。</summary>
     private const string ThinkingText = "正在思考…";
 
     /// <summary>工具记录里结果的最大展示长度（超出截断，避免撑爆气泡）。</summary>
     private const int ToolResultMaxLength = 300;
 
+    /// <summary>发给模型的对话窗口：只带最近若干条，避免请求体随对话无限增长。</summary>
+    private const int HistoryWindowMessages = 20;
+
     private readonly SouffleSettings _settings;
     private readonly ILlmChatService _llm;
     private readonly ChatToolAccess _toolAccess;
+    private readonly ChatMemory _memory;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -51,11 +52,16 @@ public partial class ChatViewModel : ViewModelBase
     /// </summary>
     private readonly List<ChatMessage> _history = [];
 
-    public ChatViewModel(SouffleSettings settings, ILlmChatService llm, ChatToolAccess toolAccess)
+    public ChatViewModel(
+        SouffleSettings settings,
+        ILlmChatService llm,
+        ChatToolAccess toolAccess,
+        ChatMemory memory)
     {
         _settings = settings;
         _llm = llm;
         _toolAccess = toolAccess;
+        _memory = memory;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
 
@@ -64,6 +70,8 @@ public partial class ChatViewModel : ViewModelBase
             ? Models.FirstOrDefault(m => m.Name == name)
             : null;
         _initialized = true;
+
+        LoadRecentHistory();
     }
 
     /// <summary>消息列表（首次打开即包含一条助手问候）。</summary>
@@ -259,6 +267,8 @@ public partial class ChatViewModel : ViewModelBase
 
         // 用户这轮提问先落历史；工具记录、占位与错误提示都不进入历史
         _history.Add(new ChatMessage(ChatRole.User, text));
+        _memory.AddTurn("user", text);
+        TrimHistory();
 
         // 占位气泡：收到第一段内容时整体替换，避免出现空气泡
         var reply = new Models.ChatMessage(ThinkingText, isUser: false);
@@ -290,7 +300,6 @@ public partial class ChatViewModel : ViewModelBase
             }
 
             if (answer.Length == 0) reply.Text = "（没有收到回复）";
-            Logger.Debug("LLM reply finished model={Model} chars={Length}", model.ModelId, answer.Length);
         }
         catch (OperationCanceledException)
         {
@@ -298,14 +307,18 @@ public partial class ChatViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "LLM request failed model={Model}", model.ModelId);
             var error = $"请求失败：{ex.Message}";
             reply.Text = answer.Length == 0 ? error : $"{answer}\n\n[{error}]";
         }
         finally
         {
             // 只有真正生成出的内容才写回历史；停止时保留已收到的部分
-            if (answer.Length > 0) _history.Add(new ChatMessage(ChatRole.Assistant, answer));
+            if (answer.Length > 0)
+            {
+                _history.Add(new ChatMessage(ChatRole.Assistant, answer));
+                _memory.AddTurn("assistant", answer);
+                TrimHistory();
+            }
             _cts = null;
             _reply = null;
             IsGenerating = false;
@@ -323,6 +336,28 @@ public partial class ChatViewModel : ViewModelBase
             ? call.Result
             : call.Result[..ToolResultMaxLength] + "…";
         return $"调用工具 {call.Name}{arguments}\n结果：{result}";
+    }
+
+    /// <summary>启动时把最近几轮对话恢复到界面上（有历史时替换掉问候语）。</summary>
+    private void LoadRecentHistory()
+    {
+        var recent = _memory.RecentTurns(HistoryWindowMessages);
+        if (recent.Count == 0) return;
+
+        Messages.Clear();
+        foreach (var turn in recent)
+        {
+            var isUser = !string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase);
+            _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
+            Messages.Add(new Models.ChatMessage(turn.Text, isUser));
+        }
+    }
+
+    /// <summary>把发给模型的历史裁到窗口大小，并从用户发言开始，避免半截对话。</summary>
+    private void TrimHistory()
+    {
+        while (_history.Count > HistoryWindowMessages) _history.RemoveAt(0);
+        while (_history.Count > 0 && _history[0].Role != ChatRole.User) _history.RemoveAt(0);
     }
 
     private bool CanSend() => !IsGenerating && !string.IsNullOrWhiteSpace(Draft);

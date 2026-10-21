@@ -97,6 +97,13 @@ public partial class SouffleSettings : ObservableObject
     [Description("对话系统提示词（人设），为空表示不注入系统消息")]
     public partial string ChatSystemPrompt { get; set; } = DefaultChatSystemPrompt;
 
+    [ObservableProperty]
+    [Description("是否启用长期记忆（对话落盘、档案注入与关键词检索）")]
+    public partial bool ChatMemoryEnabled { get; set; } = true;
+    
+    [Description("最大工具调用轮数")]
+    public int MaxToolRounds { get; init; } = 10;
+
     public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();
