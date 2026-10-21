@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -13,6 +14,13 @@ using Serilog;
 using SoufflePet.Models;
 
 namespace SoufflePet.Services;
+
+/// <summary>设置界面展示用的一条 MCP 工具（工具信息缓存也用它）。</summary>
+public sealed record McpToolInfo(string Name, string Description)
+{
+    [JsonIgnore]
+    public bool HasDescription => Description.Length > 0;
+}
 
 /// <summary>向对话提供 MCP 服务器上的工具。</summary>
 public interface IMcpToolService
@@ -23,6 +31,14 @@ public interface IMcpToolService
     /// 仅当取消时抛 <see cref="OperationCanceledException"/>。
     /// </summary>
     Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 连接指定服务器并列出其全部工具，用完立即断开（供设置界面即时查看，不影响对话用的连接缓存）。
+    /// 配置不完整、连接失败或超时以异常抛出，由调用方展示。
+    /// </summary>
+    Task<IReadOnlyList<McpToolInfo>> GetServerToolsAsync(
+        McpServerConfig server,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// 断开所有连接并清空工具缓存，下一次 <see cref="GetToolsAsync"/> 按最新配置重新连接。
@@ -89,6 +105,25 @@ public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, 
         {
             try { _gate.Release(); } catch (ObjectDisposedException) { }
         }
+    }
+
+    public async Task<IReadOnlyList<McpToolInfo>> GetServerToolsAsync(
+        McpServerConfig server,
+        CancellationToken cancellationToken)
+    {
+        if (!IsConfigured(server))
+            throw new InvalidOperationException("配置不完整，请先填写启动命令或服务地址");
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, server.TimeoutSeconds)));
+
+        await using var client = await McpClient.CreateAsync(
+                CreateTransport(server), cancellationToken: timeout.Token)
+            .ConfigureAwait(false);
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+
+        Logger.Debug("MCP server {Server} probed tools={Tools}", server.Name, tools.Count);
+        return [.. tools.Select(tool => new McpToolInfo(tool.Name, tool.Description ?? string.Empty))];
     }
 
     private async Task<IReadOnlyList<AITool>> ConnectAsync(CancellationToken cancellationToken)

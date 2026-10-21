@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -26,11 +27,13 @@ public partial class McpSettingsViewModel : ViewModelBase
 
     private readonly SouffleSettings _settings;
     private readonly IMcpToolService _mcp;
+    private readonly McpToolCache _toolCache;
 
-    public McpSettingsViewModel(SouffleSettings settings, IMcpToolService mcp)
+    public McpSettingsViewModel(SouffleSettings settings, IMcpToolService mcp, McpToolCache toolCache)
     {
         _settings = settings;
         _mcp = mcp;
+        _toolCache = toolCache;
         Reload();
     }
 
@@ -61,6 +64,11 @@ public partial class McpSettingsViewModel : ViewModelBase
         foreach (var config in _settings.McpServers)
         {
             var item = new McpServerItemViewModel(config);
+
+            // 上次启动时获取过的工具直接展示，不必等重新连接
+            var cached = _toolCache.Get(config.Name);
+            if (cached.Count > 0) item.SetTools(cached, $"上次获取：{cached.Count} 个工具");
+
             item.EnabledChanged += OnItemEnabledChanged;
             Servers.Add(item);
         }
@@ -152,6 +160,7 @@ public partial class McpSettingsViewModel : ViewModelBase
         if (SelectedServer is not { } item) return;
 
         item.EnabledChanged -= OnItemEnabledChanged;
+        _toolCache.Remove(item.Config.Name);
         Servers.Remove(item);
         SelectedServer = Servers.FirstOrDefault();
         Persist();
@@ -166,7 +175,7 @@ public partial class McpSettingsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SaveServer()
+    private async Task SaveServerAsync()
     {
         if (SelectedServer is not { } item) return;
 
@@ -216,7 +225,10 @@ public partial class McpSettingsViewModel : ViewModelBase
         }
 
         var config = item.Config;
+        var previousName = config.Name;
         config.Name = name;
+        // 缓存以服务器名为键，改名后旧条目作废（随后重新获取会写入新键）
+        if (!string.Equals(previousName, name, StringComparison.OrdinalIgnoreCase)) _toolCache.Remove(previousName);
         config.Transport = EditorTransport;
         config.Command = command;
         config.Arguments = SplitLines(EditorArguments);
@@ -232,6 +244,38 @@ public partial class McpSettingsViewModel : ViewModelBase
 
         // 名称可能被改过，按新配置重载表单（Trim 等规范化后的值也同步回界面）
         LoadEditor(config);
+
+        // 保存后立即连接一次，让用户当场看到该服务器能提供哪些工具
+        if (item.Enabled) await LoadToolsAsync();
+    }
+
+    /// <summary>连接当前选中的服务器，列出全部工具并在界面上展示（用完即断开）。</summary>
+    [RelayCommand]
+    private async Task LoadToolsAsync()
+    {
+        if (SelectedServer is not { } item) return;
+
+        item.IsLoadingTools = true;
+        item.ToolStatus = "正在连接…";
+        try
+        {
+            var tools = await _mcp.GetServerToolsAsync(item.Config, CancellationToken.None);
+            _toolCache.Set(item.Config.Name, tools);
+            item.SetTools(tools, tools.Count == 0 ? "连接成功，但没有可用工具" : $"已连接，共 {tools.Count} 个工具");
+        }
+        catch (OperationCanceledException)
+        {
+            item.SetTools([], "连接超时或已取消");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "MCP server {Server} probe failed", item.Name);
+            item.SetTools([], $"连接失败：{ex.Message}");
+        }
+        finally
+        {
+            item.IsLoadingTools = false;
+        }
     }
 
     private void LoadEditor(McpServerConfig config)

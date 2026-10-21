@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SoufflePet.ViewModels"
+             xmlns:svc="using:SoufflePet.Services"
              x:Class="SoufflePet.Views.McpSettingsView"
              x:DataType="vm:McpSettingsViewModel"
              x:CompileBindings="True">
@@ -217,6 +218,59 @@
                                                  Text="{Binding EditorTimeout, Mode=TwoWay}"
                                                  PlaceholderText="30" />
                                     </StackPanel>
+
+                                    <!-- 保存后自动连接一次，列出该服务器提供的工具 -->
+                                    <Border Background="#0DFFFFFF"
+                                            BorderBrush="#1FFFFFFF"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="10,8">
+                                        <StackPanel Spacing="6">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" VerticalAlignment="Center">
+                                                    <TextBlock Text="可用工具" Classes="label" VerticalAlignment="Center" />
+                                                    <!-- 工具数量/连接状态与标题同一行 -->
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding SelectedServer.ToolStatus}"
+                                                               FontSize="10.5"
+                                                               Foreground="#66FFFFFF"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </Grid>
+                                                <Button Grid.Column="1"
+                                                        Classes="ghost"
+                                                        Padding="8,3"
+                                                        ToolTip.Tip="连接该服务器并刷新工具列表"
+                                                        Command="{Binding LoadToolsCommand}">
+                                                    <TextBlock Text="获取工具" Classes="muted" />
+                                                </Button>
+                                            </Grid>
+
+                                            <!-- 每个工具一个折叠面板（标题为工具名），默认收起 -->
+                                            <ItemsControl ItemsSource="{Binding SelectedServer.Tools}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="svc:McpToolInfo">
+                                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                                  IsExpanded="False"
+                                                                  Margin="0,2"
+                                                                  HorizontalAlignment="Stretch">
+                                                            <Expander.Header>
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           FontSize="11.5"
+                                                                           TextWrapping="Wrap" />
+                                                            </Expander.Header>
+                                                            <TextBlock Text="{Binding Description}"
+                                                                       IsVisible="{Binding HasDescription}"
+                                                                       FontSize="10"
+                                                                       Foreground="#66FFFFFF"
+                                                                       TextWrapping="Wrap"
+                                                                       Margin="0,0,0,2" />
+                                                        </Expander>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
 
                                     <TextBlock Text="{Binding EditorError}"
                                                IsVisible="{Binding HasEditorError}"

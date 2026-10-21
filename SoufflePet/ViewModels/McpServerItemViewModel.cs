@@ -2,8 +2,11 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SoufflePet.Models;
+using SoufflePet.Services;
 
 namespace SoufflePet.ViewModels;
 
@@ -36,6 +39,22 @@ public partial class McpServerItemViewModel(McpServerConfig config) : Observable
     {
         Config.Enabled = value;
         EnabledChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>最近一次连接获取到的工具（仅用于设置界面展示）。</summary>
+    public ObservableCollection<McpToolInfo> Tools { get; } = [];
+
+    [ObservableProperty]
+    public partial bool IsLoadingTools { get; set; }
+
+    [ObservableProperty]
+    public partial string ToolStatus { get; set; } = "尚未获取工具";
+
+    public void SetTools(IReadOnlyList<McpToolInfo> tools, string status)
+    {
+        Tools.Clear();
+        foreach (var tool in tools) Tools.Add(tool);
+        ToolStatus = status;
     }
 
     /// <summary>编辑保存后刷新列表显示（简介依赖 Config 中非可观察的字段）。</summary>
