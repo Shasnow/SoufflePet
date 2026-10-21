@@ -28,7 +28,7 @@
                                     <GradientStop Color="#D97F9A" Offset="1" />
                                 </LinearGradientBrush>
                             </Border.Background>
-                            <TextBlock Text="舒"
+                            <TextBlock Text="{Binding PetInitial}"
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="#2A141B"
@@ -37,7 +37,7 @@
                         </Border>
 
                         <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
-                            <TextBlock Text="舒芙蕾" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding PetName}" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
                             <TextBlock Text="LLM 对话" FontSize="11" Foreground="#8CFFFFFF" />
                         </StackPanel>
 
@@ -113,7 +113,7 @@
                                  Text="{Binding Draft, Mode=TwoWay}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
-                                 PlaceholderText="和舒芙蕾说点什么…"
+                                 PlaceholderText="{Binding InputPlaceholder}"
                                  FocusAdorner="{x:Null}"
                                  Foreground="#F2FFFFFF"
                                  CaretBrush="#E8879B"

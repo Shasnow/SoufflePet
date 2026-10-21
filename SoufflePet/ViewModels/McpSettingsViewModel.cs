@@ -43,6 +43,15 @@ public partial class McpSettingsViewModel : ViewModelBase
 
     public bool HasSelection => SelectedServer is not null;
 
+    /// <summary>宠物称呼（设置项）。</summary>
+    public string PetName => _settings.PetName;
+
+    /// <summary>窗口标题。</summary>
+    public string WindowTitle => $"{PetName} · MCP 服务器";
+
+    /// <summary>标题栏下方的说明文案。</summary>
+    public string ToolHint => $"配置后，服务器上的工具会交给{PetName}调用";
+
     /// <summary>按当前设置重建列表（窗口每次显示前调用，保证与设置文件一致）。</summary>
     public void Reload()
     {

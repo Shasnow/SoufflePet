@@ -3,7 +3,7 @@
         xmlns:vm="using:SoufflePet.ViewModels"
         x:Class="SoufflePet.Views.ChatWindow"
         x:DataType="vm:ChatViewModel"
-        Title="舒芙蕾 · 对话"
+        Title="{Binding WindowTitle}"
         Width="452"
         Height="652"
         CanResize="False"

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
 using System;
@@ -250,7 +250,7 @@ public sealed class ChatMemory
                 builder.Append("- [")
                     .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
                     .Append("] ")
-                    .Append(IsUserRole(turn.Role) ? "用户" : "舒芙蕾")
+                    .Append(IsUserRole(turn.Role) ? "用户" : "你")
                     .Append('：')
                     .AppendLine(Truncate(turn.Text, MaxSnippetChars));
             }

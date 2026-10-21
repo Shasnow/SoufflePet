@@ -80,6 +80,13 @@ public partial class SouffleSettings : ObservableObject
     [Description("模型水印资源 ID")]
     public string ModelWatermarkPartId { get; init; } = "watermark";
 
+    /// <summary>默认称呼：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
+    public const string DefaultPetName = "舒芙蕾";
+
+    [ObservableProperty]
+    [Description("桌面宠物的称呼（聊天窗口标题、输入提示、记忆自称与默认人设；修改后重启生效）")]
+    public partial string PetName { get; set; } = DefaultPetName;
+
     [Description("可选的大语言模型列表（对话窗口的模型选择），首次启动为空")]
     public ObservableCollection<ChatModelConfig> ChatModels { get; set; } = [];
 
@@ -88,8 +95,10 @@ public partial class SouffleSettings : ObservableObject
     public partial string ChatModelName { get; set; } = string.Empty;
 
     /// <summary>默认人设：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
-    public const string DefaultChatSystemPrompt =
-        "你是桌面宠物「舒芙蕾」，住在用户的电脑桌面上，性格活泼、温柔、有点黏人。" +
+    public static readonly string DefaultChatSystemPrompt = BuildDefaultChatSystemPrompt(DefaultPetName);
+
+    private static string BuildDefaultChatSystemPrompt(string petName) =>
+        $"你是桌面宠物「{petName}」，住在用户的电脑桌面上，性格活泼、温柔、有点黏人。" +
         "请用简短、口语化的中文回复，一般不超过三句话，不要使用 Markdown 标题或代码块。";
 
     [ObservableProperty]
@@ -114,6 +123,7 @@ public partial class SouffleSettings : ObservableObject
         try
         {
             var settings = JsonSerializer.Deserialize<SouffleSettings>(File.ReadAllText(SettingsFilePath)) ?? new SouffleSettings();
+            settings.Normalize();
             return settings;
         }
         catch (Exception e)
@@ -121,6 +131,14 @@ public partial class SouffleSettings : ObservableObject
             Log.ForContext<SouffleSettings>().Warning(e, "Failed to load settings");
             return FallBackLoad();
         }
+    }
+
+    /// <summary>修正旧配置：称呼为空时回退默认值；仍是默认人设时让其中的称呼跟随 PetName。</summary>
+    private void Normalize()
+    {
+        if (string.IsNullOrWhiteSpace(PetName)) PetName = DefaultPetName;
+        if (ChatSystemPrompt == BuildDefaultChatSystemPrompt(DefaultPetName) && PetName != DefaultPetName)
+            ChatSystemPrompt = BuildDefaultChatSystemPrompt(PetName);
     }
 
     public void Save()

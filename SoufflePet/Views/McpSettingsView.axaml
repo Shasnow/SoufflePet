@@ -36,7 +36,7 @@
 
                         <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
                             <TextBlock Text="MCP 服务器" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
-                            <TextBlock Text="配置后，服务器上的工具会交给舒芙蕾调用" FontSize="11" Foreground="#8CFFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
                         </StackPanel>
 
                         <Button Grid.Column="2"

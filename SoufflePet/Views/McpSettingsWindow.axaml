@@ -3,7 +3,7 @@
         xmlns:vm="using:SoufflePet.ViewModels"
         x:Class="SoufflePet.Views.McpSettingsWindow"
         x:DataType="vm:McpSettingsViewModel"
-        Title="舒芙蕾 · MCP 服务器"
+        Title="{Binding WindowTitle}"
         Width="744"
         Height="588"
         CanResize="False"

@@ -86,6 +86,19 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>可选的对话模型（与设置共享同一集合，添加后直接持久化）。</summary>
     public ObservableCollection<ChatModelConfig> Models => _settings.ChatModels;
 
+    /// <summary>宠物称呼（设置项）。</summary>
+    public string PetName => _settings.PetName;
+
+    /// <summary>标题栏头像上的首字，称呼为空时回退默认称呼。</summary>
+    public string PetInitial =>
+        (PetName.Length > 0 ? PetName : SouffleSettings.DefaultPetName)[..1];
+
+    /// <summary>输入框占位提示。</summary>
+    public string InputPlaceholder => $"和{PetName}说点什么…";
+
+    /// <summary>窗口标题。</summary>
+    public string WindowTitle => $"{PetName} · 对话";
+
     /// <summary>输入框内容（与 TextBox 双向绑定）。</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
