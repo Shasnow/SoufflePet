@@ -9,6 +9,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using SoufflePet.ViewModels;
+using ChatMessage = SoufflePet.Models.ChatMessage;
 
 namespace SoufflePet.Views;
 
@@ -24,6 +25,10 @@ public partial class ChatView : UserControl
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
+
+        // TextBox 自己会在冒泡阶段处理 Enter（换行）并标记 Handled，
+        // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
+        InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
     }
 
     /// <summary>标题栏按住拖动：无边框窗口没有系统标题栏，用 BeginMoveDrag 接管。</summary>
@@ -41,6 +46,16 @@ public partial class ChatView : UserControl
     private void OnModelListPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (DataContext is ChatViewModel vm) vm.IsModelPickerOpen = false;
+    }
+
+    /// <summary>Enter 发送消息；Shift+Enter（或其他修饰键组合）保留文本框的换行行为。</summary>
+    private void OnInputKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None) return;
+        if (DataContext is not ChatViewModel vm || !vm.SendCommand.CanExecute(null)) return;
+
+        e.Handled = true;
+        vm.SendCommand.Execute(null);
     }
 
     /// <summary>跟随 DataContext 换绑消息订阅（ChatView 由 ViewLocator 创建，可能换过 VM）。</summary>
@@ -64,11 +79,11 @@ public partial class ChatView : UserControl
     private void OnMessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)
-            foreach (ChatMessageViewModel message in e.OldItems)
+            foreach (ChatMessage message in e.OldItems)
                 message.PropertyChanged -= OnMessagePropertyChanged;
 
         if (e.NewItems is not null)
-            foreach (ChatMessageViewModel message in e.NewItems)
+            foreach (ChatMessage message in e.NewItems)
                 message.PropertyChanged += OnMessagePropertyChanged;
 
         ScrollToEnd();
@@ -77,7 +92,7 @@ public partial class ChatView : UserControl
     /// <summary>流式追加时跟随滚动到底部，避免新内容跑出可视区。</summary>
     private void OnMessagePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatMessageViewModel.Text)) ScrollToEnd();
+        if (e.PropertyName == nameof(ChatMessage.Text)) ScrollToEnd();
     }
 
     /// <summary>等布局完成后再滚，否则新气泡的高度还没算进去。</summary>

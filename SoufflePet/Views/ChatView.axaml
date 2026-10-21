@@ -69,6 +69,20 @@
             <Setter Property="Foreground" Value="#2A141B" />
         </Style>
 
+        <!-- 工具调用记录：弱化描边 + 更小字号，和正式对话区分开 -->
+        <Style Selector="Border.bubble.tool">
+            <Setter Property="Background" Value="#0DFFFFFF" />
+            <Setter Property="BorderBrush" Value="#22FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="9,6" />
+        </Style>
+        <Style Selector="Border.bubble.tool TextBlock">
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="LineHeight" Value="17" />
+            <Setter Property="Foreground" Value="#99FFFFFF" />
+        </Style>
+
         <Style Selector="TextBlock.muted">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Foreground" Value="#8CFFFFFF" />
@@ -208,8 +222,8 @@
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ChatMessageViewModel">
-                                <Border Classes="bubble" Classes.user="{Binding IsUser}">
+                            <DataTemplate x:DataType="models:ChatMessage">
+                                <Border Classes="bubble" Classes.user="{Binding IsUser}" Classes.tool="{Binding IsTool}">
                                     <TextBlock Text="{Binding Text}" />
                                 </Border>
                             </DataTemplate>

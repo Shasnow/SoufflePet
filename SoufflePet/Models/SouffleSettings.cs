@@ -87,6 +87,16 @@ public partial class SouffleSettings : ObservableObject
     [Description("当前选择的对话模型名称，首次启动为空表示未选择")]
     public partial string ChatModelName { get; set; } = string.Empty;
 
+    /// <summary>默认人设：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
+    public const string DefaultChatSystemPrompt =
+        "你是桌面宠物「舒芙蕾」，住在用户的电脑桌面上，性格活泼、温柔、有点黏人。" +
+        "请用简短、口语化的中文回复，一般不超过三句话，不要使用 Markdown 标题或代码块。" +
+        "需要知道当前时间或桌宠的运行状态时，先调用工具获取，不要凭空猜测。";
+
+    [ObservableProperty]
+    [Description("对话系统提示词（人设），为空表示不注入系统消息")]
+    public partial string ChatSystemPrompt { get; set; } = DefaultChatSystemPrompt;
+
     public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();
