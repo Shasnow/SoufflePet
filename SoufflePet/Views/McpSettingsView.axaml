@@ -1,0 +1,248 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             x:Class="SoufflePet.Views.McpSettingsView"
+             x:DataType="vm:McpSettingsViewModel"
+             x:CompileBindings="True">
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="M"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="MCP 服务器" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="配置后，服务器上的工具会交给舒芙蕾调用" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：服务器列表 -->
+                    <Grid RowDefinitions="Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,6">
+                            <TextBlock Text="服务器" Classes="section" VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Classes="ghost"
+                                    Padding="8,4"
+                                    ToolTip.Tip="新增服务器"
+                                    Command="{Binding AddServerCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                    <Path Data="M0,5 L10,5 M5,0 L5,10"
+                                          Stroke="#8CFFFFFF"
+                                          StrokeThickness="1.4"
+                                          StrokeLineCap="Round"
+                                          VerticalAlignment="Center" />
+                                    <TextBlock Text="新建" Classes="muted" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <ListBox Grid.Row="1"
+                                 Name="ServerList"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Servers}"
+                                 SelectedItem="{Binding SelectedServer, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:McpServerItemViewModel">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                                        <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip.Tip="启用后下一次对话连接该服务器" />
+                                        <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="12.5"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Summary}"
+                                                       FontSize="10.5"
+                                                       Foreground="#66FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：编辑表单 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0">
+
+                        <TextBlock Text="在左侧选择一个服务器，或点击「新建」添加"
+                                   Classes="muted"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   IsVisible="{Binding !HasSelection}" />
+
+                        <Grid RowDefinitions="*,Auto" IsVisible="{Binding HasSelection}">
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="12" Margin="0,0,8,0">
+
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="名称" Classes="label" />
+                                        <TextBox Classes="field"
+                                                 Text="{Binding EditorName, Mode=TwoWay}"
+                                                 PlaceholderText="例如 files（工具名以此为前缀）" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="传输方式" Classes="label" />
+                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                            <Button Classes="tab"
+                                                    Classes.selected="{Binding IsStdioTransport}"
+                                                    Command="{Binding SelectStdioCommand}">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="Stdio" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="本地子进程" FontSize="10.5" Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="1"
+                                                    Classes="tab"
+                                                    Classes.selected="{Binding IsHttpTransport}"
+                                                    Command="{Binding SelectHttpCommand}">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="Http" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="远程服务" FontSize="10.5" Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <!-- Stdio 专属字段 -->
+                                    <StackPanel Spacing="10" IsVisible="{Binding IsStdioTransport}">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="启动命令" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorCommand, Mode=TwoWay}"
+                                                     PlaceholderText="例如 npx、python 或可执行文件路径" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="命令参数（每行一个）" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorArguments, Mode=TwoWay}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="NoWrap"
+                                                     MinHeight="64"
+                                                     PlaceholderText="-y&#x0a;@modelcontextprotocol/server-filesystem&#x0a;D:\" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="工作目录（可选，留空表示应用目录）" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorWorkingDirectory, Mode=TwoWay}"
+                                                     PlaceholderText="D:\projects" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="环境变量（每行 KEY=VALUE，可选）" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorEnvironment, Mode=TwoWay}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="NoWrap"
+                                                     MinHeight="52"
+                                                     PlaceholderText="API_KEY=..." />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <!-- Http 专属字段 -->
+                                    <StackPanel Spacing="10" IsVisible="{Binding IsHttpTransport}">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="服务地址" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorUrl, Mode=TwoWay}"
+                                                     PlaceholderText="http://localhost:3000/mcp" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="请求头（每行 KEY=VALUE，可选）" Classes="label" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding EditorHeaders, Mode=TwoWay}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="NoWrap"
+                                                     MinHeight="52"
+                                                     PlaceholderText="Authorization=Bearer ..." />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="超时（秒）" Classes="label" />
+                                        <TextBox Classes="field"
+                                                 Width="96"
+                                                 HorizontalAlignment="Left"
+                                                 Text="{Binding EditorTimeout, Mode=TwoWay}"
+                                                 PlaceholderText="30" />
+                                    </StackPanel>
+
+                                    <TextBlock Text="{Binding EditorError}"
+                                               IsVisible="{Binding HasEditorError}"
+                                               FontSize="11"
+                                               Foreground="#FF9E9E"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <Grid Grid.Row="1" Margin="0,10,0,0" ColumnDefinitions="Auto,*,Auto">
+                                <Button Classes="secondary"
+                                        Content="删除"
+                                        Command="{Binding DeleteServerCommand}" />
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                    <Button Classes="ghost"
+                                            Content="还原"
+                                            Command="{Binding RevertServerCommand}" />
+                                    <Button Classes="primary"
+                                            Content="保存"
+                                            Command="{Binding SaveServerCommand}" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
+</UserControl>

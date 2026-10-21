@@ -78,6 +78,13 @@ public partial class ChatView : UserControl
             message.PropertyChanged += OnMessagePropertyChanged;
     }
 
+    /// <summary>首次显示时恢复的历史消息不会触发集合变更事件，需要在布局完成后主动滚到底部。</summary>
+    protected override void OnLoaded(RoutedEventArgs e)
+    {
+        base.OnLoaded(e);
+        ScrollToEnd();
+    }
+
     private void OnMessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)

@@ -12,5 +12,11 @@
 
     <Application.Styles>
         <FluentTheme />
+        <!-- 窗口共用外观：按控件类型拆分，样式类名在各视图中复用 -->
+        <StyleInclude Source="avares://SoufflePet/Styles/Button.axaml" />
+        <StyleInclude Source="avares://SoufflePet/Styles/TextBox.axaml" />
+        <StyleInclude Source="avares://SoufflePet/Styles/TextBlock.axaml" />
+        <StyleInclude Source="avares://SoufflePet/Styles/ListBox.axaml" />
+        <StyleInclude Source="avares://SoufflePet/Styles/Border.axaml" />
     </Application.Styles>
 </Application>

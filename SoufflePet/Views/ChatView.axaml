@@ -6,199 +6,7 @@
              x:DataType="vm:ChatViewModel"
              x:CompileBindings="True">
 
-    <!-- 深色玻璃面板的全部外观收在这一层；窗口外壳（ChatWindow）只负责透明/置顶/尺寸 -->
-    <UserControl.Styles>
-        <!-- 无底色的弱化按钮：悬停时叠一层淡淡的白 -->
-        <Style Selector="Button.ghost">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="6,4" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#1AFFFFFF" />
-        </Style>
-
-        <!-- 强调色主按钮（发送） -->
-        <Style Selector="Button.primary">
-            <Setter Property="Background" Value="#E8879B" />
-            <Setter Property="Foreground" Value="#2A141B" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="9" />
-            <Setter Property="Padding" Value="16,6" />
-            <Setter Property="FontSize" Value="12.5" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#F09CAE" />
-        </Style>
-        <!-- 草稿为空时按钮禁用：保留强调色的淡出效果，而不是主题的灰色底 -->
-        <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#3DE8879B" />
-        </Style>
-        <Style Selector="Button.primary:disabled">
-            <Setter Property="Foreground" Value="#8C2A141B" />
-        </Style>
-
-        <!-- 消息气泡：助手靠左浅色，用户靠右强调色 -->
-        <Style Selector="Border.bubble">
-            <Setter Property="Background" Value="#17FFFFFF" />
-            <Setter Property="CornerRadius" Value="12,12,12,4" />
-            <Setter Property="Padding" Value="11,8" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
-            <Setter Property="MaxWidth" Value="292" />
-        </Style>
-        <Style Selector="Border.bubble.user">
-            <Setter Property="Background" Value="#E8879B" />
-            <Setter Property="CornerRadius" Value="12,12,4,12" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-        </Style>
-        <Style Selector="Border.bubble TextBlock">
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="LineHeight" Value="20" />
-            <Setter Property="Foreground" Value="#F2FFFFFF" />
-        </Style>
-        <Style Selector="Border.bubble.user TextBlock">
-            <Setter Property="Foreground" Value="#2A141B" />
-        </Style>
-
-        <!-- 工具调用记录：弱化描边 + 更小字号，和正式对话区分开 -->
-        <Style Selector="Border.bubble.tool">
-            <Setter Property="Background" Value="#0DFFFFFF" />
-            <Setter Property="BorderBrush" Value="#22FFFFFF" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="9,6" />
-        </Style>
-        <Style Selector="Border.bubble.tool TextBlock">
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="LineHeight" Value="17" />
-            <Setter Property="Foreground" Value="#99FFFFFF" />
-        </Style>
-
-        <!-- 待审批的工具调用：气泡描边点亮强调色，内部带允许/拒绝按钮 -->
-        <Style Selector="Border.bubble.approval">
-            <Setter Property="BorderBrush" Value="#4DE8879B" />
-        </Style>
-
-        <Style Selector="Button.approval">
-            <Setter Property="Padding" Value="10,3" />
-            <Setter Property="CornerRadius" Value="7" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.approval.accept">
-            <Setter Property="Background" Value="#E8879B" />
-            <Setter Property="Foreground" Value="#2A141B" />
-        </Style>
-        <Style Selector="Button.approval.accept:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#F09CAE" />
-        </Style>
-        <Style Selector="Button.approval.reject">
-            <Setter Property="Background" Value="#1FFFFFFF" />
-            <Setter Property="Foreground" Value="#D9FFFFFF" />
-        </Style>
-        <Style Selector="Button.approval.reject:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#33FFFFFF" />
-        </Style>
-
-        <!-- 审批规则浮层里的可选项 -->
-        <Style Selector="Button.modeItem">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="8,6" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.modeItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#1AFFFFFF" />
-        </Style>
-
-        <Style Selector="TextBlock.muted">
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#8CFFFFFF" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-
-        <!-- 无边框输入框：Fluent 主题会把底色/描边直接设在模板内部 Border 上，必须一起覆盖 -->
-        <Style Selector="TextBox.bare">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="TextBox.bare /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="TextBox.bare:focus /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-
-        <!-- 模型选择列表：去掉默认白底，用强调色淡底表示选中 -->
-        <Style Selector="ListBox.modelList">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
-        </Style>
-        <Style Selector="ListBox.modelList ListBoxItem">
-            <Setter Property="Padding" Value="8,6" />
-            <Setter Property="Margin" Value="0,1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="ListBox.modelList ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="CornerRadius" Value="8" />
-        </Style>
-        <Style Selector="ListBox.modelList ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#1AFFFFFF" />
-        </Style>
-        <Style Selector="ListBox.modelList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#33E8879B" />
-        </Style>
-        <Style
-            Selector="ListBox.modelList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Background" Value="#40E8879B" />
-        </Style>
-
-        <!-- 添加模型表单里的输入框：深色底 + 细描边，聚焦时描边染成强调色 -->
-        <Style Selector="TextBox.field">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="#F2FFFFFF" />
-            <Setter Property="CaretBrush" Value="#E8879B" />
-            <Setter Property="FontSize" Value="12.5" />
-            <Setter Property="Padding" Value="8,5" />
-            <Setter Property="MinHeight" Value="32" />
-        </Style>
-        <Style Selector="TextBox.field /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="#12FFFFFF" />
-            <Setter Property="BorderBrush" Value="#22FFFFFF" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-        </Style>
-        <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement">
-            <Setter Property="BorderBrush" Value="#40FFFFFF" />
-        </Style>
-        <Style Selector="TextBox.field:focus /template/ Border#PART_BorderElement">
-            <Setter Property="BorderBrush" Value="#E8879B" />
-        </Style>
-    </UserControl.Styles>
+    <!-- 深色玻璃面板的外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
 
     <!-- 留出 ShadowMargin，避免面板阴影被窗口边界裁掉 -->
     <Panel Margin="16">
@@ -318,7 +126,10 @@
                         <!-- 左侧操作项允许收缩裁剪，发送按钮固定在右侧，永远不会被顶出窗口 -->
                         <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="*,Auto">
                             <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
-                                <Button Classes="ghost" ToolTip.Tip="添加文件">
+                                <Button Name="MoreButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="更多操作"
+                                        Command="{Binding ToggleMoreCommand}">
                                     <Path Data="M0,6 L12,6 M6,0 L6,12"
                                             Stroke="#8CFFFFFF"
                                             StrokeThickness="1.4"
@@ -409,6 +220,37 @@
                                                       StrokeLineCap="Round"
                                                       VerticalAlignment="Center" />
                                                 <TextBlock Text="添加模型" Classes="muted" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+
+                            <!-- 更多操作浮层：MCP 服务器配置入口 -->
+                            <Popup Grid.Column="0" IsOpen="{Binding IsMoreOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #MoreButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="212"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="更多操作"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <Button Classes="modeItem" Command="{Binding OpenMcpSettingsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="MCP 服务器…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="配置模型可调用的外部工具"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>

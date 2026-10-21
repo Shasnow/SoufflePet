@@ -1,0 +1,46 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 无边框输入框：Fluent 主题会把底色/描边直接设在模板内部 Border 上，必须一起覆盖 -->
+    <Style Selector="TextBox.bare">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- 表单输入框：深色底 + 细描边，聚焦时描边染成强调色 -->
+    <Style Selector="TextBox.field">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="#F2FFFFFF" />
+        <Setter Property="CaretBrush" Value="#E8879B" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="MinHeight" Value="32" />
+    </Style>
+    <Style Selector="TextBox.field /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="#12FFFFFF" />
+        <Setter Property="BorderBrush" Value="#22FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    </Style>
+    <Style Selector="TextBox.field:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="#E8879B" />
+    </Style>
+</Styles>

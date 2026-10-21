@@ -1,0 +1,22 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Style Selector="TextBlock.muted">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="#8CFFFFFF" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 表单字段标题 -->
+    <Style Selector="TextBlock.label">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="#8CFFFFFF" />
+    </Style>
+
+    <!-- 分区标题 -->
+    <Style Selector="TextBlock.section">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="#F2FFFFFF" />
+    </Style>
+</Styles>

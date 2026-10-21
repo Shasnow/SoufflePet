@@ -60,6 +60,8 @@ public class App : Application
             services.AddSingleton<ILlmChatService, LlmChatService>();
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
             services.AddSingleton<IChatWindowService, ChatWindowService>();
+            services.AddSingleton<McpSettingsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的服务器上
+            services.AddSingleton<IMcpSettingsWindowService, McpSettingsWindowService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例

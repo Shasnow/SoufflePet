@@ -1,0 +1,45 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 消息气泡：助手靠左浅色，用户靠右强调色 -->
+    <Style Selector="Border.bubble">
+        <Setter Property="Background" Value="#17FFFFFF" />
+        <Setter Property="CornerRadius" Value="12,12,12,4" />
+        <Setter Property="Padding" Value="11,8" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="MaxWidth" Value="292" />
+    </Style>
+    <Style Selector="Border.bubble.user">
+        <Setter Property="Background" Value="#E8879B" />
+        <Setter Property="CornerRadius" Value="12,12,4,12" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+    </Style>
+    <Style Selector="Border.bubble TextBlock">
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="LineHeight" Value="20" />
+        <Setter Property="Foreground" Value="#F2FFFFFF" />
+    </Style>
+    <Style Selector="Border.bubble.user TextBlock">
+        <Setter Property="Foreground" Value="#2A141B" />
+    </Style>
+
+    <!-- 工具调用记录：弱化描边 + 更小字号，和正式对话区分开 -->
+    <Style Selector="Border.bubble.tool">
+        <Setter Property="Background" Value="#0DFFFFFF" />
+        <Setter Property="BorderBrush" Value="#22FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="9,6" />
+    </Style>
+    <Style Selector="Border.bubble.tool TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="LineHeight" Value="17" />
+        <Setter Property="Foreground" Value="#99FFFFFF" />
+    </Style>
+
+    <!-- 待审批的工具调用：气泡描边点亮强调色 -->
+    <Style Selector="Border.bubble.approval">
+        <Setter Property="BorderBrush" Value="#4DE8879B" />
+    </Style>
+</Styles>

@@ -36,6 +36,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ILlmChatService _llm;
     private readonly ChatToolAccess _toolAccess;
     private readonly ChatMemory _memory;
+    private readonly IMcpSettingsWindowService _mcpSettings;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -56,12 +57,14 @@ public partial class ChatViewModel : ViewModelBase
         SouffleSettings settings,
         ILlmChatService llm,
         ChatToolAccess toolAccess,
-        ChatMemory memory)
+        ChatMemory memory,
+        IMcpSettingsWindowService mcpSettings)
     {
         _settings = settings;
         _llm = llm;
         _toolAccess = toolAccess;
         _memory = memory;
+        _mcpSettings = mcpSettings;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
 
@@ -195,6 +198,21 @@ public partial class ChatViewModel : ViewModelBase
 
     [RelayCommand]
     private void ToggleModelPicker() => IsModelPickerOpen = !IsModelPickerOpen;
+
+    /// <summary>「更多操作」浮层是否展开。</summary>
+    [ObservableProperty]
+    public partial bool IsMoreOpen { get; set; }
+
+    [RelayCommand]
+    private void ToggleMore() => IsMoreOpen = !IsMoreOpen;
+
+    /// <summary>打开 MCP 服务器设置窗口（保存后下一次对话按新配置重连）。</summary>
+    [RelayCommand]
+    private void OpenMcpSettings()
+    {
+        IsMoreOpen = false;
+        _mcpSettings.Show();
+    }
 
     [RelayCommand]
     private void OpenAddModel()

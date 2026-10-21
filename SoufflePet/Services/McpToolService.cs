@@ -23,6 +23,12 @@ public interface IMcpToolService
     /// 仅当取消时抛 <see cref="OperationCanceledException"/>。
     /// </summary>
     Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 断开所有连接并清空工具缓存，下一次 <see cref="GetToolsAsync"/> 按最新配置重新连接。
+    /// 设置界面保存后调用，使改动无需重启即可生效。
+    /// </summary>
+    Task ResetAsync();
 }
 
 /// <summary>
@@ -58,10 +64,37 @@ public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, 
         }
     }
 
+    public async Task ResetAsync()
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return; // 应用退出期间容器已释放
+        }
+
+        try
+        {
+            if (_disposed) return;
+            foreach (var client in _clients) await DisposeQuietlyAsync(client).ConfigureAwait(false);
+            _clients.Clear();
+            _tools = null;
+            Logger.Debug("MCP connections reset");
+        }
+        finally
+        {
+            try { _gate.Release(); } catch (ObjectDisposedException) { }
+        }
+    }
+
     private async Task<IReadOnlyList<AITool>> ConnectAsync(CancellationToken cancellationToken)
     {
         var servers = settings.McpServers
-            .Where(server => server.Enabled && !string.IsNullOrWhiteSpace(server.Name))
+            .Where(server => server.Enabled && !string.IsNullOrWhiteSpace(server.Name) && IsConfigured(server))
             .ToList();
         if (servers.Count == 0) return [];
 
@@ -119,6 +152,13 @@ public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, 
             else if (transport is IAsyncDisposable disposable) await DisposeQuietlyAsync(disposable).ConfigureAwait(false);
         }
     }
+
+    /// <summary>尚未填写完整的新条目跳过连接，避免空命令/空地址产生一次必然失败的连接。</summary>
+    private static bool IsConfigured(McpServerConfig server) =>
+        server.Transport == McpTransportType.Http
+            ? Uri.TryCreate(server.Url.Trim(), UriKind.Absolute, out var uri)
+              && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            : !string.IsNullOrWhiteSpace(server.Command);
 
     private static IClientTransport CreateTransport(McpServerConfig server) =>
         server.Transport == McpTransportType.Http

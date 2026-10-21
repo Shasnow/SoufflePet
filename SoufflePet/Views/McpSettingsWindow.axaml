@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SoufflePet.ViewModels"
+        x:Class="SoufflePet.Views.McpSettingsWindow"
+        x:DataType="vm:McpSettingsViewModel"
+        Title="舒芙蕾 · MCP 服务器"
+        Width="744"
+        Height="588"
+        CanResize="False"
+        WindowDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        RequestedThemeVariant="Dark">
+    <!-- 内容交给 ViewLocator：DataContext 是 McpSettingsViewModel 时自动实例化 McpSettingsView -->
+    <ContentControl Content="{Binding}" />
+</Window>

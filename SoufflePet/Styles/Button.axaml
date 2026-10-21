@@ -1,0 +1,116 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 无底色的弱化按钮：悬停时叠一层淡淡的白 -->
+    <Style Selector="Button.ghost">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#1AFFFFFF" />
+    </Style>
+
+    <!-- 强调色主按钮（发送 / 保存） -->
+    <Style Selector="Button.primary">
+        <Setter Property="Background" Value="#E8879B" />
+        <Setter Property="Foreground" Value="#2A141B" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="9" />
+        <Setter Property="Padding" Value="16,6" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#F09CAE" />
+    </Style>
+    <!-- 按钮禁用时保留强调色的淡出效果，而不是主题的灰色底 -->
+    <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#3DE8879B" />
+    </Style>
+    <Style Selector="Button.primary:disabled">
+        <Setter Property="Foreground" Value="#8C2A141B" />
+    </Style>
+
+    <!-- 次要按钮：浅底（还原 / 删除等） -->
+    <Style Selector="Button.secondary">
+        <Setter Property="Background" Value="#1FFFFFFF" />
+        <Setter Property="Foreground" Value="#D9FFFFFF" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="9" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#33FFFFFF" />
+    </Style>
+
+    <!-- 工具审批气泡里的允许 / 拒绝按钮 -->
+    <Style Selector="Button.approval">
+        <Setter Property="Padding" Value="10,3" />
+        <Setter Property="CornerRadius" Value="7" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.approval.accept">
+        <Setter Property="Background" Value="#E8879B" />
+        <Setter Property="Foreground" Value="#2A141B" />
+    </Style>
+    <Style Selector="Button.approval.accept:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#F09CAE" />
+    </Style>
+    <Style Selector="Button.approval.reject">
+        <Setter Property="Background" Value="#1FFFFFFF" />
+        <Setter Property="Foreground" Value="#D9FFFFFF" />
+    </Style>
+    <Style Selector="Button.approval.reject:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#33FFFFFF" />
+    </Style>
+
+    <!-- 浮层里的可选项 -->
+    <Style Selector="Button.modeItem">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.modeItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#1AFFFFFF" />
+    </Style>
+
+    <!-- 传输方式切换（单选标签） -->
+    <Style Selector="Button.tab">
+        <Setter Property="Background" Value="#12FFFFFF" />
+        <Setter Property="BorderBrush" Value="#22FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="12,8" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#1FFFFFFF" />
+        <Setter Property="CornerRadius" Value="10" />
+    </Style>
+    <Style Selector="Button.tab.selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#33E8879B" />
+        <Setter Property="CornerRadius" Value="10" />
+    </Style>
+    <Style Selector="Button.tab.selected">
+        <Setter Property="BorderBrush" Value="#66E8879B" />
+    </Style>
+</Styles>

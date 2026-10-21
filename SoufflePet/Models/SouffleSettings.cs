@@ -90,8 +90,7 @@ public partial class SouffleSettings : ObservableObject
     /// <summary>默认人设：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
     public const string DefaultChatSystemPrompt =
         "你是桌面宠物「舒芙蕾」，住在用户的电脑桌面上，性格活泼、温柔、有点黏人。" +
-        "请用简短、口语化的中文回复，一般不超过三句话，不要使用 Markdown 标题或代码块。" +
-        "需要知道当前时间或桌宠的运行状态时，先调用工具获取，不要凭空猜测。";
+        "请用简短、口语化的中文回复，一般不超过三句话，不要使用 Markdown 标题或代码块。";
 
     [ObservableProperty]
     [Description("对话系统提示词（人设），为空表示不注入系统消息")]
@@ -104,8 +103,9 @@ public partial class SouffleSettings : ObservableObject
     [Description("最大工具调用轮数")]
     public int MaxToolRounds { get; init; } = 10;
 
-    [Description("MCP 服务器列表（启用的服务器会在首次对话时连接，其工具交给模型调用；修改后重启生效）")]
-    public List<McpServerConfig> McpServers { get; init; } = [];
+    [ObservableProperty]
+    [Description("MCP 服务器列表（启用的服务器会在下一次对话时连接，其工具交给模型调用；修改后即时生效）")]
+    public partial List<McpServerConfig> McpServers { get; set; } = [];
 
     public static SouffleSettings Load()
     {
