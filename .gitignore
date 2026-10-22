@@ -1,6 +1,7 @@
 .idea
 .trae
 .workbuddy
+.verifybuild
 obj
 bin
 **/wwwroot/*

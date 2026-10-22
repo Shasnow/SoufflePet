@@ -439,6 +439,13 @@ public sealed class ChatTools
             else stderrLines.Enqueue(e.Data);
         };
 
+        // 用 Exited 事件等进程退出，不要用 WaitForExitAsync：开始异步读流之后，
+        // WaitForExitAsync 会连同「读到管道 EOF」一起等，而命令拉起的 daemon
+        // （比如 agent-browser）会继承写端句柄，EOF 永远不来，结果每次都超时。
+        var exitTask = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => exitTask.TrySetResult();
+
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSecondsValue));
 
@@ -454,24 +461,12 @@ public sealed class ChatTools
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
+        // 正常退出与超时只有「结束原因」不同：输出收集、收敛、拼装完全一样，
+        // 所以只用一个 try 等到进程退出或被超时打断，最后按原因套不同的外壳。
+        var timedOut = false;
         try
         {
-            await process.WaitForExitAsync(timeout.Token);
-
-            // 主进程已退出：能收到 EOF 就说明输出读完，收不到也不再多等（避免被后台进程拖住）。
-            await Task.WhenAny(
-                    Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
-                    Task.Delay(OutputDrainTimeout, CancellationToken.None))
-                .ConfigureAwait(false);
-
-            var stdout = TruncateOutput(JoinOutput(stdoutLines));
-            var stderr = TruncateOutput(JoinOutput(stderrLines));
-
-            var result = new StringBuilder($"退出码 {process.ExitCode}");
-            if (stdout.Length > 0) result.Append("\n输出：\n").Append(stdout);
-            if (stderr.Length > 0) result.Append("\n错误：\n").Append(stderr);
-            if (stdout.Length == 0 && stderr.Length == 0) result.Append("\n（无输出）");
-            return result.ToString();
+            await exitTask.Task.WaitAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
@@ -487,8 +482,32 @@ public sealed class ChatTools
             // 只有「停止对话」才把取消继续往上抛；命令自身超时按普通结果回给模型，
             // 不能连带取消本次 LLM 请求。
             cancellationToken.ThrowIfCancellationRequested();
-            return $"命令超过 {timeoutSecondsValue} 秒未结束，已终止。";
+            timedOut = true;
         }
+
+        // 进程已退出或已被终止：能收到 EOF 就说明输出读完，收不到也不再多等
+        // （避免被继承了写端句柄的常驻进程拖住）。超时也把已收到的输出带回去：
+        // CLI 常在卡住前先打印一行进度或错误，这些线索丢了就只能看到「超时」。
+        await Task.WhenAny(
+                Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
+                Task.Delay(OutputDrainTimeout, CancellationToken.None))
+            .ConfigureAwait(false);
+
+        var stdout = TruncateOutput(JoinOutput(stdoutLines));
+        var stderr = TruncateOutput(JoinOutput(stderrLines));
+
+        var result = new StringBuilder(
+            timedOut ? $"命令超过 {timeoutSecondsValue} 秒未结束，已终止。" : $"退出码 {process.ExitCode}");
+        if (stdout.Length > 0) result.Append(timedOut ? "\n已产生的输出：\n" : "\n输出：\n").Append(stdout);
+        if (stderr.Length > 0) result.Append(timedOut ? "\n已产生的错误：\n" : "\n错误：\n").Append(stderr);
+        if (stdout.Length == 0 && stderr.Length == 0)
+        {
+            result.Append(timedOut
+                ? "\n（没有任何输出：命令卡在启动阶段，或它拉起的常驻进程继承了输出句柄）"
+                : "\n（无输出）");
+        }
+
+        return result.ToString();
     }
 
     private static string JoinOutput(ConcurrentQueue<string> lines) =>
