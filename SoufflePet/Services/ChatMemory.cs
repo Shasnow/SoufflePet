@@ -23,7 +23,8 @@ public readonly record struct MemoryTurn(
     string? CallId = null,
     string? ToolName = null,
     string? Arguments = null,
-    string? Result = null);
+    string? Result = null,
+    string? Reasoning = null);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -115,7 +116,8 @@ public sealed class ChatMemory
         string? callId = null,
         string? toolName = null,
         string? arguments = null,
-        string? result = null)
+        string? result = null,
+        string? reasoning = null)
     {
         text = text.Trim();
         if (text.Length == 0) return;
@@ -128,7 +130,8 @@ public sealed class ChatMemory
             CallId = callId,
             ToolName = toolName,
             Arguments = arguments,
-            Result = result
+            Result = result,
+            Reasoning = string.IsNullOrWhiteSpace(reasoning) ? null : reasoning.Trim()
         };
         lock (_gate)
         {
@@ -173,7 +176,7 @@ public sealed class ChatMemory
 
             var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
-                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result))
+                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result, t.Reasoning))
                 .ToList();
 
             Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
@@ -558,6 +561,9 @@ public sealed class ChatMemory
 
         /// <summary>工具完整结果（仅 tool 记录）。</summary>
         public string? Result { get; set; }
+
+        /// <summary>该轮的思考内容（reasoning_content），用于请求时原样回传给推理模型。</summary>
+        public string? Reasoning { get; set; }
 
         /// <summary>检索用的切词结果，只在内存里保留。</summary>
         [JsonIgnore]

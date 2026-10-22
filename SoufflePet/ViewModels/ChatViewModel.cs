@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -336,12 +337,35 @@ public partial class ChatViewModel : ViewModelBase
         _cts = cts;
         IsGenerating = true;
 
-        var answer = string.Empty;   // 整轮回复（写入历史）
         var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
+        var roundReasoning = new StringBuilder(); // 当前轮的思考内容，随本轮最后一条助手消息落库
         Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
         Models.ChatMessage? answered = null; // 本轮最后一段正文所在的气泡，用量挂在它下方
         LlmUsageEvent? usage = null;         // 本轮 token 用量（流结束时产出）
         var toolBubbles = new Dictionary<string, Models.ChatMessage>(StringComparer.Ordinal); // CallId → 进行中的工具气泡
+
+        // 把当前气泡里的正文作为独立的一轮落库：工具调用会截断气泡，
+        // 只有在这里立刻保存，「回答 → 工具调用 → 回答」的先后顺序才能完整保留。
+        // withReasoning 仅在本轮没有工具调用（即最终回复）时为 true，思考内容随这条消息一起保存。
+        void CommitSegment(bool withReasoning)
+        {
+            if (segment.Length == 0) return;
+
+            List<AIContent> contents = [];
+            string? reasoning = null;
+            if (withReasoning && roundReasoning.Length > 0)
+            {
+                reasoning = roundReasoning.ToString();
+                contents.Add(new TextReasoningContent(reasoning));
+                roundReasoning.Clear();
+            }
+
+            contents.Add(new TextContent(segment));
+            _history.Add(new ChatMessage(ChatRole.Assistant, contents));
+            _memory.AddTurn(ChatMemory.AssistantRole, segment, reasoning: reasoning);
+            TrimHistory();
+            segment = string.Empty;
+        }
 
         // 插入一条工具记录：没有正文时直接插在回复气泡前；已有正文则截断并为后续回复新开气泡
         void AddToolBubble(Models.ChatMessage message)
@@ -355,11 +379,11 @@ public partial class ChatViewModel : ViewModelBase
                 return;
             }
 
+            CommitSegment(withReasoning: false);
             Messages.Insert(index + 1, message);
             reply = new Models.ChatMessage(ThinkingText, isUser: false);
             _reply = reply;
             Messages.Insert(index + 2, reply);
-            segment = string.Empty;
         }
 
         try
@@ -369,6 +393,7 @@ public partial class ChatViewModel : ViewModelBase
                 switch (evt)
                 {
                     case LlmReasoningDelta reasoning:
+                        roundReasoning.Append(reasoning.Text);
                         if (thinking is null)
                         {
                             thinking = new Models.ChatMessage(string.Empty, isUser: false, isReasoning: true);
@@ -379,7 +404,6 @@ public partial class ChatViewModel : ViewModelBase
                         break;
 
                     case LlmTextDelta delta:
-                        answer += delta.Text;
                         segment += delta.Text;
                         reply.Text = segment;
                         answered = reply;
@@ -411,9 +435,13 @@ public partial class ChatViewModel : ViewModelBase
                             completed.Text = display;
                         }
 
-                        // 工具调用记录既写入长期记忆（重启后恢复），也按标准结构进入请求历史
-                        _memory.AddTurn(ChatMemory.ToolRole, display, call.CallId, call.Name, call.Arguments, call.Result);
-                        AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, display);
+                        // 工具调用记录既写入长期记忆（重启后恢复），也按标准结构进入请求历史；
+                        // 本轮思考内容随第一条工具记录保存，推理模型在工具循环里要求回传 reasoning_content
+                        var toolReasoning = roundReasoning.Length > 0 ? roundReasoning.ToString() : null;
+                        roundReasoning.Clear();
+                        _memory.AddTurn(ChatMemory.ToolRole, display, call.CallId, call.Name, call.Arguments, call.Result,
+                            toolReasoning);
+                        AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, display, toolReasoning);
                         TrimHistory();
                         break;
                 }
@@ -421,7 +449,7 @@ public partial class ChatViewModel : ViewModelBase
 
             if (segment.Length == 0)
             {
-                if (answer.Length == 0) reply.Text = "（没有收到回复）";
+                if (answered is null) reply.Text = "（没有收到回复）";
                 else Messages.Remove(reply); // 最后一轮只有工具调用，没有正文可显示
             }
         }
@@ -439,13 +467,8 @@ public partial class ChatViewModel : ViewModelBase
             // 停止或出错时仍在「执行中」的工具记录标记为中断，避免看起来一直没结束
             foreach (var pending in toolBubbles.Values) pending.Text += "\n（已中断）";
 
-            // 只有真正生成出的内容才写回历史；停止时保留已收到的部分
-            if (answer.Length > 0)
-            {
-                _history.Add(new ChatMessage(ChatRole.Assistant, answer));
-                _memory.AddTurn("assistant", answer);
-                TrimHistory();
-            }
+            // 只有真正生成出的内容才写回历史；停止时保留已收到的最后一段
+            CommitSegment(withReasoning: true);
 
             // 用量统计：气泡底部显示本轮明细，同时累加进设置里的历史总额
             if (usage is { } roundUsage) RecordUsage(roundUsage, answered);
@@ -502,7 +525,13 @@ public partial class ChatViewModel : ViewModelBase
     /// 按标准结构把一次工具调用写进请求历史：助手消息携带 FunctionCallContent，紧跟 ChatRole.Tool 的结果消息。
     /// 旧记录缺少 CallId / 工具名时无法配对，只能退化成助手文本，避免出现没有对应调用的 tool 消息。
     /// </summary>
-    private void AddToolHistory(string? callId, string? name, string? arguments, string? result, string fallbackText)
+    private void AddToolHistory(
+        string? callId,
+        string? name,
+        string? arguments,
+        string? result,
+        string fallbackText,
+        string? reasoning = null)
     {
         if (string.IsNullOrEmpty(callId) || string.IsNullOrEmpty(name) || result is null)
         {
@@ -510,8 +539,10 @@ public partial class ChatViewModel : ViewModelBase
             return;
         }
 
-        _history.Add(new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent(callId, name, ParseArguments(arguments))]));
+        List<AIContent> contents = [];
+        if (!string.IsNullOrEmpty(reasoning)) contents.Add(new TextReasoningContent(reasoning));
+        contents.Add(new FunctionCallContent(callId, name, ParseArguments(arguments)));
+        _history.Add(new ChatMessage(ChatRole.Assistant, contents));
         _history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
     }
 
@@ -554,13 +585,22 @@ public partial class ChatViewModel : ViewModelBase
             if (string.Equals(turn.Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase))
             {
                 // 工具记录按标准结构重建进请求历史，界面上按工具气泡展示（展示时截断）
-                AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text);
+                AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text, turn.Reasoning);
                 Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true));
                 continue;
             }
 
             var isUser = string.Equals(turn.Role, ChatMemory.UserRole, StringComparison.OrdinalIgnoreCase);
-            _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
+            if (!isUser && !string.IsNullOrEmpty(turn.Reasoning))
+            {
+                _history.Add(new ChatMessage(ChatRole.Assistant,
+                    [new TextReasoningContent(turn.Reasoning), new TextContent(turn.Text)]));
+            }
+            else
+            {
+                _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
+            }
+
             Messages.Add(new Models.ChatMessage(turn.Text, isUser));
         }
     }

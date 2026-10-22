@@ -18,6 +18,8 @@ using Serilog;
 using SoufflePet.Models;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
+#pragma warning disable SCME0001 // JsonPatch 目前仍是 OpenAI SDK 的实验性 API
+
 namespace SoufflePet.Services;
 
 /// <summary>流式回复中的一个事件。</summary>
@@ -210,6 +212,9 @@ public sealed class LlmChatService : ILlmChatService
             // 工具结果会不断追加，每轮请求前重新检查预算，防止长工具链把提示词撑爆
             TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
 
+            // OpenAI 适配器不会序列化 TextReasoningContent，这里把思考内容补成 reasoning_content
+            AttachReasoning(messages);
+
             // 文本增量即时产出，同时留存完整流以便汇总工具调用
             var updates = new List<ChatResponseUpdate>();
             await using (var enumerator = chatClient
@@ -400,6 +405,9 @@ public sealed class LlmChatService : ILlmChatService
                 case FunctionResultContent result:
                     chars += ResultChars(result.Result);
                     break;
+                case TextReasoningContent reasoning:
+                    chars += reasoning.Text.Length;
+                    break;
             }
         }
 
@@ -490,6 +498,50 @@ public sealed class LlmChatService : ILlmChatService
         JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
         _ => JsonSerializer.Serialize(result, ToolJsonOptions)
     };
+
+    /// <summary>
+    /// 把助手消息里的思考内容补回请求体：OpenAI 适配器序列化时会忽略 TextReasoningContent，
+    /// 而 DeepSeek 等推理模型要求工具循环中回传 reasoning_content。
+    /// 做法是构造 SDK 的原始助手消息并打 JsonPatch，适配器会优先使用 RawRepresentation。
+    /// </summary>
+    private static void AttachReasoning(IEnumerable<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message.Role != ChatRole.Assistant) continue;
+
+            var reasoning = string.Concat(message.Contents
+                .OfType<TextReasoningContent>()
+                .Select(content => content.Text));
+            if (reasoning.Length == 0) continue;
+
+            var calls = message.Contents.OfType<FunctionCallContent>().ToList();
+            AssistantChatMessage raw;
+            if (calls.Count > 0)
+            {
+                raw = new AssistantChatMessage(calls.Select(call =>
+                {
+                    var arguments = FormatArguments(call.Arguments);
+                    return ChatToolCall.CreateFunctionToolCall(
+                        call.CallId,
+                        call.Name,
+                        BinaryData.FromString(arguments.Length > 0 ? arguments : "{}"));
+                }));
+
+                if (message.Text.Length > 0)
+                    raw.Patch.Set("$.content"u8,
+                        BinaryData.FromString(JsonSerializer.Serialize(message.Text, ToolJsonOptions)));
+            }
+            else
+            {
+                raw = new AssistantChatMessage(message.Text);
+            }
+
+            raw.Patch.Set("$.reasoning_content"u8,
+                BinaryData.FromString(JsonSerializer.Serialize(reasoning, ToolJsonOptions)));
+            message.RawRepresentation = raw;
+        }
+    }
 
     /// <summary>发送前把完整请求写入调试日志：逐条打印消息（含系统提示词、记忆、技能清单），再列出本次可调用的工具。</summary>
     private static void LogRequest(
