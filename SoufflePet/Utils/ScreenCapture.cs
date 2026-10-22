@@ -368,8 +368,8 @@ public static class ScreenCapture
         return new Rectangle(
             0,
             0,
-            (int)GetSystemMetrics(SystemMetricCxScreen),
-            (int)GetSystemMetrics(SystemMetricCyScreen));
+            GetSystemMetrics(SystemMetricCxScreen),
+            GetSystemMetrics(SystemMetricCyScreen));
     }
 
     private const int SystemMetricCxScreen = 0;
