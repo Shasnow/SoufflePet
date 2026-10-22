@@ -18,12 +18,6 @@ using SoufflePet.Utils;
 namespace SoufflePet.Services;
 
 /// <summary>
-/// 带图片的工具结果：<see cref="Text"/> 回传给模型与界面用于展示，
-/// <see cref="Data"/> 由对话服务作为独立的多模态内容附加到下一轮请求。
-/// </summary>
-public sealed record ToolImageResult(string Text, byte[] Data, string MediaType);
-
-/// <summary>
 /// 对话模型可调用的本地工具集（含切换表情、执行命令这两个有副作用的工具）：
 /// 由 AIFunctionFactory 依据方法签名与 <see cref="DescriptionAttribute"/> 生成工具声明，
 /// 模型按需发起调用，本地执行后再把结果回传给模型。
@@ -54,12 +48,6 @@ public sealed class ChatTools
     private readonly ChatMemory _memory;
     private readonly IMcpToolService _mcp;
     private readonly ISkillService _skills;
-
-    /// <summary>
-    /// 截图工具暂存的图片：工具返回值会被序列化成 JSON，类型判断识别不出图片，
-    /// 改由这里暂存，对话服务在工具调用完后取走并作为多模态内容附加。
-    /// </summary>
-    private ToolImageResult? _pendingImage;
 
     public ChatTools(
         SouffleSettings settings,
@@ -182,29 +170,21 @@ public sealed class ChatTools
             : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
     }
 
-    private string TakeScreenshot()
+    /// <summary>
+    /// 截图结果直接以 AIContent 集合返回：AIFunctionFactory 对可赋值给 IEnumerable&lt;T&gt; 的声明类型
+    /// 不做 JSON 序列化，对话服务能据此把图片拆出来走多模态通道。
+    /// </summary>
+    private AIContent[] TakeScreenshot()
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("截图工具仅支持 Windows。");
 
         var shot = ScreenCapture.CaptureCurrentMonitor();
-        // 图片暂存起来（返回值会被序列化成 JSON，塞不下 base64），只把说明文本作为工具结果。
-        _pendingImage = new ToolImageResult(
-            $"已截取当前显示器画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}",
-            shot.Image,
-            shot.MediaType);
-        return _pendingImage.Text;
-    }
-
-    /// <summary>
-    /// 取走并清空暂存的截图图片：对话服务每次工具调用后取一次，
-    /// 避免旧图串到下一次调用；没有暂存图片时返回 null。
-    /// </summary>
-    internal ToolImageResult? TakePendingImage()
-    {
-        var image = _pendingImage;
-        _pendingImage = null;
-        return image;
+        return
+        [
+            new TextContent($"已截取当前显示器画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}"),
+            new DataContent(shot.Image, shot.MediaType)
+        ];
     }
 
     private async Task<string> RunShellCommand(

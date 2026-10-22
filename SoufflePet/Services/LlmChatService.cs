@@ -273,32 +273,25 @@ public sealed class LlmChatService : ILlmChatService
 
                 var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
 
-                // 带图片的工具（如截图）：返回值会被序列化成 JSON，类型判断识别不出图片，
-                // 改为主动取走 ChatTools 暂存的图片；工具结果只放文本，
+                // 工具返回 AIContent 集合（截图、MCP 图片等）：文本作为工具结果，
                 // 图片作为独立用户消息附加，让支持视觉输入的模型能真正看到画面。
-                var pendingImage = _chatTools.TakePendingImage();
-                if (pendingImage is not null)
+                if (result is IEnumerable<AIContent> contents)
                 {
-                    messages.Add(new ChatMessage(ChatRole.Tool,
-                        [new FunctionResultContent(call.CallId, pendingImage.Text)]));
-                    messages.Add(new ChatMessage(ChatRole.User,
-                    [
-                        new TextContent("这是刚才工具返回的画面，请结合图片内容回答。"),
-                        new DataContent(pendingImage.Data, pendingImage.MediaType)
-                    ]));
-                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, pendingImage.Text);
-                    continue;
-                }
+                    var list = contents as IList<AIContent> ?? [.. contents];
+                    var text = ExtractText(list);
+                    if (list.OfType<DataContent>().FirstOrDefault() is { } image)
+                    {
+                        var summary = text.Length > 0 ? text : "工具返回了一张图片。";
+                        messages.Add(new ChatMessage(ChatRole.Tool,
+                            [new FunctionResultContent(call.CallId, summary)]));
+                        messages.Add(new ChatMessage(ChatRole.User,
+                            [new DataContent(image.Data, image.MediaType)]));
+                        yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, summary);
+                        continue;
+                    }
 
-                // MCP 等其它工具直接返回图片内容的情形（已在 InvokeToolAsync 里归一化）
-                if (result is ToolImageResult image)
-                {
-                    messages.Add(new ChatMessage(ChatRole.Tool,
-                        [new FunctionResultContent(call.CallId, image.Text)]));
-                    messages.Add(new ChatMessage(ChatRole.User,
-                    [new DataContent(image.Data, image.MediaType)]));
-                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, image.Text);
-                    continue;
+                    // 纯文本内容集合：拼成字符串回传，避免被序列化成 JSON
+                    if (text.Length > 0) result = text;
                 }
 
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
@@ -468,34 +461,22 @@ public sealed class LlmChatService : ILlmChatService
     }
 
     /// <summary>
-    /// 把工具结果规整成统一形态：带图片的结果（如 MCP 截图工具返回的 DataContent）
-    /// 转换成 <see cref="ToolImageResult" />，让图片走多模态通道，而不是把 base64 当文本塞进对话。
+    /// 把工具结果规整成统一形态：MCP 工具会把 CallToolResult 的 Content 列表映射成 AIContent 集合返回，
+    /// 单个内容块则直接返回一个 AIContent；这里统一包装成集合，其余类型原样返回。
     /// </summary>
     private static object? NormalizeToolResult(object? result) => result switch
     {
         null => null,
-        ToolImageResult => result,
-        DataContent data => new ToolImageResult("工具返回了一张图片。", data.Data.ToArray(), data.MediaType),
-        // MCP 工具把 CallToolResult 的 Content 列表映射成 AIContent 集合返回
-        IEnumerable<AIContent> contents => FromContents(contents),
+        AIContent content => new[] { content },
+        IEnumerable<AIContent> contents => contents as IList<AIContent> ?? [.. contents],
         _ => result
     };
 
-    /// <summary>从内容集合中抽出第一张图片；没有图片时原样返回，仍按普通文本结果处理。</summary>
-    private static object FromContents(IEnumerable<AIContent> contents)
-    {
-        var list = contents as IList<AIContent> ?? [.. contents];
-        if (list.OfType<DataContent>().FirstOrDefault() is not { } image) return list;
-
-        var text = string.Join("\n", list.OfType<TextContent>()
+    /// <summary>把内容集合里的文本块拼成多行文本。</summary>
+    private static string ExtractText(IEnumerable<AIContent> contents) =>
+        string.Join("\n", contents.OfType<TextContent>()
             .Select(content => content.Text)
             .Where(line => !string.IsNullOrWhiteSpace(line)));
-
-        return new ToolImageResult(
-            text.Length > 0 ? text : "工具返回了一张图片。",
-            image.Data.ToArray(),
-            image.MediaType);
-    }
 
     /// <summary>工具参数序列化为界面可读的 JSON；无参数时返回空串。</summary>
     private static string FormatArguments(IDictionary<string, object?>? arguments) =>
