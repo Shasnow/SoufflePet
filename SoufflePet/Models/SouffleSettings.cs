@@ -92,6 +92,10 @@ public partial class SouffleSettings : ObservableObject
     public ObservableCollection<ChatModelConfig> ChatModels { get; set; } = [];
 
     [ObservableProperty]
+    [Description("联网搜索用的百度千帆 API Key（web_search 工具）；留空时该工具会提示未配置")]
+    public partial string WebSearchApiKey { get; set; } = string.Empty;
+
+    [ObservableProperty]
     [Description("当前选择的对话模型名称，首次启动为空表示未选择")]
     public partial string ChatModelName { get; set; } = string.Empty;
 

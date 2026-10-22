@@ -8,7 +8,9 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -48,7 +50,20 @@ public sealed class ChatTools
     /// <summary>每个问题的预设选项上限，超出的忽略。</summary>
     private const int AskUserMaxOptions = 6;
 
+    /// <summary>联网搜索接口（百度千帆 AI 搜索）：POST + Bearer API Key。</summary>
+    private const string WebSearchEndpoint = "https://qianfan.baidubce.com/v2/ai_search/web_search";
+
+    /// <summary>联网搜索使用的命名 HttpClient（在组合根注册，超时 20 秒）。</summary>
+    public const string WebSearchClientName = "web-search";
+
+    /// <summary>单条搜索摘要回传给模型的最大长度，超出截断。</summary>
+    private const int SearchSnippetMaxLength = 400;
+
+    /// <summary>搜索结果整体回传给模型的最大长度，超出截断。</summary>
+    private const int SearchOutputMaxLength = 6000;
+
     private readonly SouffleSettings _settings;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly PetExpressionService _expressions;
     private readonly ChatToolAccess _access;
     private readonly ChatMemory _memory;
@@ -58,6 +73,7 @@ public sealed class ChatTools
 
     public ChatTools(
         SouffleSettings settings,
+        IHttpClientFactory httpClientFactory,
         PetExpressionService expressions,
         ChatToolAccess access,
         ChatMemory memory,
@@ -66,6 +82,7 @@ public sealed class ChatTools
         UserQuestionService questions)
     {
         _settings = settings;
+        _httpClientFactory = httpClientFactory;
         _expressions = expressions;
         _access = access;
         _memory = memory;
@@ -78,6 +95,12 @@ public sealed class ChatTools
                 GetCurrentTime,
                 "get_current_time",
                 "获取当前的本地日期、时间、星期和时区。用户问到现在几点、今天几号、星期几时先调用它，不要凭空推测。"),
+            AIFunctionFactory.Create(
+                WebSearch,
+                "web_search",
+                "联网搜索实时信息：返回若干网页的标题、链接和摘要。"
+                + "用户问到新闻、天气、价格、赛事、近期事件，或必须依赖最新外部信息才能回答时调用；"
+                + "常识问题、本地文件与本地信息不要调用。"),
             AIFunctionFactory.Create(
                 GetExpressions,
                 "get_expressions",
@@ -148,6 +171,94 @@ public sealed class ChatTools
         var culture = CultureInfo.GetCultureInfo("zh-CN");
         return $"{now.ToString("yyyy-MM-dd HH:mm:ss dddd", culture)}，UTC{now:zzz}，时区 {TimeZoneInfo.Local.Id}";
     }
+
+    /// <summary>
+    /// 联网搜索：把关键词交给百度千帆 AI 搜索，汇总返回网页的标题、链接与摘要。
+    /// 摘要与总量都做截断，避免一次调用把上下文撑爆。
+    /// </summary>
+    private async Task<string> WebSearch(
+        [Description("搜索关键词，尽量具体；百度侧只取前 72 个字符")]
+        string query,
+        [Description("可选的时间范围：week 最近7天、month 最近30天、semiyear 最近180天、year 最近365天；不传表示不限时间")]
+        string? recency = null,
+        CancellationToken cancellationToken = default)
+    {
+        var apiKey = _settings.WebSearchApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return "联网搜索未配置：请在 SoufflePet.json 中填写 WebSearchApiKey（百度千帆 API Key）后重启应用。";
+
+        query = query?.Trim() ?? string.Empty;
+        if (query.Length == 0) return "搜索关键词不能为空。";
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["messages"] = new[] { new { role = "user", content = query } },
+            ["search_source"] = "baidu_search_v2",
+            ["edition"] = "standard",
+            ["resource_type_filter"] = new[] { new { type = "web", top_k = 10 } },
+        };
+        if (!string.IsNullOrWhiteSpace(recency)) payload["search_recency_filter"] = recency.Trim();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, WebSearchEndpoint)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
+
+        using var response = await _httpClientFactory.CreateClient(WebSearchClientName)
+            .SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            return $"联网搜索失败（HTTP {(int)response.StatusCode}）：{Truncate(body, 300)}";
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        if (root.TryGetProperty("code", out var code) && code.ValueKind != JsonValueKind.Null)
+            return $"联网搜索失败（{code.GetRawText()}）：{ReadString(root, "message")}".Trim();
+
+        if (!root.TryGetProperty("references", out var references) || references.ValueKind != JsonValueKind.Array)
+            return "联网搜索没有返回结果。";
+
+        var builder = new StringBuilder("联网搜索结果：");
+        var count = 0;
+        foreach (var item in references.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            // 本次只请求网页，视频/图片等结果直接跳过
+            if (ReadString(item, "type") is { } type &&
+                !string.Equals(type, "web", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var url = ReadString(item, "url");
+            if (string.IsNullOrWhiteSpace(url)) continue;
+
+            var title = ReadString(item, "title") ?? ReadString(item, "web_anchor") ?? "(无标题)";
+            var snippet = ReadString(item, "snippet") ?? ReadString(item, "content") ?? string.Empty;
+            var date = ReadString(item, "date");
+            var site = ReadString(item, "website");
+
+            builder.Append("\n\n").Append(++count).Append(". ").Append(title);
+            if (!string.IsNullOrEmpty(date)) builder.Append("（").Append(date).Append("）");
+            builder.Append('\n').Append(url);
+            if (!string.IsNullOrWhiteSpace(site)) builder.Append("\n来源：").Append(site);
+            if (snippet.Length > 0) builder.Append('\n').Append(Truncate(snippet.Trim(), SearchSnippetMaxLength));
+
+            if (builder.Length >= SearchOutputMaxLength)
+            {
+                builder.Append("\n…（结果过多，已截断）");
+                break;
+            }
+        }
+
+        return count == 0 ? "联网搜索没有返回网页结果。" : builder.ToString();
+    }
+
+    private static string? ReadString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max] + "…";
 
     private string GetExpressions()
     {

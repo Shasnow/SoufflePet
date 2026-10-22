@@ -45,6 +45,9 @@ public class App : Application
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
             services.AddSingleton(SouffleSettings.Load());
+            // 联网搜索的 HTTP 客户端：由 IHttpClientFactory 统一管理生命周期与连接池
+            services.AddHttpClient(ChatTools.WebSearchClientName,
+                client => client.Timeout = TimeSpan.FromSeconds(20));
             services.AddSingleton<IProcessDetector, ProcessDetector>();
             services.AddSingleton<IForegroundDetector, ForegroundDetector>();
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
