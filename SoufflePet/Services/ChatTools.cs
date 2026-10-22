@@ -42,12 +42,19 @@ public sealed class ChatTools
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8000;
 
+    /// <summary>一次提问最多展示的问题数，超出的忽略（面板放不下，也避免模型刷屏）。</summary>
+    private const int AskUserMaxQuestions = 6;
+
+    /// <summary>每个问题的预设选项上限，超出的忽略。</summary>
+    private const int AskUserMaxOptions = 6;
+
     private readonly SouffleSettings _settings;
     private readonly PetExpressionService _expressions;
     private readonly ChatToolAccess _access;
     private readonly ChatMemory _memory;
     private readonly IMcpToolService _mcp;
     private readonly ISkillService _skills;
+    private readonly UserQuestionService _questions;
 
     public ChatTools(
         SouffleSettings settings,
@@ -55,7 +62,8 @@ public sealed class ChatTools
         ChatToolAccess access,
         ChatMemory memory,
         IMcpToolService mcp,
-        ISkillService skills)
+        ISkillService skills,
+        UserQuestionService questions)
     {
         _settings = settings;
         _expressions = expressions;
@@ -63,6 +71,7 @@ public sealed class ChatTools
         _memory = memory;
         _mcp = mcp;
         _skills = skills;
+        _questions = questions;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -85,10 +94,22 @@ public sealed class ChatTools
                 + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
                 + "不要执行格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
             AIFunctionFactory.Create(
+                ListWindows,
+                "list_windows",
+                "列出当前屏幕上的可见窗口。"),
+            AIFunctionFactory.Create(
+                AskUser,
+                "ask_user",
+                "向用户提问以补全信息：一次可以问多个问题，每个问题给出 2-5 个预设选项（可带一句说明），"
+                + "界面会固定再附带一个「其他」选项。用户回答完所有问题后返回问答结果。"
+                + "当缺少关键信息（喜好、路径、数量、方案选择等）且无法自行推断时使用；"
+                + "能从上下文或工具得到答案的不要问。"),
+            AIFunctionFactory.Create(
                 TakeScreenshot,
                 "take_screenshot",
-                "截取用户当前显示器（光标所在屏幕）的画面，图片会直接返回给你查看，同时保存为 PNG 文件。"
-                + "仅在用户要求看屏幕、或必须看到屏幕内容才能回答时调用。"),
+                "截取屏幕画面，图片会直接返回给你查看，同时保存为 PNG 文件。"
+                + "不传 window 时截取光标所在显示器；传 window 时按标题（可只写一部分，不区分大小写）截取该窗口，"
+                + "窗口被遮挡或不在最前也能截到。"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
@@ -171,20 +192,86 @@ public sealed class ChatTools
     }
 
     /// <summary>
+    /// 向用户提问：交给对话界面展示提问面板，等用户全部回答后把问答结果回传给模型。
+    /// 停止对话时取消等待，按「用户没有回答」返回。
+    /// </summary>
+    private async Task<string> AskUser(
+        [Description("要问用户的问题列表，一次可以问多个；每个问题给 2-5 个预设选项")]
+        AskUserQuestion[]? questions,
+        CancellationToken cancellationToken)
+    {
+        var list = (questions ?? [])
+            .Where(question => !string.IsNullOrWhiteSpace(question.Question))
+            .Take(AskUserMaxQuestions)
+            .Select(question => new UserQuestion(
+                question.Question.Trim(),
+                [.. (question.Options ?? [])
+                    .Where(option => !string.IsNullOrWhiteSpace(option.Text))
+                    .Select(option => new UserOption(
+                        option.Text.Trim(),
+                        string.IsNullOrWhiteSpace(option.Description) ? null : option.Description.Trim()))
+                    .Take(AskUserMaxOptions)]))
+            .ToList();
+
+        if (list.Count == 0)
+            return "提问失败：questions 不能为空，每个问题都要有 question 内容。";
+
+        var answers = await _questions.AskAsync(list, cancellationToken).ConfigureAwait(false);
+        if (answers is null) return "用户没有回答提问（已取消）。";
+
+        var builder = new StringBuilder("用户已回答：");
+        for (var i = 0; i < answers.Count; i++)
+        {
+            builder.Append('\n').Append(i + 1).Append(". ").Append(answers[i].Question)
+                .Append("\n→ ").Append(answers[i].Answer);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
     /// 截图结果直接以 AIContent 集合返回：AIFunctionFactory 对可赋值给 IEnumerable&lt;T&gt; 的声明类型
     /// 不做 JSON 序列化，对话服务能据此把图片拆出来走多模态通道。
     /// </summary>
-    private AIContent[] TakeScreenshot()
+    private AIContent[] TakeScreenshot(
+        [Description("要截取的窗口标题，可只写一部分，不区分大小写；不传或传空则截取光标所在显示器")]
+        string? window = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("截图工具仅支持 Windows。");
 
-        var shot = ScreenCapture.CaptureCurrentMonitor();
+        var target = window?.Trim();
+        var shot = string.IsNullOrEmpty(target)
+            ? ScreenCapture.CaptureCurrentMonitor()
+            : ScreenCapture.CaptureWindow(target);
+        var label = string.IsNullOrEmpty(target) ? "当前显示器" : $"窗口「{target}」";
         return
         [
-            new TextContent($"已截取当前显示器画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}"),
+            new TextContent($"已截取{label}画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}"),
             new DataContent(shot.Image, shot.MediaType)
         ];
+    }
+
+    /// <summary>列出可截图的窗口，让模型知道 window 参数该填什么。</summary>
+    private static string ListWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("窗口列表仅支持 Windows。");
+
+        var windows = ScreenCapture.GetWindows();
+        if (windows.Count == 0) return "当前没有可见的窗口。";
+
+        var builder = new StringBuilder("当前可见窗口：\n");
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var window = windows[i];
+            builder.Append(i + 1).Append(". ").Append(window.Title)
+                .Append("（").Append(string.IsNullOrEmpty(window.ProcessName) ? "未知进程" : window.ProcessName).Append('）');
+            if (window.IsMinimized) builder.Append("（已最小化）");
+            builder.Append('\n');
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private async Task<string> RunShellCommand(

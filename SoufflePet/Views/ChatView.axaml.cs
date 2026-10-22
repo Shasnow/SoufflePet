@@ -60,6 +60,16 @@ public partial class ChatView : UserControl
         vm.SendCommand.Execute(null);
     }
 
+    /// <summary>提问面板的自由输入框按 Enter 直接翻到下一题（最后一题停留，等用户提交）。</summary>
+    private void OnAnswerInputKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (DataContext is not ChatViewModel { AskUser: { } panel }) return;
+
+        e.Handled = true;
+        if (panel.NextCommand.CanExecute(null)) panel.NextCommand.Execute(null);
+    }
+
     /// <summary>跟随 DataContext 换绑消息订阅（ChatView 由 ViewLocator 创建，可能换过 VM）。</summary>
     private void OnDataContextChanged(object? sender, EventArgs e)
     {

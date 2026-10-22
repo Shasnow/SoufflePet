@@ -54,6 +54,7 @@ public class App : Application
             services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
             services.AddSingleton<PetExpressionService>();
             services.AddSingleton<ChatToolAccess>();
+            services.AddSingleton<UserQuestionService>();
             services.AddSingleton<ChatMemory>();
             services.AddSingleton<IMcpToolService, McpToolService>();
             services.AddSingleton(McpToolCache.Load()); // 工具信息缓存：重启后直接展示上次获取的工具

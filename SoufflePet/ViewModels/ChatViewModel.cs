@@ -66,7 +66,8 @@ public partial class ChatViewModel : ViewModelBase
         ChatToolAccess toolAccess,
         ChatMemory memory,
         IMcpSettingsWindowService mcpSettings,
-        ISkillsWindowService skillsWindow)
+        ISkillsWindowService skillsWindow,
+        UserQuestionService questions)
     {
         _settings = settings;
         _llm = llm;
@@ -76,6 +77,7 @@ public partial class ChatViewModel : ViewModelBase
         _skillsWindow = skillsWindow;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
+        questions.QuestionAsked += OnQuestionAsked;
 
         // 首次启动列表为空且没有已保存的模型名，此时保持未选中状态。
         SelectedModel = settings.ChatModelName is { Length: > 0 } name
@@ -202,9 +204,37 @@ public partial class ChatViewModel : ViewModelBase
         });
     }
 
+    /// <summary>工具执行线程发起提问：回到 UI 线程显示提问面板，等用户提交或取消。</summary>
+    private void OnQuestionAsked(UserQuestionRequest request)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            // 同一时间只保留一个面板：旧请求按取消处理，避免它的工具调用一直等
+            AskUser?.CancelCommand.Execute(null);
+
+            var panel = new AskUserViewModel(request);
+            request.Resolved += () => Dispatcher.UIThread.Post(() =>
+            {
+                if (ReferenceEquals(AskUser, panel)) AskUser = null;
+            });
+
+            // 极端情况下请求在执行到 UI 线程前就已经结束（例如立刻按了停止），不再显示死角面板
+            if (request.IsResolved) return;
+
+            AskUser = panel;
+        });
+    }
+
     /// <summary>模型选择列表是否展开。</summary>
     [ObservableProperty]
     public partial bool IsModelPickerOpen { get; set; }
+
+    /// <summary>模型通过 ask_user 工具发起的提问面板；null 表示没有待回答的问题。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAsking))]
+    public partial AskUserViewModel? AskUser { get; set; }
+
+    public bool IsAsking => AskUser is not null;
 
     /// <summary>「添加模型」表单是否显示。</summary>
     [ObservableProperty]

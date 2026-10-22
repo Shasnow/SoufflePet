@@ -16,7 +16,7 @@
                 CornerRadius="16"
                 ClipToBounds="True"
                 BoxShadow="0 16 40 0 #80000000">
-            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto">
 
                 <!-- 标题栏：按住可拖动无边框窗口 -->
                 <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
@@ -58,6 +58,160 @@
                 </Border>
 
                 <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <!-- 提问面板：模型调用 ask_user 时出现在消息区下方、输入框上方，全部回答后提交给模型 -->
+                <Border Grid.Row="3"
+                        Margin="12,0,12,8"
+                        Padding="12,10"
+                        CornerRadius="12"
+                        Background="#1FE8879B"
+                        BorderBrush="#59E8879B"
+                        BorderThickness="1"
+                        IsVisible="{Binding IsAsking}">
+                    <!-- 模板内部以 AskUser 为数据上下文，避免在面板隐藏时对 null 取子属性 -->
+                    <ContentControl Content="{Binding AskUser}"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate x:DataType="vm:AskUserViewModel">
+                                <Grid RowDefinitions="Auto,Auto,Auto">
+                                    <!-- 顶部：标题 + 右上角页码与翻页按钮 -->
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="需要你补充一些信息"
+                                                   FontSize="12.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#F2FFFFFF"
+                                                   VerticalAlignment="Center" />
+
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    Spacing="2"
+                                                    VerticalAlignment="Center">
+                                            <Button Classes="ghost"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Padding="0"
+                                                    ToolTip.Tip="上一题"
+                                                    ToolTip.Placement="Top"
+                                                    ToolTip.VerticalOffset="-6"
+                                                    Command="{Binding PreviousCommand}">
+                                                <Path Data="M5,0 L0,5 L5,10"
+                                                      Stroke="#B3FFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      StrokeJoin="Round"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" />
+                                            </Button>
+                                            <TextBlock Text="{Binding PageText}"
+                                                       MinWidth="36"
+                                                       TextAlignment="Center"
+                                                       FontSize="11"
+                                                       Foreground="#B3FFFFFF"
+                                                       VerticalAlignment="Center" />
+                                            <Button Classes="ghost"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Padding="0"
+                                                    ToolTip.Tip="下一题"
+                                                    ToolTip.Placement="Top"
+                                                    ToolTip.VerticalOffset="-6"
+                                                    Command="{Binding NextCommand}">
+                                                <Path Data="M0,0 L5,5 L0,10"
+                                                      Stroke="#B3FFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      StrokeJoin="Round"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- 当前问题：一页一个，选项每行一个 -->
+                                    <ScrollViewer Grid.Row="1"
+                                                  Margin="0,8,0,0"
+                                                  MaxHeight="220"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ContentControl Content="{Binding CurrentQuestion}"
+                                                        HorizontalContentAlignment="Stretch">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="vm:AskQuestionViewModel">
+                                                    <StackPanel Spacing="6">
+                                                        <TextBlock Text="{Binding Text}"
+                                                                   FontSize="12.5"
+                                                                   LineHeight="18"
+                                                                   TextWrapping="Wrap"
+                                                                   Foreground="#F2FFFFFF" />
+
+                                                        <!-- 预设选项 + 固定的「其他（自由输入）」，每行一个 -->
+                                                        <ItemsControl ItemsSource="{Binding Options}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <StackPanel Spacing="2" />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:AskOptionViewModel">
+                                                                    <RadioButton GroupName="{Binding GroupName}"
+                                                                                 IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                                 HorizontalAlignment="Stretch"
+                                                                                 HorizontalContentAlignment="Stretch"
+                                                                                 Padding="4,3"
+                                                                                 FontSize="12"
+                                                                                 Foreground="#D9FFFFFF">
+                                                                        <StackPanel Spacing="1">
+                                                                            <TextBlock Text="{Binding Text}"
+                                                                                       TextWrapping="NoWrap"
+                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                            <!-- 说明小字：不换行，超长截断，悬停看全文 -->
+                                                                            <TextBlock Text="{Binding Description}"
+                                                                                       IsVisible="{Binding HasDescription}"
+                                                                                       FontSize="10.5"
+                                                                                       Foreground="#8CFFFFFF"
+                                                                                       TextWrapping="NoWrap"
+                                                                                       TextTrimming="CharacterEllipsis"
+                                                                                       ToolTip.Tip="{Binding Description}"
+                                                                                       ToolTip.Placement="Top"
+                                                                                       ToolTip.VerticalOffset="-6"
+                                                                                       ToolTip.ShowDelay="300" />
+                                                                        </StackPanel>
+                                                                    </RadioButton>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+
+                                                        <!-- 选中自由输入项后展开；按 Enter 进入下一题 -->
+                                                        <TextBox Classes="field"
+                                                                 IsVisible="{Binding IsCustomSelected}"
+                                                                 Text="{Binding CustomText, Mode=TwoWay}"
+                                                                 AcceptsReturn="False"
+                                                                 PlaceholderText="输入你的回答，按 Enter 下一题"
+                                                                 KeyDown="OnAnswerInputKeyDown" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
+                                    </ScrollViewer>
+
+                                    <StackPanel Grid.Row="2"
+                                                Orientation="Horizontal"
+                                                HorizontalAlignment="Right"
+                                                Spacing="8"
+                                                Margin="0,8,0,0">
+                                        <Button Classes="secondary"
+                                                Content="取消"
+                                                Command="{Binding CancelCommand}" />
+                                        <Button Classes="primary"
+                                                Content="提交"
+                                                Command="{Binding SubmitCommand}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </Border>
 
                 <!-- 消息区 -->
                 <ScrollViewer Name="MessageScroll"
@@ -128,7 +282,7 @@
                 </ScrollViewer>
 
                 <!-- 输入区：多行文本框 + 下方「附件 / 模型 / 发送」操作行 -->
-                <Border Grid.Row="3"
+                <Border Grid.Row="4"
                         Margin="12,4,12,12"
                         Padding="10,8"
                         CornerRadius="12"
@@ -361,7 +515,7 @@
                 </Border>
 
                 <!-- 有史以来的 token 用量与缓存命中率 -->
-                <TextBlock Grid.Row="4"
+                <TextBlock Grid.Row="5"
                            Margin="16,0,16,10"
                            HorizontalAlignment="Right"
                            Text="{Binding UsageSummaryText}"
@@ -369,7 +523,7 @@
                            Foreground="#59FFFFFF" />
 
                 <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
-                <Grid Grid.Row="0" Grid.RowSpan="5"
+                <Grid Grid.Row="0" Grid.RowSpan="6"
                       IsVisible="{Binding IsAddingModel}"
                       Background="#A6000000">
                     <Border Width="344"
