@@ -5,6 +5,7 @@ using System;
 using System.IO;
 using Avalonia;
 using Serilog;
+using Serilog.Filters;
 
 namespace SoufflePet;
 
@@ -27,7 +28,11 @@ class Program
                 retainedFileCountLimit: 7,
                 outputTemplate: template);
 #if DEBUG
-        loggerConfig = loggerConfig.WriteTo.Console(outputTemplate: template);
+        // FileOnly 标记的日志（如完整请求体）体积大，只写文件，不打到控制台。
+        // 过滤器必须放在子 logger 里，直接挂在 LoggerConfiguration 上会连文件 sink 一起过滤掉。
+        loggerConfig = loggerConfig.WriteTo.Logger(console => console
+            .Filter.ByExcluding(Matching.WithProperty<bool>("FileOnly", fileOnly => fileOnly))
+            .WriteTo.Console(outputTemplate: template));
 #endif
         Log.Logger = loggerConfig.CreateLogger();
 

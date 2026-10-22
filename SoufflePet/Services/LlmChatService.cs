@@ -550,12 +550,11 @@ public sealed class LlmChatService : ILlmChatService
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<AITool> tools)
     {
-        var builder = new StringBuilder();
-        builder.Append("LLM request ").Append(endpoint)
-            .Append(" model=").Append(model.ModelId)
-            .Append(" messages=").Append(messages.Count)
-            .Append(" tools=").Append(tools.Count);
+        // 摘要行同时输出到控制台与文件
+        Logger.Debug("LLM request {Endpoint} model={Model} messages={Messages} tools={Tools}",
+            endpoint, model.ModelId, messages.Count, tools.Count);
 
+        var builder = new StringBuilder();
         foreach (var message in messages)
         {
             builder.Append("\n--- ").Append(message.Role).Append(" ---\n");
@@ -573,7 +572,8 @@ public sealed class LlmChatService : ILlmChatService
             foreach (var tool in tools) builder.Append("\n- ").Append(tool.Name);
         }
 
-        Logger.Debug(builder.ToString());
+        // FileOnly：只写日志文件，不打到控制台
+        Logger.ForContext("FileOnly", true).Debug(builder.ToString());
     }
 
     private static string DescribeContent(AIContent content) => content switch
