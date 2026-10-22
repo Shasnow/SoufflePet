@@ -17,7 +17,7 @@ public sealed partial class ChatMessage : ObservableObject
     private readonly string _baseText;
 
     public ChatMessage(string text, bool isUser, bool isTool = false, bool isReasoning = false,
-        ToolApprovalRequest? approval = null)
+        ToolApprovalRequest? approval = null, bool isExpanded = true)
     {
         Text = text;
         _baseText = text;
@@ -25,6 +25,9 @@ public sealed partial class ChatMessage : ObservableObject
         IsTool = isTool;
         IsReasoning = isReasoning;
         Approval = approval;
+        IsExpanded = isExpanded;
+        // 初始就是收起状态的思考气泡（从历史恢复）已经结束，标题直接显示「已完成」
+        IsReasoningDone = !isExpanded;
 
         if (approval is null) return;
 
@@ -34,7 +37,8 @@ public sealed partial class ChatMessage : ObservableObject
         else OnApprovalResolved();
     }
 
-    [ObservableProperty] public partial string Text { get; set; }
+    [ObservableProperty]
+    public partial string Text { get; set; }
 
     /// <summary>本轮回复的 token 用量（结束后显示在气泡底部）；空串表示不显示。</summary>
     [ObservableProperty]
@@ -50,6 +54,52 @@ public sealed partial class ChatMessage : ObservableObject
 
     /// <summary>模型的思考过程（弱化样式展示，不参与上下文）。</summary>
     public bool IsReasoning { get; }
+
+    /// <summary>折叠面板的展开状态（思考过程与工具调用共用）：思考结束后自动收起，用户可手动切换。</summary>
+    [ObservableProperty]
+    public partial bool IsExpanded { get; set; }
+
+    /// <summary>思考阶段是否已结束（结束时自动折叠），与用户手动展开/收起无关。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReasoningHeader))]
+    public partial bool IsReasoningDone { get; set; }
+
+    /// <summary>折叠面板的标题：只反映思考是否结束，手动展开不会变回「思考中」。</summary>
+    public string ReasoningHeader => IsReasoningDone ? "思考过程（已完成）" : "思考过程（思考中…）";
+
+    /// <summary>工具名（仅工具记录）：折叠标题只显示它。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToolHeader))]
+    public partial string ToolName { get; set; } = string.Empty;
+
+    /// <summary>工具参数原文（仅工具记录）：展开后显示。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToolBody))]
+    public partial string ToolArguments { get; set; } = string.Empty;
+
+    /// <summary>工具执行结果（仅工具记录）：流式时先显示「执行中…」，展开后显示完整内容。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToolBody))]
+    public partial string ToolResult { get; set; } = string.Empty;
+
+    /// <summary>工具气泡的折叠面板标题：只显示工具名，参数与结果展开后再看。</summary>
+    public string ToolHeader => ToolName.Length > 0 ? $"调用工具：{ToolName}" : "调用工具";
+
+    /// <summary>工具气泡的折叠面板内容：参数原文 + 完整结果；结果为空时给出提示。</summary>
+    public string ToolBody
+    {
+        get
+        {
+            var result = ToolResult.Length > 0 ? ToolResult : "（无输出）";
+            return ToolArguments.Length > 0 ? $"参数：{ToolArguments}\n结果：{result}" : $"结果：{result}";
+        }
+    }
+
+    /// <summary>工具记录气泡：用折叠面板展示（待审批的气泡走普通文本，保证按钮始终可见）。</summary>
+    public bool IsToolPanel => IsTool && Approval is null;
+
+    /// <summary>普通文本气泡：既不是思考过程，也不是工具记录（待审批的气泡按普通消息展示）。</summary>
+    public bool IsPlain => !IsReasoning && !IsToolPanel;
 
     /// <summary>需要用户审批的工具调用；为 null 表示普通消息。</summary>
     public ToolApprovalRequest? Approval { get; }

@@ -344,6 +344,14 @@ public partial class ChatViewModel : ViewModelBase
         LlmUsageEvent? usage = null;         // 本轮 token 用量（流结束时产出）
         var toolBubbles = new Dictionary<string, Models.ChatMessage>(StringComparer.Ordinal); // CallId → 进行中的工具气泡
 
+        // 思考阶段结束（开始输出正文或开始调用工具）时自动折叠思考气泡
+        void CollapseThinking()
+        {
+            if (thinking is not { IsReasoningDone: false } bubble) return;
+            bubble.IsReasoningDone = true;
+            bubble.IsExpanded = false;
+        }
+
         // 把当前气泡里的正文作为独立的一轮落库：工具调用会截断气泡，
         // 只有在这里立刻保存，「回答 → 工具调用 → 回答」的先后顺序才能完整保留。
         // withReasoning 仅在本轮没有工具调用（即最终回复）时为 true，思考内容随这条消息一起保存。
@@ -370,6 +378,7 @@ public partial class ChatViewModel : ViewModelBase
         // 插入一条工具记录：没有正文时直接插在回复气泡前；已有正文则截断并为后续回复新开气泡
         void AddToolBubble(Models.ChatMessage message)
         {
+            CollapseThinking();
             thinking = null;
             var index = Messages.IndexOf(reply);
             if (segment.Length == 0)
@@ -404,6 +413,8 @@ public partial class ChatViewModel : ViewModelBase
                         break;
 
                     case LlmTextDelta delta:
+                        // 正文开始输出，思考阶段结束：思考气泡自动收起
+                        CollapseThinking();
                         segment += delta.Text;
                         reply.Text = segment;
                         answered = reply;
@@ -414,25 +425,38 @@ public partial class ChatViewModel : ViewModelBase
                         break;
 
                     case LlmToolCallStartedEvent started:
-                        // 工具一开始执行就先显示「进行中」，长耗时工具也有反馈
-                        var bubble = new Models.ChatMessage(FormatToolStarted(started), isUser: false, isTool: true);
+                        // 工具一开始执行就先显示「进行中」，长耗时工具也有反馈；面板默认收起
+                        var bubble = new Models.ChatMessage(FormatToolStarted(started), isUser: false, isTool: true,
+                            isExpanded: false)
+                        {
+                            ToolName = started.Name,
+                            ToolArguments = started.Arguments,
+                            ToolResult = "执行中…"
+                        };
                         toolBubbles[started.CallId] = bubble;
                         AddToolBubble(bubble);
                         break;
 
                     case LlmToolCallEvent call:
-                        // 界面气泡用截断文本避免撑爆，请求历史与落盘保留完整结果
+                        // 气泡正文用截断文本避免撑爆，展开面板里放参数原文与完整结果
                         var display = FormatToolCall(call);
 
                         // 结果回来后就地更新同一条气泡；找不到时（例如重连后）补一条完整记录
                         if (!toolBubbles.Remove(call.CallId, out var completed))
                         {
-                            completed = new Models.ChatMessage(display, isUser: false, isTool: true);
+                            completed = new Models.ChatMessage(display, isUser: false, isTool: true, isExpanded: false)
+                            {
+                                ToolName = call.Name,
+                                ToolArguments = call.Arguments,
+                                ToolResult = call.Result
+                            };
                             AddToolBubble(completed);
                         }
                         else
                         {
                             completed.Text = display;
+                            completed.ToolArguments = call.Arguments;
+                            completed.ToolResult = call.Result;
                         }
 
                         // 工具调用记录既写入长期记忆（重启后恢复），也按标准结构进入请求历史；
@@ -464,8 +488,17 @@ public partial class ChatViewModel : ViewModelBase
         }
         finally
         {
+            // 思考阶段结束（包括中途停止），思考气泡收起
+            CollapseThinking();
+
             // 停止或出错时仍在「执行中」的工具记录标记为中断，避免看起来一直没结束
-            foreach (var pending in toolBubbles.Values) pending.Text += "\n（已中断）";
+            foreach (var pending in toolBubbles.Values)
+            {
+                pending.Text += "\n（已中断）";
+                pending.ToolResult = pending.ToolResult.Length > 0
+                    ? $"{pending.ToolResult}\n（已中断）"
+                    : "（已中断）";
+            }
 
             // 只有真正生成出的内容才写回历史；停止时保留已收到的最后一段
             CommitSegment(withReasoning: true);
@@ -585,7 +618,7 @@ public partial class ChatViewModel : ViewModelBase
         void AddReasoningBubble(string? reasoning)
         {
             if (string.IsNullOrEmpty(reasoning)) return;
-            Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true));
+            Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true, isExpanded: false));
         }
 
         foreach (var turn in recent)
@@ -595,7 +628,12 @@ public partial class ChatViewModel : ViewModelBase
                 // 工具记录按标准结构重建进请求历史，界面上按工具气泡展示（展示时截断）
                 AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text, turn.Reasoning);
                 AddReasoningBubble(turn.Reasoning);
-                Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true));
+                Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true, isExpanded: false)
+                {
+                    ToolName = turn.ToolName ?? string.Empty,
+                    ToolArguments = turn.Arguments ?? string.Empty,
+                    ToolResult = turn.Result ?? string.Empty
+                });
                 continue;
             }
 

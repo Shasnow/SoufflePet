@@ -79,7 +79,28 @@
                                         Classes.thinking="{Binding IsReasoning}"
                                         Classes.approval="{Binding IsApproval}">
                                     <StackPanel Spacing="7">
-                                        <TextBlock Text="{Binding Text}" />
+                                        <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看 -->
+                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                  IsVisible="{Binding IsReasoning}"
+                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                  Header="{Binding ReasoningHeader}">
+                                            <TextBlock Text="{Binding Text}"
+                                                       TextWrapping="Wrap" />
+                                        </Expander>
+
+                                        <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果 -->
+                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                  IsVisible="{Binding IsToolPanel}"
+                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                            <Expander.Header>
+                                                <TextBlock Text="{Binding ToolHeader}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Expander.Header>
+                                            <TextBlock Text="{Binding ToolBody}"
+                                                       TextWrapping="Wrap" />
+                                        </Expander>
+
+                                        <TextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
 
                                         <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
                                         <TextBlock Text="{Binding UsageText}"
