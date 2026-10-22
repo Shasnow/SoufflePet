@@ -126,6 +126,9 @@ public partial class SouffleSettings : ObservableObject
     [Description("已停用的技能名称（未列出的技能默认启用；技能自动从 .agents/skills 与 .souffle/skills 读取）")]
     public partial List<string> DisabledSkills { get; set; } = [];
 
+    [Description("有史以来的对话 token 累计用量（每轮结束后累加，用于界面底部的用量统计）")]
+    public ChatUsageTotals ChatUsage { get; set; } = new();
+
     public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();
@@ -163,4 +166,17 @@ public partial class SouffleSettings : ObservableObject
         defaultSettings.Save();
         return defaultSettings;
     }
+}
+
+/// <summary>对话 token 用量的历史累计值，随设置文件一起持久化。</summary>
+public sealed class ChatUsageTotals
+{
+    /// <summary>输入 token 总数（包含命中缓存的部分）。</summary>
+    public long InputTokens { get; set; }
+
+    /// <summary>输出 token 总数。</summary>
+    public long OutputTokens { get; set; }
+
+    /// <summary>输入 token 中命中缓存的部分，用于计算缓存命中率。</summary>
+    public long CachedInputTokens { get; set; }
 }

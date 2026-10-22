@@ -151,18 +151,32 @@ public sealed class ChatMemory
 
     /// <summary>
     /// 最近若干轮对话（用于界面恢复与上下文重建）；includeTools 为 true 时一并返回工具调用记录。
-    /// 会裁掉开头的助手/工具消息，避免从半截对话开始。
+    /// 一轮以用户提问为边界，包含该提问及其后的助手回复与工具记录；不足 maxTurns 轮时返回全部。
     /// </summary>
     public IReadOnlyList<MemoryTurn> RecentTurns(int maxTurns, bool includeTools = false)
     {
         lock (_gate)
         {
-            var skip = Math.Max(0, _turns.Count - maxTurns);
-            var turns = _turns.Skip(skip)
+            // 从后往前数到第 maxTurns 个用户提问，窗口从这里开始，
+            // 避免按条数取窗口时把一轮对话截成半截（工具链尤其容易超长）
+            var start = 0;
+            var userTurns = 0;
+            for (var i = _turns.Count - 1; i >= 0; i--)
+            {
+                if (!IsUserRole(_turns[i].Role)) continue;
+                if (++userTurns == maxTurns)
+                {
+                    start = i;
+                    break;
+                }
+            }
+
+            var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
                 .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result))
                 .ToList();
-            while (turns.Count > 0 && !IsUserRole(turns[0].Role)) turns.RemoveAt(0);
+
+            Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
             return turns;
         }
     }
@@ -399,6 +413,7 @@ public sealed class ChatMemory
             }
 
             TrimConversationFile();
+            Logger.Debug("conversation loaded turns={Count}", _turns.Count);
         }
         catch (Exception ex)
         {

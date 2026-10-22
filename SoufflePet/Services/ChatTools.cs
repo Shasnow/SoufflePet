@@ -13,8 +13,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using SoufflePet.Models;
+using SoufflePet.Utils;
 
 namespace SoufflePet.Services;
+
+/// <summary>
+/// 带图片的工具结果：<see cref="Text"/> 回传给模型与界面用于展示，
+/// <see cref="Data"/> 由对话服务作为独立的多模态内容附加到下一轮请求。
+/// </summary>
+public sealed record ToolImageResult(string Text, byte[] Data, string MediaType);
 
 /// <summary>
 /// 对话模型可调用的本地工具集（含切换表情、执行命令这两个有副作用的工具）：
@@ -47,6 +54,12 @@ public sealed class ChatTools
     private readonly ChatMemory _memory;
     private readonly IMcpToolService _mcp;
     private readonly ISkillService _skills;
+
+    /// <summary>
+    /// 截图工具暂存的图片：工具返回值会被序列化成 JSON，类型判断识别不出图片，
+    /// 改由这里暂存，对话服务在工具调用完后取走并作为多模态内容附加。
+    /// </summary>
+    private ToolImageResult? _pendingImage;
 
     public ChatTools(
         SouffleSettings settings,
@@ -83,6 +96,11 @@ public sealed class ChatTools
                 "在用户的 Windows 电脑上执行 PowerShell 命令，返回退出码、标准输出和错误输出。"
                 + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
                 + "不要执行格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
+            AIFunctionFactory.Create(
+                TakeScreenshot,
+                "take_screenshot",
+                "截取用户当前显示器（光标所在屏幕）的画面，图片会直接返回给你查看，同时保存为 PNG 文件。"
+                + "仅在用户要求看屏幕、或必须看到屏幕内容才能回答时调用。"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
@@ -162,6 +180,31 @@ public sealed class ChatTools
         return content.Length <= SkillContentMaxLength
             ? builder.Append(content).ToString()
             : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
+    }
+
+    private string TakeScreenshot()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("截图工具仅支持 Windows。");
+
+        var shot = ScreenCapture.CaptureCurrentMonitor();
+        // 图片暂存起来（返回值会被序列化成 JSON，塞不下 base64），只把说明文本作为工具结果。
+        _pendingImage = new ToolImageResult(
+            $"已截取当前显示器画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}",
+            shot.Image,
+            shot.MediaType);
+        return _pendingImage.Text;
+    }
+
+    /// <summary>
+    /// 取走并清空暂存的截图图片：对话服务每次工具调用后取一次，
+    /// 避免旧图串到下一次调用；没有暂存图片时返回 null。
+    /// </summary>
+    internal ToolImageResult? TakePendingImage()
+    {
+        var image = _pendingImage;
+        _pendingImage = null;
+        return image;
     }
 
     private async Task<string> RunShellCommand(

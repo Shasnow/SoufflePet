@@ -35,6 +35,9 @@ public sealed record LlmToolCallStartedEvent(string CallId, string Name, string 
 /// <summary>一次工具调用已执行结束（CallId 与 Started 事件对应），附带参数与结果。</summary>
 public sealed record LlmToolCallEvent(string CallId, string Name, string Arguments, string Result) : LlmStreamEvent;
 
+/// <summary>本次回复的 token 用量（含多轮工具调用的总和），在流结束后产出。</summary>
+public sealed record LlmUsageEvent(long InputTokens, long OutputTokens, long CachedInputTokens) : LlmStreamEvent;
+
 /// <summary>LLM 对话服务：通过 Microsoft.Extensions.AI 的 IChatClient 流式请求回复。</summary>
 public interface ILlmChatService
 {
@@ -62,6 +65,18 @@ public sealed class LlmChatService : ILlmChatService
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
+
+    /// <summary>
+    /// 单次请求的提示词预算（按字符粗估）：中文约 1 字≈1 token，base64 图片按字符计，
+    /// 留出余量避免撞上上游 1M 的硬上限。超出时依次丢弃最旧轮次、省略图片、截断超长工具结果。
+    /// </summary>
+    private const int PromptCharBudget = 600_000;
+
+    /// <summary>预算仍超限时，单条工具结果保留的最大字符数。</summary>
+    private const int ToolResultCharCap = 8_000;
+
+    /// <summary>图片因预算被省略时替换成的文本。</summary>
+    private const string ImageOmittedText = "（图片已省略：超出上下文预算，可缩小窗口或重开对话后再试）";
 
     private readonly SouffleSettings _settings;
     private readonly ChatMemory _memory;
@@ -163,12 +178,18 @@ public sealed class LlmChatService : ILlmChatService
         if (skillBlock.Length > 0)
             messages.Add(new ChatMessage(ChatRole.System, skillBlock));
 
+        var historyStart = messages.Count;
         messages.AddRange(history);
+        var historyEnd = messages.Count;
 
         // 本地工具 + MCP 工具：MCP 服务器在首次对话时连接，失败只记日志、不影响本地工具
         var tools = await _chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
         var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
         foreach (var function in tools.OfType<AIFunction>()) functions.TryAdd(function.Name, function);
+
+        // 工具声明本身也占提示词预算，先扣掉再按剩余额度裁剪对话历史
+        var messageBudget = Math.Max(200_000, PromptCharBudget - EstimateToolChars(tools));
+        TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
 
         // 发送前把完整请求写入调试日志，便于排查提示词/记忆/技能/历史是否符合预期
         LogRequest(endpoint, model, messages, tools);
@@ -179,8 +200,16 @@ public sealed class LlmChatService : ILlmChatService
             Tools = [.. tools]
         };
 
+        // 带工具调用时一轮回复会发出多次请求，每次都单独计费：逐轮累加，最后统一上报
+        var inputTokens = 0L;
+        var outputTokens = 0L;
+        var cachedInputTokens = 0L;
+
         for (var round = 0;; round++)
         {
+            // 工具结果会不断追加，每轮请求前重新检查预算，防止长工具链把提示词撑爆
+            TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
+
             // 文本增量即时产出，同时留存完整流以便汇总工具调用
             var updates = new List<ChatResponseUpdate>();
             await using (var enumerator = chatClient
@@ -212,19 +241,26 @@ public sealed class LlmChatService : ILlmChatService
                 }
             }
 
-            if (updates.Count == 0) yield break;
+            if (updates.Count == 0) break;
 
             var response = updates.ToChatResponse();
+            if (response.Usage is { } usage)
+            {
+                inputTokens += usage.InputTokenCount ?? 0;
+                outputTokens += usage.OutputTokenCount ?? 0;
+                cachedInputTokens += usage.CachedInputTokenCount ?? 0;
+            }
+
             var calls = response.Messages
                 .SelectMany(message => message.Contents)
                 .OfType<FunctionCallContent>()
                 .ToList();
 
-            if (calls.Count == 0) yield break;
+            if (calls.Count == 0) break;
             if (round >= _settings.MaxToolRounds)
             {
                 Logger.Warning("Tool calls exceeded {MaxRounds} rounds, stop requesting", _settings.MaxToolRounds);
-                yield break;
+                break;
             }
 
             // 把模型的工具调用消息与本地执行结果接回历史，再请求下一轮
@@ -236,15 +272,173 @@ public sealed class LlmChatService : ILlmChatService
                 yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
 
                 var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
+
+                // 带图片的工具（如截图）：返回值会被序列化成 JSON，类型判断识别不出图片，
+                // 改为主动取走 ChatTools 暂存的图片；工具结果只放文本，
+                // 图片作为独立用户消息附加，让支持视觉输入的模型能真正看到画面。
+                var pendingImage = _chatTools.TakePendingImage();
+                if (pendingImage is not null)
+                {
+                    messages.Add(new ChatMessage(ChatRole.Tool,
+                        [new FunctionResultContent(call.CallId, pendingImage.Text)]));
+                    messages.Add(new ChatMessage(ChatRole.User,
+                    [
+                        new TextContent("这是刚才工具返回的画面，请结合图片内容回答。"),
+                        new DataContent(pendingImage.Data, pendingImage.MediaType)
+                    ]));
+                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, pendingImage.Text);
+                    continue;
+                }
+
+                // MCP 等其它工具直接返回图片内容的情形（已在 InvokeToolAsync 里归一化）
+                if (result is ToolImageResult image)
+                {
+                    messages.Add(new ChatMessage(ChatRole.Tool,
+                        [new FunctionResultContent(call.CallId, image.Text)]));
+                    messages.Add(new ChatMessage(ChatRole.User,
+                    [new DataContent(image.Data, image.MediaType)]));
+                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, image.Text);
+                    continue;
+                }
+
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
                 yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, FormatResult(result));
             }
         }
+
+        // 用量整体产出一个事件：界面据此在助手气泡下方与底部统计里展示
+        if (inputTokens > 0 || outputTokens > 0)
+            yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
+    }
+
+    /// <summary>
+    /// 按字符预算裁剪本次请求：先整轮丢弃最旧对话（系统消息与当前提问始终保留），
+    /// 再把图片替换成占位文本，最后截断超长工具结果。
+    /// </summary>
+    private static void TrimToBudget(List<ChatMessage> messages, int historyStart, ref int historyEnd, int budget)
+    {
+        var total = messages.Sum(EstimateChars);
+        if (total <= budget) return;
+
+        var before = total;
+
+        // 1. 从最旧的一轮开始整轮删除；最后一轮（当前提问）及其后的工具记录不动
+        while (total > budget)
+        {
+            var firstUser = FindUser(messages, historyStart, historyEnd);
+            if (firstUser < 0) break;
+            var nextUser = FindUser(messages, firstUser + 1, historyEnd);
+            if (nextUser < 0) break;
+
+            for (var i = firstUser; i < nextUser; i++) total -= EstimateChars(messages[i]);
+            messages.RemoveRange(firstUser, nextUser - firstUser);
+            historyEnd -= nextUser - firstUser;
+        }
+
+        // 2. 图片 base64 在只按文本计数的上游约等于 1 token/字符，必要时省略
+        if (total > budget) total = OmitImages(messages, total, budget);
+
+        // 3. 单条工具结果过大时截断，尽量保留对话结构
+        if (total > budget) total = CapToolResults(messages, total, budget);
+
+        if (total > budget)
+            Logger.Warning("prompt over budget after trim chars={Chars} budget={Budget}", total, budget);
+        else
+            Logger.Debug("prompt trimmed chars {Before} -> {After} budget={Budget}", before, total, budget);
+    }
+
+    /// <summary>在 [start, end) 内找用户发言；找不到返回 -1。</summary>
+    private static int FindUser(List<ChatMessage> messages, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+            if (messages[i].Role == ChatRole.User) return i;
+        return -1;
+    }
+
+    /// <summary>逐条把图片内容替换成占位文本，直到回到预算内。</summary>
+    private static int OmitImages(List<ChatMessage> messages, int total, int budget)
+    {
+        for (var i = 0; i < messages.Count && total > budget; i++)
+        {
+            var message = messages[i];
+            if (!message.Contents.OfType<DataContent>().Any()) continue;
+
+            total -= EstimateChars(message);
+            messages[i] = new ChatMessage(message.Role,
+                message.Contents.Select(c => c is DataContent ? new TextContent(ImageOmittedText) : c).ToList());
+            total += EstimateChars(messages[i]);
+        }
+
+        return total;
+    }
+
+    /// <summary>逐条截断过长的工具结果，直到回到预算内。</summary>
+    private static int CapToolResults(List<ChatMessage> messages, int total, int budget)
+    {
+        for (var i = 0; i < messages.Count && total > budget; i++)
+        {
+            var message = messages[i];
+            if (message.Contents.OfType<FunctionResultContent>().FirstOrDefault() is not { Result: string text } result)
+                continue;
+            if (text.Length <= ToolResultCharCap) continue;
+
+            var trimmed = text[..ToolResultCharCap] + "\n…（已截断：超出上下文预算）";
+            total -= text.Length - trimmed.Length;
+            messages[i] = new ChatMessage(message.Role, [new FunctionResultContent(result.CallId, trimmed)]);
+        }
+
+        return total;
+    }
+
+    /// <summary>估算单条消息的字符数：正文 + base64 图片 + 工具参数/结果。</summary>
+    private static int EstimateChars(ChatMessage message)
+    {
+        var chars = message.Text.Length;
+        foreach (var content in message.Contents)
+        {
+            switch (content)
+            {
+                case DataContent data:
+                    chars += data.Data.Length / 3 * 4 + 128; // base64 膨胀 + data URL 前缀
+                    break;
+                case FunctionCallContent call:
+                    chars += FormatArguments(call.Arguments).Length;
+                    break;
+                case FunctionResultContent result:
+                    chars += ResultChars(result.Result);
+                    break;
+            }
+        }
+
+        return chars;
+    }
+
+    private static int ResultChars(object? result) => result switch
+    {
+        null => 0,
+        string text => text.Length,
+        JsonElement element => element.ValueKind == JsonValueKind.String
+            ? element.GetString()?.Length ?? 0
+            : element.GetRawText().Length,
+        _ => result.ToString()?.Length ?? 0
+    };
+
+    /// <summary>估算工具声明（名称 + JSON Schema）占用的字符数。</summary>
+    private static int EstimateToolChars(IReadOnlyList<AITool> tools)
+    {
+        var chars = 0;
+        foreach (var tool in tools)
+        {
+            chars += tool.Name.Length;
+            chars += tool is AIFunction function ? function.JsonSchema.GetRawText().Length : 200;
+        }
+
+        return chars;
     }
 
     private async Task<object?> InvokeToolAsync(
         FunctionCallContent call,
-        IReadOnlyDictionary<string, AIFunction> functions,
+        Dictionary<string, AIFunction> functions,
         CancellationToken cancellationToken)
     {
         if (!functions.TryGetValue(call.Name, out var function))
@@ -258,7 +452,7 @@ public sealed class LlmChatService : ILlmChatService
             var arguments = call.Arguments is { } values ? new AIFunctionArguments(values) : new AIFunctionArguments();
             var result = await function.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
             Logger.Debug("Tool {Tool} invoked", call.Name);
-            return result;
+            return NormalizeToolResult(result);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -271,6 +465,36 @@ public sealed class LlmChatService : ILlmChatService
             Logger.Warning(ex, "Tool {Tool} failed", call.Name);
             return $"工具执行失败：{ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// 把工具结果规整成统一形态：带图片的结果（如 MCP 截图工具返回的 DataContent）
+    /// 转换成 <see cref="ToolImageResult" />，让图片走多模态通道，而不是把 base64 当文本塞进对话。
+    /// </summary>
+    private static object? NormalizeToolResult(object? result) => result switch
+    {
+        null => null,
+        ToolImageResult => result,
+        DataContent data => new ToolImageResult("工具返回了一张图片。", data.Data.ToArray(), data.MediaType),
+        // MCP 工具把 CallToolResult 的 Content 列表映射成 AIContent 集合返回
+        IEnumerable<AIContent> contents => FromContents(contents),
+        _ => result
+    };
+
+    /// <summary>从内容集合中抽出第一张图片；没有图片时原样返回，仍按普通文本结果处理。</summary>
+    private static object FromContents(IEnumerable<AIContent> contents)
+    {
+        var list = contents as IList<AIContent> ?? [.. contents];
+        if (list.OfType<DataContent>().FirstOrDefault() is not { } image) return list;
+
+        var text = string.Join("\n", list.OfType<TextContent>()
+            .Select(content => content.Text)
+            .Where(line => !string.IsNullOrWhiteSpace(line)));
+
+        return new ToolImageResult(
+            text.Length > 0 ? text : "工具返回了一张图片。",
+            image.Data.ToArray(),
+            image.MediaType);
     }
 
     /// <summary>工具参数序列化为界面可读的 JSON；无参数时返回空串。</summary>

@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
 using Microsoft.Extensions.AI;
+using Serilog;
 using SoufflePet.Models;
 using SoufflePet.Services;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -24,14 +25,16 @@ namespace SoufflePet.ViewModels;
 /// </summary>
 public partial class ChatViewModel : ViewModelBase
 {
+    private static readonly ILogger Logger = Log.ForContext<ChatViewModel>();
+
     /// <summary>助手气泡在收到第一段内容前的占位文案。</summary>
     private const string ThinkingText = "正在思考…";
 
     /// <summary>工具记录里结果的最大展示长度（超出截断，避免撑爆气泡）。</summary>
     private const int ToolResultMaxLength = 300;
 
-    /// <summary>发给模型的对话窗口：只带最近若干条，避免请求体随对话无限增长。</summary>
-    private const int HistoryWindowMessages = 60;
+    /// <summary>发给模型的对话窗口：保留最近多少轮用户提问（含其后的回复与工具调用记录）。</summary>
+    private const int HistoryWindowTurns = 10;
 
     private readonly SouffleSettings _settings;
     private readonly ILlmChatService _llm;
@@ -103,6 +106,20 @@ public partial class ChatViewModel : ViewModelBase
 
     /// <summary>窗口标题。</summary>
     public string WindowTitle => $"{PetName} · 对话";
+
+    /// <summary>输入区下方的常驻统计：有史以来的 token 总量与缓存命中率。</summary>
+    public string UsageSummaryText
+    {
+        get
+        {
+            var totals = _settings.ChatUsage;
+            var total = totals.InputTokens + totals.OutputTokens;
+            var cacheRate = totals.InputTokens > 0
+                ? $"{(double)totals.CachedInputTokens / totals.InputTokens:P0}"
+                : "—";
+            return $"累计 {total:N0} tokens · 缓存命中 {cacheRate}";
+        }
+    }
 
     /// <summary>输入框内容（与 TextBox 双向绑定）。</summary>
     [ObservableProperty]
@@ -322,6 +339,8 @@ public partial class ChatViewModel : ViewModelBase
         var answer = string.Empty;   // 整轮回复（写入历史）
         var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
         Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
+        Models.ChatMessage? answered = null; // 本轮最后一段正文所在的气泡，用量挂在它下方
+        LlmUsageEvent? usage = null;         // 本轮 token 用量（流结束时产出）
         var toolBubbles = new Dictionary<string, Models.ChatMessage>(StringComparer.Ordinal); // CallId → 进行中的工具气泡
 
         // 插入一条工具记录：没有正文时直接插在回复气泡前；已有正文则截断并为后续回复新开气泡
@@ -363,6 +382,11 @@ public partial class ChatViewModel : ViewModelBase
                         answer += delta.Text;
                         segment += delta.Text;
                         reply.Text = segment;
+                        answered = reply;
+                        break;
+
+                    case LlmUsageEvent roundUsage:
+                        usage = roundUsage;
                         break;
 
                     case LlmToolCallStartedEvent started:
@@ -423,6 +447,9 @@ public partial class ChatViewModel : ViewModelBase
                 TrimHistory();
             }
 
+            // 用量统计：气泡底部显示本轮明细，同时累加进设置里的历史总额
+            if (usage is { } roundUsage) RecordUsage(roundUsage, answered);
+
             _cts = null;
             _reply = null;
             IsGenerating = false;
@@ -431,6 +458,28 @@ public partial class ChatViewModel : ViewModelBase
 
     [RelayCommand]
     private void Stop() => _cts?.Cancel();
+
+    /// <summary>记录一轮用量：气泡底部显示明细，累计值写回设置并落盘。</summary>
+    private void RecordUsage(LlmUsageEvent usage, Models.ChatMessage? bubble)
+    {
+        if (bubble is not null) bubble.UsageText = FormatUsage(usage);
+
+        var totals = _settings.ChatUsage;
+        totals.InputTokens += usage.InputTokens;
+        totals.OutputTokens += usage.OutputTokens;
+        totals.CachedInputTokens += usage.CachedInputTokens;
+        _settings.Save();
+        OnPropertyChanged(nameof(UsageSummaryText));
+    }
+
+    /// <summary>本轮用量文案：输入/输出 token，有缓存命中时补上命中数量。</summary>
+    private static string FormatUsage(LlmUsageEvent usage)
+    {
+        var text = $"输入 {usage.InputTokens:N0} · 输出 {usage.OutputTokens:N0} tokens";
+        return usage.CachedInputTokens > 0
+            ? $"{text} · 缓存命中 {usage.CachedInputTokens:N0}"
+            : text;
+    }
 
     /// <summary>工具开始执行时的展示文本：先给出反馈，结果回来后原地替换成完整记录。</summary>
     private static string FormatToolStarted(LlmToolCallStartedEvent call)
@@ -496,7 +545,7 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>启动时把最近几轮对话（含工具调用记录）恢复到界面与请求历史里（有历史时替换掉问候语）。</summary>
     private void LoadRecentHistory()
     {
-        var recent = _memory.RecentTurns(HistoryWindowMessages, includeTools: true);
+        var recent = _memory.RecentTurns(HistoryWindowTurns, includeTools: true);
         if (recent.Count == 0) return;
 
         Messages.Clear();
@@ -516,11 +565,31 @@ public partial class ChatViewModel : ViewModelBase
         }
     }
 
-    /// <summary>把发给模型的历史裁到窗口大小，并从用户发言开始，避免半截对话。</summary>
+    /// <summary>
+    /// 把发给模型的历史裁到最近 <see cref="HistoryWindowTurns"/> 轮。以用户提问作为轮的边界，
+    /// 每轮包含该提问及其后的助手回复、全部工具调用记录；窗口内不会再出现半截工具链。
+    /// </summary>
     private void TrimHistory()
     {
-        while (_history.Count > HistoryWindowMessages) _history.RemoveAt(0);
-        while (_history.Count > 0 && _history[0].Role != ChatRole.User) _history.RemoveAt(0);
+        var before = _history.Count;
+
+        // 从后往前数到第 N 个用户发言，窗口就从这里开始；不足 N 轮时从头保留
+        var keepFrom = 0;
+        var userTurns = 0;
+        for (var i = _history.Count - 1; i >= 0; i--)
+        {
+            if (_history[i].Role != ChatRole.User) continue;
+            if (++userTurns == HistoryWindowTurns)
+            {
+                keepFrom = i;
+                break;
+            }
+        }
+
+        if (keepFrom > 0) _history.RemoveRange(0, keepFrom);
+
+        if (before != _history.Count)
+            Logger.Debug("history trimmed before={Before} after={After} turns={Turns}", before, _history.Count, userTurns);
     }
 
     private bool CanSend() => !IsGenerating && !string.IsNullOrWhiteSpace(Draft);

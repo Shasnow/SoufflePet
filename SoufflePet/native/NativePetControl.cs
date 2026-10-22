@@ -198,7 +198,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             // Cubism Framework 初始化（官方 Native Samples 的标准流程）
             CubismFramework.StartUp(new LAppAllocator(), new CubismOption
             {
-                LogFunction = msg => Logger.Debug("Cubism: {Message}", msg),
+                LogFunction = msg => Logger.Verbose("Cubism: {Message}", msg),
                 LoggingLevel = LAppDefine.CubismLoggingLevel
             });
             Logger.Debug("CubismFramework.StartUp ok");

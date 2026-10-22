@@ -36,6 +36,13 @@ public sealed partial class ChatMessage : ObservableObject
 
     [ObservableProperty] public partial string Text { get; set; }
 
+    /// <summary>本轮回复的 token 用量（结束后显示在气泡底部）；空串表示不显示。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUsage))]
+    public partial string UsageText { get; set; } = string.Empty;
+
+    public bool HasUsage => UsageText.Length > 0;
+
     public bool IsUser { get; }
 
     /// <summary>工具调用记录（弱化样式展示，不参与上下文）。</summary>

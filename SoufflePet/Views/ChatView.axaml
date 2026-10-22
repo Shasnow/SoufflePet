@@ -16,7 +16,7 @@
                 CornerRadius="16"
                 ClipToBounds="True"
                 BoxShadow="0 16 40 0 #80000000">
-            <Grid RowDefinitions="Auto,Auto,*,Auto">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
 
                 <!-- 标题栏：按住可拖动无边框窗口 -->
                 <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
@@ -81,6 +81,13 @@
                                     <StackPanel Spacing="7">
                                         <TextBlock Text="{Binding Text}" />
 
+                                        <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
+                                        <TextBlock Text="{Binding UsageText}"
+                                                   IsVisible="{Binding HasUsage}"
+                                                   FontSize="10.5"
+                                                   LineHeight="16"
+                                                   Foreground="#59FFFFFF" />
+
                                         <!-- 手动审批：等待用户决定时才显示按钮 -->
                                         <StackPanel Orientation="Horizontal"
                                                     Spacing="7"
@@ -130,6 +137,8 @@
                                 <Button Name="MoreButton"
                                         Classes="ghost"
                                         ToolTip.Tip="更多操作"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
                                         Command="{Binding ToggleMoreCommand}">
                                     <Path Data="M0,6 L12,6 M6,0 L6,12"
                                             Stroke="#8CFFFFFF"
@@ -140,6 +149,8 @@
                                 <Button Name="ApprovalButton"
                                         Classes="ghost"
                                         ToolTip.Tip="命令执行审批规则"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
                                         Command="{Binding ToggleApprovalPickerCommand}">
                                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                         <Ellipse Width="6" Height="6" Fill="#E8879B" VerticalAlignment="Center" />
@@ -149,6 +160,8 @@
                                 <Button Name="ModelButton"
                                         Classes="ghost"
                                         ToolTip.Tip="选择模型"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
                                         Command="{Binding ToggleModelPickerCommand}">
                                     <TextBlock Text="{Binding ModelButtonText}"
                                                Classes="muted"
@@ -326,8 +339,16 @@
                     </Grid>
                 </Border>
 
+                <!-- 有史以来的 token 用量与缓存命中率 -->
+                <TextBlock Grid.Row="4"
+                           Margin="16,0,16,10"
+                           HorizontalAlignment="Right"
+                           Text="{Binding UsageSummaryText}"
+                           FontSize="10.5"
+                           Foreground="#59FFFFFF" />
+
                 <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
-                <Grid Grid.Row="0" Grid.RowSpan="4"
+                <Grid Grid.Row="0" Grid.RowSpan="5"
                       IsVisible="{Binding IsAddingModel}"
                       Background="#A6000000">
                     <Border Width="344"
