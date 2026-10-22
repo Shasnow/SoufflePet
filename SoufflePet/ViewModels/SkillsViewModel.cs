@@ -50,13 +50,19 @@ public partial class SkillsViewModel : ViewModelBase
     /// <summary>标题栏下方的说明文案。</summary>
     public string ToolHint => $"读取技能目录下的说明，按需交给{PetName}使用";
 
-    /// <summary>扫描目录提示（相对应用目录）。</summary>
-    public string SearchHint => string.Join(" 与 ", _skills.SearchDirectories.Select(d =>
-        Path.GetRelativePath(AppContext.BaseDirectory, d).Replace('\\', '/')));
+    /// <summary>扫描目录提示：应用目录内用相对路径，家目录用 ~ 开头。</summary>
+    public string SearchHint => string.Join(" 与 ", _skills.SearchDirectories.Select(_skills.DescribeDirectory));
 
     /// <summary>列表上方的统计文案。</summary>
     [ObservableProperty]
     public partial string Status { get; set; } = string.Empty;
+
+    /// <summary>安装结果提示（成功与失败都用这一行，空串表示不显示）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasInstallMessage))]
+    public partial string InstallMessage { get; set; } = string.Empty;
+
+    public bool HasInstallMessage => InstallMessage.Length > 0;
 
     /// <summary>按磁盘内容重建列表（窗口每次显示前调用）。</summary>
     public void Reload()
@@ -79,6 +85,21 @@ public partial class SkillsViewModel : ViewModelBase
 
     [RelayCommand]
     private void Refresh() => Reload();
+
+    /// <summary>从压缩包安装技能：安装后重新扫描，并选中刚装好的技能。</summary>
+    public void InstallFromArchive(string archivePath)
+    {
+        var result = _skills.Install(archivePath);
+        InstallMessage = result.Message;
+        if (!result.Success) return;
+
+        Reload();
+        if (result.SkillName is { Length: > 0 } name)
+        {
+            SelectedSkill = Skills.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+                            ?? SelectedSkill;
+        }
+    }
 
     /// <summary>在资源管理器中打开技能目录；两个目录都不存在时打开应用目录。</summary>
     [RelayCommand]

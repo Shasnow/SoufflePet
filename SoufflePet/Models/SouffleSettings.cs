@@ -123,7 +123,7 @@ public partial class SouffleSettings : ObservableObject
     public partial List<McpServerConfig> McpServers { get; set; } = [];
 
     [ObservableProperty]
-    [Description("已停用的技能名称（未列出的技能默认启用；技能自动从 .agents/skills 与 .souffle/skills 读取）")]
+    [Description("已停用的技能名称（未列出的技能默认启用；技能自动从应用目录与家目录下的 .agents/skills、.souffle/skills 读取）")]
     public partial List<string> DisabledSkills { get; set; } = [];
 
     [Description("有史以来的对话 token 累计用量（每轮结束后累加，用于界面底部的用量统计）")]

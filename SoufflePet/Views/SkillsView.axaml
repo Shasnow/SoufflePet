@@ -66,6 +66,12 @@
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
                                 <Button Classes="ghost"
                                         Padding="7,3"
+                                        ToolTip.Tip="安装技能：上传含 SKILL.md 的压缩包"
+                                        Click="OnInstallClick">
+                                    <TextBlock Text="安装" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
                                         ToolTip.Tip="重新扫描技能目录"
                                         Command="{Binding RefreshCommand}">
                                     <TextBlock Text="刷新" Classes="muted" />
@@ -79,11 +85,18 @@
                             </StackPanel>
                         </Grid>
 
-                        <TextBlock Grid.Row="1"
-                                   Text="{Binding Status}"
-                                   Classes="label"
-                                   Margin="4,0,4,6"
-                                   TextTrimming="CharacterEllipsis" />
+                        <StackPanel Grid.Row="1" Margin="4,0,4,6" Spacing="1">
+                            <TextBlock Text="{Binding Status}"
+                                       Classes="label"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <!-- 安装结果：装好后提示技能名，失败时提示原因 -->
+                            <TextBlock Text="{Binding InstallMessage}"
+                                       IsVisible="{Binding HasInstallMessage}"
+                                       FontSize="10.5"
+                                       Foreground="#8CFFFFFF"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
 
                         <ListBox Grid.Row="2"
                                  Classes="serverList"
@@ -123,7 +136,7 @@
                             <TextBlock Text="没有找到技能"
                                        Classes="muted"
                                        HorizontalAlignment="Center" />
-                            <TextBlock Text="{Binding SearchHint, StringFormat='在 {0} 下放置 SKILL.md'}"
+                            <TextBlock Text="{Binding SearchHint, StringFormat='在 {0} 下放置 SKILL.md，或点「安装」上传压缩包'}"
                                        FontSize="10.5"
                                        Foreground="#66FFFFFF"
                                        HorizontalAlignment="Center"
