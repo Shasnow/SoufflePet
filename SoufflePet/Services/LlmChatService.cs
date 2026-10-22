@@ -140,14 +140,21 @@ public sealed class LlmChatService : ILlmChatService
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
 
         // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）。
-        // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入。
+        // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入；
+        // 工具消息的结构化内容不在 Text 里，需要额外按 CallId 排除。
         var historyTexts = history
             .Select(m => m.Text.Trim())
             .Where(t => t.Length > 0)
             .ToHashSet(StringComparer.Ordinal);
+        var historyCallIds = history
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionCallContent>()
+            .Select(c => c.CallId)
+            .ToHashSet(StringComparer.Ordinal);
         var memoryBlock = _memory.BuildMemoryBlock(
             history.LastOrDefault(m => m.Role == ChatRole.User)?.Text,
-            historyTexts);
+            historyTexts,
+            historyCallIds);
         if (memoryBlock.Length > 0)
             messages.Add(new ChatMessage(ChatRole.System, memoryBlock));
 

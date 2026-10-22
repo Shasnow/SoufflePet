@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -30,7 +31,7 @@ public partial class ChatViewModel : ViewModelBase
     private const int ToolResultMaxLength = 300;
 
     /// <summary>发给模型的对话窗口：只带最近若干条，避免请求体随对话无限增长。</summary>
-    private const int HistoryWindowMessages = 20;
+    private const int HistoryWindowMessages = 60;
 
     private readonly SouffleSettings _settings;
     private readonly ILlmChatService _llm;
@@ -49,8 +50,9 @@ public partial class ChatViewModel : ViewModelBase
     private Models.ChatMessage? _reply;
 
     /// <summary>
-    /// 对话历史：统一用 Microsoft.Extensions.AI.ChatMessage 记录，
-    /// 只包含真实对话与工具调用记录（启动时从长期记忆恢复，均参与后续请求上下文）。
+    /// 对话历史：统一用 Microsoft.Extensions.AI.ChatMessage 记录，只包含真实对话与工具调用记录。
+    /// 工具记录按标准结构保存（助手消息携带 FunctionCallContent，紧跟一条 ChatRole.Tool 的结果消息），
+    /// 启动时从长期记忆恢复，下次请求拿到的上下文与本次一致。
     /// </summary>
     private readonly List<ChatMessage> _history = [];
 
@@ -371,9 +373,8 @@ public partial class ChatViewModel : ViewModelBase
                         break;
 
                     case LlmToolCallEvent call:
-                        // 界面气泡用截断文本避免撑爆，落盘与请求历史保留完整结果
-                        var display = FormatToolCall(call, ToolResultMaxLength);
-                        var full = FormatToolCall(call, 0);
+                        // 界面气泡用截断文本避免撑爆，请求历史与落盘保留完整结果
+                        var display = FormatToolCall(call);
 
                         // 结果回来后就地更新同一条气泡；找不到时（例如重连后）补一条完整记录
                         if (!toolBubbles.Remove(call.CallId, out var completed))
@@ -386,9 +387,9 @@ public partial class ChatViewModel : ViewModelBase
                             completed.Text = display;
                         }
 
-                        // 工具调用记录既写入长期记忆，也进入请求历史，重启恢复后上下文与本次一致
-                        _memory.AddTurn(ChatMemory.ToolRole, full);
-                        _history.Add(new ChatMessage(ChatRole.Assistant, full));
+                        // 工具调用记录既写入长期记忆（重启后恢复），也按标准结构进入请求历史
+                        _memory.AddTurn(ChatMemory.ToolRole, display, call.CallId, call.Name, call.Arguments, call.Result);
+                        AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, display);
                         TrimHistory();
                         break;
                 }
@@ -438,17 +439,46 @@ public partial class ChatViewModel : ViewModelBase
         return $"调用工具 {call.Name}{arguments}\n执行中…";
     }
 
-    /// <summary>
-    /// 工具调用记录的展示文本：工具名（参数）换行跟结果。
-    /// maxLength 为 0 表示不截断（落盘与请求历史用），否则结果部分超出即截断。
-    /// </summary>
-    private static string FormatToolCall(LlmToolCallEvent call, int maxLength)
+    /// <summary>工具调用记录的展示文本：工具名（参数）换行跟结果，结果超出展示上限即截断。</summary>
+    private static string FormatToolCall(LlmToolCallEvent call)
     {
         var arguments = call.Arguments.Length == 0 ? string.Empty : $" {call.Arguments}";
-        var result = maxLength > 0 && call.Result.Length > maxLength
-            ? call.Result[..maxLength] + "…"
+        var result = call.Result.Length > ToolResultMaxLength
+            ? call.Result[..ToolResultMaxLength] + "…"
             : call.Result;
         return $"调用工具 {call.Name}{arguments}\n结果：{result}";
+    }
+
+    /// <summary>
+    /// 按标准结构把一次工具调用写进请求历史：助手消息携带 FunctionCallContent，紧跟 ChatRole.Tool 的结果消息。
+    /// 旧记录缺少 CallId / 工具名时无法配对，只能退化成助手文本，避免出现没有对应调用的 tool 消息。
+    /// </summary>
+    private void AddToolHistory(string? callId, string? name, string? arguments, string? result, string fallbackText)
+    {
+        if (string.IsNullOrEmpty(callId) || string.IsNullOrEmpty(name) || result is null)
+        {
+            _history.Add(new ChatMessage(ChatRole.Assistant, fallbackText));
+            return;
+        }
+
+        _history.Add(new ChatMessage(ChatRole.Assistant,
+            [new FunctionCallContent(callId, name, ParseArguments(arguments))]));
+        _history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
+    }
+
+    /// <summary>把落盘的参数 JSON 还原成工具调用参数；为空或解析失败时视为无参数。</summary>
+    private static Dictionary<string, object?>? ParseArguments(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object?>>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>恢复历史时截断工具记录的结果部分：落盘的是完整文本，界面气泡不必全量显示。</summary>
@@ -474,8 +504,8 @@ public partial class ChatViewModel : ViewModelBase
         {
             if (string.Equals(turn.Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase))
             {
-                // 工具记录作为助手上下文带回请求，界面上按工具气泡展示（展示时截断）
-                _history.Add(new ChatMessage(ChatRole.Assistant, turn.Text));
+                // 工具记录按标准结构重建进请求历史，界面上按工具气泡展示（展示时截断）
+                AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text);
                 Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true));
                 continue;
             }

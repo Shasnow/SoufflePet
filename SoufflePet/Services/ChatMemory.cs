@@ -15,8 +15,15 @@ using SoufflePet.Models;
 
 namespace SoufflePet.Services;
 
-/// <summary>恢复界面用的一轮历史对话。</summary>
-public readonly record struct MemoryTurn(DateTimeOffset Time, string Role, string Text);
+/// <summary>恢复界面用的一轮历史对话；工具记录的 CallId / ToolName / Arguments / Result 用于重建请求上下文。</summary>
+public readonly record struct MemoryTurn(
+    DateTimeOffset Time,
+    string Role,
+    string Text,
+    string? CallId = null,
+    string? ToolName = null,
+    string? Arguments = null,
+    string? Result = null);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -32,7 +39,7 @@ public sealed class ChatMemory
     /// <summary>助手角色。</summary>
     public const string AssistantRole = "assistant";
 
-    /// <summary>工具调用记录（落盘保留；启动恢复时作为助手上下文参与重建）。</summary>
+    /// <summary>工具调用记录（参与检索；启动时按标准 tool 消息重建请求上下文）。</summary>
     public const string ToolRole = "tool";
 
     /// <summary>内存里保留的最大历史轮数，也是启动时读取的行数。</summary>
@@ -69,7 +76,8 @@ public sealed class ChatMemory
 
     private static readonly JsonSerializerOptions LineJsonOptions = new()
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     private readonly Lock _gate = new();
@@ -97,13 +105,31 @@ public sealed class ChatMemory
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
     public bool Enabled => _settings.ChatMemoryEnabled;
 
-    /// <summary>追加一条记录并落盘；role 为 user / assistant / tool。</summary>
-    public void AddTurn(string role, string text)
+    /// <summary>
+    /// 追加一条记录并落盘；role 为 user / assistant / tool。
+    /// tool 记录额外保存调用信息（CallId、工具名、参数、完整结果），供启动时重建请求上下文。
+    /// </summary>
+    public void AddTurn(
+        string role,
+        string text,
+        string? callId = null,
+        string? toolName = null,
+        string? arguments = null,
+        string? result = null)
     {
         text = text.Trim();
         if (text.Length == 0) return;
 
-        var turn = new Turn { Time = DateTimeOffset.Now, Role = role, Text = text };
+        var turn = new Turn
+        {
+            Time = DateTimeOffset.Now,
+            Role = role,
+            Text = text,
+            CallId = callId,
+            ToolName = toolName,
+            Arguments = arguments,
+            Result = result
+        };
         lock (_gate)
         {
             _turns.Add(turn);
@@ -134,7 +160,7 @@ public sealed class ChatMemory
             var skip = Math.Max(0, _turns.Count - maxTurns);
             var turns = _turns.Skip(skip)
                 .Where(t => includeTools || !IsToolRole(t.Role))
-                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text))
+                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result))
                 .ToList();
             while (turns.Count > 0 && !IsUserRole(turns[0].Role)) turns.RemoveAt(0);
             return turns;
@@ -221,10 +247,14 @@ public sealed class ChatMemory
 
     /// <summary>
     /// 生成本轮要注入系统提示词的记忆块：档案全量（限长）+ 与 query 相关的回忆。
-    /// exclude 里的文本（通常是本次请求已带上的历史对话）不参与检索，避免与上下文重复。
+    /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
+    /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
     /// 关闭记忆或没有任何内容时返回空串。
     /// </summary>
-    public string BuildMemoryBlock(string? query, IReadOnlyCollection<string>? exclude = null)
+    public string BuildMemoryBlock(
+        string? query,
+        IReadOnlyCollection<string>? exclude = null,
+        IReadOnlyCollection<string>? excludeCallIds = null)
     {
         if (!Enabled) return string.Empty;
 
@@ -239,7 +269,7 @@ public sealed class ChatMemory
             ];
         }
 
-        var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude);
+        var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude, excludeCallIds);
 
         var profileBuilder = new StringBuilder();
         foreach (var line in profileLines)
@@ -276,7 +306,10 @@ public sealed class ChatMemory
         return block.Length <= MaxMemoryBlockChars ? block : block[..MaxMemoryBlockChars];
     }
 
-    private List<MemoryTurn> Search(string? query, IReadOnlyCollection<string>? exclude = null)
+    private List<MemoryTurn> Search(
+        string? query,
+        IReadOnlyCollection<string>? exclude = null,
+        IReadOnlyCollection<string>? excludeCallIds = null)
     {
         var results = new List<MemoryTurn>();
         if (!Enabled || string.IsNullOrWhiteSpace(query)) return results;
@@ -309,6 +342,8 @@ public sealed class ChatMemory
             foreach (var turn in _turns)
             {
                 if (excluded is not null && excluded.Contains(turn.Text)) continue;
+                if (excludeCallIds is not null && turn.CallId is { Length: > 0 } callId
+                    && excludeCallIds.Contains(callId)) continue;
 
                 var frequencies = new Dictionary<string, int>(StringComparer.Ordinal);
                 foreach (var term in turn.Tokens)
@@ -496,6 +531,18 @@ public sealed class ChatMemory
         public string Role { get; set; } = "user";
 
         public string Text { get; set; } = string.Empty;
+
+        /// <summary>工具调用的 id（仅 tool 记录）。</summary>
+        public string? CallId { get; set; }
+
+        /// <summary>工具名（仅 tool 记录）。</summary>
+        public string? ToolName { get; set; }
+
+        /// <summary>工具参数 JSON（仅 tool 记录）。</summary>
+        public string? Arguments { get; set; }
+
+        /// <summary>工具完整结果（仅 tool 记录）。</summary>
+        public string? Result { get; set; }
 
         /// <summary>检索用的切词结果，只在内存里保留。</summary>
         [JsonIgnore]
