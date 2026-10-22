@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -22,11 +23,20 @@ namespace SoufflePet.Services;
 /// </summary>
 public sealed class ChatTools
 {
-    /// <summary>命令执行超时：超时后连同子进程一起结束，避免挂死对话。</summary>
-    private const int ShellTimeoutSeconds = 30;
+    /// <summary>命令执行的默认超时（秒）：模型没指定 timeout_seconds 时使用。</summary>
+    private const int DefaultShellTimeoutSeconds = 30;
+
+    /// <summary>命令执行允许的最大超时（秒）：模型传得更大时按此上限处理。</summary>
+    private const int MaxShellTimeoutSeconds = 600;
 
     /// <summary>命令输出回传给模型的最大长度，超出截断。</summary>
     private const int ShellOutputMaxLength = 4000;
+
+    /// <summary>
+    /// 主进程退出后等待管道 EOF 的宽限时间：命令拉起后台进程（如浏览器 daemon）时，
+    /// 管道写端仍被其持有，EOF 永远不会到来，只能收完已缓冲的输出就返回。
+    /// </summary>
+    private static readonly TimeSpan OutputDrainTimeout = TimeSpan.FromMilliseconds(300);
 
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8000;
@@ -70,9 +80,9 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
-                "在用户的 Windows 电脑上执行 PowerShell 命令，返回退出码、标准输出和错误输出（30 秒超时）。"
+                "在用户的 Windows 电脑上执行 PowerShell 命令，返回退出码、标准输出和错误输出。"
                 + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
-                + "不要执行删除、格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
+                + "不要执行格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
@@ -87,14 +97,9 @@ public sealed class ChatTools
                 "recall",
                 "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。"),
             AIFunctionFactory.Create(
-                GetSkills,
-                "get_skills",
-                "列出当前可用的技能（名称与用途）。技能是用户放在工作目录 .agents/skills 或 .souffle/skills 下的操作说明，"
-                + "任务与某个技能相关时，先用 read_skill 读取该技能内容，再按说明执行。"),
-            AIFunctionFactory.Create(
                 ReadSkill,
                 "read_skill",
-                "读取指定技能的完整说明。技能名必须来自 get_skills 的返回值。")
+                "读取某个技能的完整说明。")
         ];
     }
 
@@ -144,30 +149,11 @@ public sealed class ChatTools
         [Description("检索关键词，可以是用户问题里的关键词")] string query)
         => _memory.Recall(query);
 
-    /// <summary>已启用的技能（DisabledSkills 里的名字忽略大小写）。</summary>
-    private IReadOnlyList<SkillInfo> EnabledSkills() =>
-        [.. _skills.Discover().Where(s => !_settings.DisabledSkills.Any(d => string.Equals(d, s.Name, StringComparison.OrdinalIgnoreCase)))];
-
-    private string GetSkills()
-    {
-        var skills = EnabledSkills();
-        if (skills.Count == 0) return "当前没有可用的技能。";
-
-        var builder = new StringBuilder($"当前可用技能共 {skills.Count} 个：");
-        foreach (var skill in skills)
-        {
-            builder.Append("\n- ").Append(skill.Name);
-            if (skill.HasDescription) builder.Append("：").Append(skill.Description);
-        }
-
-        return builder.ToString();
-    }
-
     private string ReadSkill(
-        [Description("技能名称，必须是 get_skills 返回的名字")] string name)
+        [Description("技能名称，必须是系统提示词中技能清单里的名字")] string name)
     {
-        if (EnabledSkills().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
-            return $"没有名为「{name}」的可用技能，请先调用 get_skills 查看可用技能。";
+        if (_skills.DiscoverEnabled().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
+            return $"没有名为「{name}」的可用技能，请从系统提示词的技能清单中选择。";
 
         var content = _skills.ReadContent(skill);
         if (content.Length == 0) return $"技能「{skill.Name}」没有正文内容。";
@@ -182,8 +168,12 @@ public sealed class ChatTools
         [Description(
             "要执行的 PowerShell 命令，例如 Get-ChildItem C:\\ 或 Get-Process | Sort-Object CPU -Descending | Select-Object -First 5")]
         string command,
-        CancellationToken cancellationToken)
+        [Description("命令超时时间（秒），默认 30，最大 600，超出按上限处理")]
+        int timeoutSeconds = DefaultShellTimeoutSeconds,
+        CancellationToken cancellationToken = default)
     {
+        var timeoutSecondsValue = Math.Clamp(timeoutSeconds, 1, MaxShellTimeoutSeconds);
+
         // 命令执行按当前审批规则处理：手动审批时阻塞等待用户点击允许
         if (!await _access.RequestShellApprovalAsync(command, cancellationToken))
         {
@@ -209,8 +199,27 @@ public sealed class ChatTools
 
         using var process = new Process();
         process.StartInfo = startInfo;
+
+        // 按行异步收集输出：不能用 ReadToEndAsync，它要等管道 EOF，
+        // 而命令拉起的后台进程会继承写端句柄，导致永远等不到 EOF、看起来每次都超时。
+        var stdoutLines = new ConcurrentQueue<string>();
+        var stderrLines = new ConcurrentQueue<string>();
+        var stdoutClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) stdoutClosed.TrySetResult();
+            else stdoutLines.Enqueue(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) stderrClosed.TrySetResult();
+            else stderrLines.Enqueue(e.Data);
+        };
+
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(ShellTimeoutSeconds));
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSecondsValue));
 
         try
         {
@@ -221,12 +230,27 @@ public sealed class ChatTools
             return $"命令启动失败：{ex.Message}";
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
 
         try
         {
             await process.WaitForExitAsync(timeout.Token);
+
+            // 主进程已退出：能收到 EOF 就说明输出读完，收不到也不再多等（避免被后台进程拖住）。
+            await Task.WhenAny(
+                    Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
+                    Task.Delay(OutputDrainTimeout, CancellationToken.None))
+                .ConfigureAwait(false);
+
+            var stdout = TruncateOutput(JoinOutput(stdoutLines));
+            var stderr = TruncateOutput(JoinOutput(stderrLines));
+
+            var result = new StringBuilder($"退出码 {process.ExitCode}");
+            if (stdout.Length > 0) result.Append("\n输出：\n").Append(stdout);
+            if (stderr.Length > 0) result.Append("\n错误：\n").Append(stderr);
+            if (stdout.Length == 0 && stderr.Length == 0) result.Append("\n（无输出）");
+            return result.ToString();
         }
         catch (OperationCanceledException)
         {
@@ -239,20 +263,15 @@ public sealed class ChatTools
                 /* 已退出则忽略 */
             }
 
-            return cancellationToken.IsCancellationRequested
-                ? "命令已取消。"
-                : $"命令超过 {ShellTimeoutSeconds} 秒未结束，已终止。";
+            // 只有「停止对话」才把取消继续往上抛；命令自身超时按普通结果回给模型，
+            // 不能连带取消本次 LLM 请求。
+            cancellationToken.ThrowIfCancellationRequested();
+            return $"命令超过 {timeoutSecondsValue} 秒未结束，已终止。";
         }
-
-        var stdout = TruncateOutput((await stdoutTask).Trim());
-        var stderr = TruncateOutput((await stderrTask).Trim());
-
-        var result = new StringBuilder($"退出码 {process.ExitCode}");
-        if (stdout.Length > 0) result.Append("\n输出：\n").Append(stdout);
-        if (stderr.Length > 0) result.Append("\n错误：\n").Append(stderr);
-        if (stdout.Length == 0 && stderr.Length == 0) result.Append("\n（无输出）");
-        return result.ToString();
     }
+
+    private static string JoinOutput(ConcurrentQueue<string> lines) =>
+        lines.IsEmpty ? string.Empty : string.Join(Environment.NewLine, lines).Trim();
 
     private static string TruncateOutput(string text) =>
         text.Length <= ShellOutputMaxLength ? text : text[..ShellOutputMaxLength] + "…（已截断）";

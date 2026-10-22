@@ -130,46 +130,55 @@
                                        TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <Grid RowDefinitions="Auto,Auto,*" IsVisible="{Binding HasSelection}">
-                            <StackPanel Spacing="3">
-                                <TextBlock Text="{Binding SelectedSkill.Name}"
-                                           FontSize="14"
-                                           FontWeight="SemiBold"
-                                           Foreground="#F2FFFFFF"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding SelectedSkill.Description}"
-                                           IsVisible="{Binding SelectedSkill.HasDescription}"
-                                           FontSize="11"
-                                           Foreground="#8CFFFFFF"
-                                           TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding SelectedSkill.FilePath}"
-                                           FontSize="10.5"
-                                           Foreground="#59FFFFFF"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip.Tip="{Binding SelectedSkill.FilePath}" />
-                            </StackPanel>
+                        <!-- 详情通过 ContentControl + DataTemplate 绑定：未选中时内容为 null，不会产生空引用绑定错误 -->
+                        <ContentControl Content="{Binding SelectedSkill}"
+                                        HorizontalContentAlignment="Stretch"
+                                        VerticalContentAlignment="Stretch">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate x:DataType="vm:SkillItemViewModel">
+                                    <Grid RowDefinitions="Auto,Auto,*">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Description}"
+                                                       IsVisible="{Binding HasDescription}"
+                                                       FontSize="11"
+                                                       Foreground="#8CFFFFFF"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding FilePath}"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip.Tip="{Binding FilePath}" />
+                                        </StackPanel>
 
-                            <Border Grid.Row="1" Height="1" Background="#14FFFFFF" Margin="0,8" />
+                                        <Border Grid.Row="1" Height="1" Background="#14FFFFFF" Margin="0,8" />
 
-                            <ScrollViewer Grid.Row="2"
-                                          HorizontalScrollBarVisibility="Disabled"
-                                          VerticalScrollBarVisibility="Auto">
-                                <SelectableTextBlock Text="{Binding SelectedSkill.Content}"
-                                                     IsVisible="{Binding SelectedSkill.HasContent}"
-                                                     FontSize="11.5"
-                                                     Foreground="#D9FFFFFF"
-                                                     LineHeight="18"
-                                                     TextWrapping="Wrap"
-                                                     Margin="0,0,8,0" />
-                            </ScrollViewer>
+                                        <ScrollViewer Grid.Row="2"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <SelectableTextBlock Text="{Binding Content}"
+                                                                 IsVisible="{Binding HasContent}"
+                                                                 FontSize="11.5"
+                                                                 Foreground="#D9FFFFFF"
+                                                                 LineHeight="18"
+                                                                 TextWrapping="Wrap"
+                                                                 Margin="0,0,8,0" />
+                                        </ScrollViewer>
 
-                            <TextBlock Grid.Row="2"
-                                       Text="该技能没有正文内容"
-                                       Classes="muted"
-                                       IsVisible="{Binding !SelectedSkill.HasContent}"
-                                       VerticalAlignment="Center"
-                                       HorizontalAlignment="Center" />
-                        </Grid>
+                                        <TextBlock Grid.Row="2"
+                                                   Text="该技能没有正文内容"
+                                                   Classes="muted"
+                                                   IsVisible="{Binding !HasContent}"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
                     </Grid>
                 </Grid>
             </Grid>

@@ -24,7 +24,6 @@ public class NativePetWindow : Window, IPetWindow
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
     private readonly IChatWindowService _chat;
-    private DateTime _lastMoveLog;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
@@ -160,12 +159,6 @@ public class NativePetWindow : Window, IPetWindow
                     (float)(pos.Y - modelDragPoint.Value.Y));
                 modelDragPoint = pos;
                 return;
-            }
-
-            if ((DateTime.Now - _lastMoveLog).TotalMilliseconds > 800)
-            {
-                _lastMoveLog = DateTime.Now;
-                Logger.Debug("PointerMoved pos={PosX:F0},{PosY:F0} bounds={Width:F0}x{Height:F0}", pos.X, pos.Y, Bounds.Width, Bounds.Height);
             }
 
             if (pressPoint is null) return;

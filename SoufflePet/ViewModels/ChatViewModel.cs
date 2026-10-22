@@ -50,7 +50,7 @@ public partial class ChatViewModel : ViewModelBase
 
     /// <summary>
     /// 对话历史：统一用 Microsoft.Extensions.AI.ChatMessage 记录，
-    /// 只包含真实对话（不含工具调用记录、思考占位与错误提示）。
+    /// 只包含真实对话与工具调用记录（启动时从长期记忆恢复，均参与后续请求上下文）。
     /// </summary>
     private readonly List<ChatMessage> _history = [];
 
@@ -303,7 +303,7 @@ public partial class ChatViewModel : ViewModelBase
         Messages.Add(new Models.ChatMessage(text, isUser: true));
         Draft = string.Empty;
 
-        // 用户这轮提问先落历史；工具记录、占位与错误提示都不进入历史
+        // 用户这轮提问先落历史；占位与错误提示不进入历史
         _history.Add(new ChatMessage(ChatRole.User, text));
         _memory.AddTurn("user", text);
         TrimHistory();
@@ -320,6 +320,27 @@ public partial class ChatViewModel : ViewModelBase
         var answer = string.Empty;   // 整轮回复（写入历史）
         var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
         Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
+        var toolBubbles = new Dictionary<string, Models.ChatMessage>(StringComparer.Ordinal); // CallId → 进行中的工具气泡
+
+        // 插入一条工具记录：没有正文时直接插在回复气泡前；已有正文则截断并为后续回复新开气泡
+        void AddToolBubble(Models.ChatMessage message)
+        {
+            thinking = null;
+            var index = Messages.IndexOf(reply);
+            if (segment.Length == 0)
+            {
+                if (index >= 0) Messages.Insert(index, message);
+                else Messages.Add(message);
+                return;
+            }
+
+            Messages.Insert(index + 1, message);
+            reply = new Models.ChatMessage(ThinkingText, isUser: false);
+            _reply = reply;
+            Messages.Insert(index + 2, reply);
+            segment = string.Empty;
+        }
+
         try
         {
             await foreach (var evt in _llm.StreamAsync(model, [.. _history], cts.Token))
@@ -342,26 +363,33 @@ public partial class ChatViewModel : ViewModelBase
                         reply.Text = segment;
                         break;
 
+                    case LlmToolCallStartedEvent started:
+                        // 工具一开始执行就先显示「进行中」，长耗时工具也有反馈
+                        var bubble = new Models.ChatMessage(FormatToolStarted(started), isUser: false, isTool: true);
+                        toolBubbles[started.CallId] = bubble;
+                        AddToolBubble(bubble);
+                        break;
+
                     case LlmToolCallEvent call:
-                        var record = new Models.ChatMessage(FormatToolCall(call), isUser: false, isTool: true);
-                        // 工具调用同样写入长期记忆（只参与检索，不参与界面恢复与请求历史）
-                        _memory.AddTurn(ChatMemory.ToolRole, record.Text);
-                        thinking = null; // 下一轮思考另起气泡，排在后续回复之前
-                        var index = Messages.IndexOf(reply);
-                        if (segment.Length == 0)
+                        // 界面气泡用截断文本避免撑爆，落盘与请求历史保留完整结果
+                        var display = FormatToolCall(call, ToolResultMaxLength);
+                        var full = FormatToolCall(call, 0);
+
+                        // 结果回来后就地更新同一条气泡；找不到时（例如重连后）补一条完整记录
+                        if (!toolBubbles.Remove(call.CallId, out var completed))
                         {
-                            // 还没输出正文：工具记录插在占位气泡之前即可
-                            Messages.Insert(index, record);
-                            break;
+                            completed = new Models.ChatMessage(display, isUser: false, isTool: true);
+                            AddToolBubble(completed);
+                        }
+                        else
+                        {
+                            completed.Text = display;
                         }
 
-                        // 正文已经显示在当前气泡里：先截断它，工具记录排在后面，
-                        // 再为后续回复新开一个气泡，避免工具记录把一段话切成上下两半。
-                        Messages.Insert(index + 1, record);
-                        reply = new Models.ChatMessage(ThinkingText, isUser: false);
-                        _reply = reply;
-                        Messages.Insert(index + 2, reply);
-                        segment = string.Empty;
+                        // 工具调用记录既写入长期记忆，也进入请求历史，重启恢复后上下文与本次一致
+                        _memory.AddTurn(ChatMemory.ToolRole, full);
+                        _history.Add(new ChatMessage(ChatRole.Assistant, full));
+                        TrimHistory();
                         break;
                 }
             }
@@ -383,6 +411,9 @@ public partial class ChatViewModel : ViewModelBase
         }
         finally
         {
+            // 停止或出错时仍在「执行中」的工具记录标记为中断，避免看起来一直没结束
+            foreach (var pending in toolBubbles.Values) pending.Text += "\n（已中断）";
+
             // 只有真正生成出的内容才写回历史；停止时保留已收到的部分
             if (answer.Length > 0)
             {
@@ -400,26 +431,56 @@ public partial class ChatViewModel : ViewModelBase
     [RelayCommand]
     private void Stop() => _cts?.Cancel();
 
-    /// <summary>工具调用记录的展示文本：工具名（参数）换行跟结果。</summary>
-    private static string FormatToolCall(LlmToolCallEvent call)
+    /// <summary>工具开始执行时的展示文本：先给出反馈，结果回来后原地替换成完整记录。</summary>
+    private static string FormatToolStarted(LlmToolCallStartedEvent call)
     {
         var arguments = call.Arguments.Length == 0 ? string.Empty : $" {call.Arguments}";
-        var result = call.Result.Length <= ToolResultMaxLength
-            ? call.Result
-            : call.Result[..ToolResultMaxLength] + "…";
+        return $"调用工具 {call.Name}{arguments}\n执行中…";
+    }
+
+    /// <summary>
+    /// 工具调用记录的展示文本：工具名（参数）换行跟结果。
+    /// maxLength 为 0 表示不截断（落盘与请求历史用），否则结果部分超出即截断。
+    /// </summary>
+    private static string FormatToolCall(LlmToolCallEvent call, int maxLength)
+    {
+        var arguments = call.Arguments.Length == 0 ? string.Empty : $" {call.Arguments}";
+        var result = maxLength > 0 && call.Result.Length > maxLength
+            ? call.Result[..maxLength] + "…"
+            : call.Result;
         return $"调用工具 {call.Name}{arguments}\n结果：{result}";
     }
 
-    /// <summary>启动时把最近几轮对话恢复到界面上（有历史时替换掉问候语）。</summary>
+    /// <summary>恢复历史时截断工具记录的结果部分：落盘的是完整文本，界面气泡不必全量显示。</summary>
+    private static string TruncateToolText(string text)
+    {
+        const string marker = "\n结果：";
+        var index = text.IndexOf(marker, StringComparison.Ordinal);
+        if (index < 0) return text;
+
+        var head = text[..(index + marker.Length)];
+        var result = text[(index + marker.Length)..];
+        return result.Length <= ToolResultMaxLength ? text : head + result[..ToolResultMaxLength] + "…";
+    }
+
+    /// <summary>启动时把最近几轮对话（含工具调用记录）恢复到界面与请求历史里（有历史时替换掉问候语）。</summary>
     private void LoadRecentHistory()
     {
-        var recent = _memory.RecentTurns(HistoryWindowMessages);
+        var recent = _memory.RecentTurns(HistoryWindowMessages, includeTools: true);
         if (recent.Count == 0) return;
 
         Messages.Clear();
         foreach (var turn in recent)
         {
-            var isUser = !string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(turn.Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase))
+            {
+                // 工具记录作为助手上下文带回请求，界面上按工具气泡展示（展示时截断）
+                _history.Add(new ChatMessage(ChatRole.Assistant, turn.Text));
+                Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true));
+                continue;
+            }
+
+            var isUser = string.Equals(turn.Role, ChatMemory.UserRole, StringComparison.OrdinalIgnoreCase);
             _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
             Messages.Add(new Models.ChatMessage(turn.Text, isUser));
         }

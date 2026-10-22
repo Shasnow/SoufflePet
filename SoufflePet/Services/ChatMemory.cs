@@ -32,7 +32,7 @@ public sealed class ChatMemory
     /// <summary>助手角色。</summary>
     public const string AssistantRole = "assistant";
 
-    /// <summary>工具调用记录（只在长期记忆里保留，不参与界面恢复与请求历史）。</summary>
+    /// <summary>工具调用记录（落盘保留；启动恢复时作为助手上下文参与重建）。</summary>
     public const string ToolRole = "tool";
 
     /// <summary>内存里保留的最大历史轮数，也是启动时读取的行数。</summary>
@@ -124,16 +124,16 @@ public sealed class ChatMemory
     }
 
     /// <summary>
-    /// 最近若干轮对话（用于界面恢复）；会跳过工具调用记录，并裁掉开头的助手消息，
-    /// 避免从半截对话开始。
+    /// 最近若干轮对话（用于界面恢复与上下文重建）；includeTools 为 true 时一并返回工具调用记录。
+    /// 会裁掉开头的助手/工具消息，避免从半截对话开始。
     /// </summary>
-    public IReadOnlyList<MemoryTurn> RecentTurns(int maxTurns)
+    public IReadOnlyList<MemoryTurn> RecentTurns(int maxTurns, bool includeTools = false)
     {
         lock (_gate)
         {
             var skip = Math.Max(0, _turns.Count - maxTurns);
             var turns = _turns.Skip(skip)
-                .Where(t => !IsToolRole(t.Role))
+                .Where(t => includeTools || !IsToolRole(t.Role))
                 .Select(t => new MemoryTurn(t.Time, t.Role, t.Text))
                 .ToList();
             while (turns.Count > 0 && !IsUserRole(turns[0].Role)) turns.RemoveAt(0);
@@ -221,9 +221,10 @@ public sealed class ChatMemory
 
     /// <summary>
     /// 生成本轮要注入系统提示词的记忆块：档案全量（限长）+ 与 query 相关的回忆。
+    /// exclude 里的文本（通常是本次请求已带上的历史对话）不参与检索，避免与上下文重复。
     /// 关闭记忆或没有任何内容时返回空串。
     /// </summary>
-    public string BuildMemoryBlock(string? query)
+    public string BuildMemoryBlock(string? query, IReadOnlyCollection<string>? exclude = null)
     {
         if (!Enabled) return string.Empty;
 
@@ -238,7 +239,7 @@ public sealed class ChatMemory
             ];
         }
 
-        var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query);
+        var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude);
 
         var profileBuilder = new StringBuilder();
         foreach (var line in profileLines)
@@ -275,13 +276,18 @@ public sealed class ChatMemory
         return block.Length <= MaxMemoryBlockChars ? block : block[..MaxMemoryBlockChars];
     }
 
-    private List<MemoryTurn> Search(string? query)
+    private List<MemoryTurn> Search(string? query, IReadOnlyCollection<string>? exclude = null)
     {
         var results = new List<MemoryTurn>();
         if (!Enabled || string.IsNullOrWhiteSpace(query)) return results;
 
         var queryTokens = Tokenize(query).Distinct(StringComparer.Ordinal).ToArray();
         if (queryTokens.Length == 0) return results;
+
+        // 已进入本次请求上下文的对话不参与检索，否则会与上下文内容重复
+        HashSet<string>? excluded = exclude is { Count: > 0 }
+            ? [.. exclude.Select(t => t.Trim())]
+            : null;
 
         lock (_gate)
         {
@@ -302,6 +308,8 @@ public sealed class ChatMemory
             var scored = new List<(Turn Turn, double Score)>(count);
             foreach (var turn in _turns)
             {
+                if (excluded is not null && excluded.Contains(turn.Text)) continue;
+
                 var frequencies = new Dictionary<string, int>(StringComparer.Ordinal);
                 foreach (var term in turn.Tokens)
                     frequencies[term] = frequencies.GetValueOrDefault(term) + 1;

@@ -68,9 +68,7 @@ public partial class SkillsViewModel : ViewModelBase
 
         foreach (var skill in _skills.Discover())
         {
-            var enabled = !_settings.DisabledSkills.Any(d =>
-                string.Equals(d, skill.Name, StringComparison.OrdinalIgnoreCase));
-            var item = new SkillItemViewModel(skill, _skills.ReadContent(skill), enabled);
+            var item = new SkillItemViewModel(skill, _skills.ReadContent(skill), _skills.IsEnabled(skill));
             item.EnabledChanged += OnItemEnabledChanged;
             Skills.Add(item);
         }

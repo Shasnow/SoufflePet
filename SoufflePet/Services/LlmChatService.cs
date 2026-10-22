@@ -6,6 +6,7 @@ using System.ClientModel;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
@@ -28,8 +29,11 @@ public sealed record LlmTextDelta(string Text) : LlmStreamEvent;
 /// <summary>一段思考过程增量（推理模型返回；只用于界面展示，不进入请求历史与长期记忆）。</summary>
 public sealed record LlmReasoningDelta(string Text) : LlmStreamEvent;
 
-/// <summary>模型发起的一次工具调用（已执行，附带参数与结果）。</summary>
-public sealed record LlmToolCallEvent(string Name, string Arguments, string Result) : LlmStreamEvent;
+/// <summary>模型发起一次工具调用：在真正执行前先产出，界面据此立即显示，避免耗时工具看起来没反应。</summary>
+public sealed record LlmToolCallStartedEvent(string CallId, string Name, string Arguments) : LlmStreamEvent;
+
+/// <summary>一次工具调用已执行结束（CallId 与 Started 事件对应），附带参数与结果。</summary>
+public sealed record LlmToolCallEvent(string CallId, string Name, string Arguments, string Result) : LlmStreamEvent;
 
 /// <summary>LLM 对话服务：通过 Microsoft.Extensions.AI 的 IChatClient 流式请求回复。</summary>
 public interface ILlmChatService
@@ -62,12 +66,14 @@ public sealed class LlmChatService : ILlmChatService
     private readonly SouffleSettings _settings;
     private readonly ChatMemory _memory;
     private readonly ChatTools _chatTools;
+    private readonly ISkillService _skills;
 
-    public LlmChatService(SouffleSettings settings, ChatTools tools, ChatMemory memory)
+    public LlmChatService(SouffleSettings settings, ChatTools tools, ChatMemory memory, ISkillService skills)
     {
         _settings = settings;
         _memory = memory;
         _chatTools = tools;
+        _skills = skills;
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -75,8 +81,6 @@ public sealed class LlmChatService : ILlmChatService
         IReadOnlyList<ChatMessage> history,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        Logger.Debug("LLM request {Endpoint} model={Model}", BuildEndpoint(model.BaseUrl), model.ModelId);
-
         var chars = 0;
         var events = StreamCoreAsync(model, history, cancellationToken).GetAsyncEnumerator(cancellationToken);
         try
@@ -135,10 +139,22 @@ public sealed class LlmChatService : ILlmChatService
         if (_settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
 
-        // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）
-        var memoryBlock = _memory.BuildMemoryBlock(history.LastOrDefault(m => m.Role == ChatRole.User)?.Text);
+        // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）。
+        // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入。
+        var historyTexts = history
+            .Select(m => m.Text.Trim())
+            .Where(t => t.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        var memoryBlock = _memory.BuildMemoryBlock(
+            history.LastOrDefault(m => m.Role == ChatRole.User)?.Text,
+            historyTexts);
         if (memoryBlock.Length > 0)
             messages.Add(new ChatMessage(ChatRole.System, memoryBlock));
+
+        // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
+        var skillBlock = _skills.BuildCatalog();
+        if (skillBlock.Length > 0)
+            messages.Add(new ChatMessage(ChatRole.System, skillBlock));
 
         messages.AddRange(history);
 
@@ -146,6 +162,9 @@ public sealed class LlmChatService : ILlmChatService
         var tools = await _chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
         var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
         foreach (var function in tools.OfType<AIFunction>()) functions.TryAdd(function.Name, function);
+
+        // 发送前把完整请求写入调试日志，便于排查提示词/记忆/技能/历史是否符合预期
+        LogRequest(endpoint, model, messages, tools);
 
         var chatOptions = new ChatOptions
         {
@@ -205,9 +224,13 @@ public sealed class LlmChatService : ILlmChatService
             messages.AddMessages(response);
             foreach (var call in calls)
             {
+                var arguments = FormatArguments(call.Arguments);
+                // 先通知界面「开始调用」，长耗时工具（MCP、命令执行）也能立刻看到反馈
+                yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
+
                 var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
-                yield return new LlmToolCallEvent(call.Name, FormatArguments(call.Arguments), FormatResult(result));
+                yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, FormatResult(result));
             }
         }
     }
@@ -230,6 +253,12 @@ public sealed class LlmChatService : ILlmChatService
             Logger.Debug("Tool {Tool} invoked", call.Name);
             return result;
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 工具自身超时或内部取消：当作普通结果回给模型，不能连带取消本次 LLM 请求
+            Logger.Warning("Tool {Tool} cancelled internally", call.Name);
+            return $"工具 {call.Name} 执行超时或已中止。";
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.Warning(ex, "Tool {Tool} failed", call.Name);
@@ -248,6 +277,47 @@ public sealed class LlmChatService : ILlmChatService
         string text => text,
         JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
         _ => JsonSerializer.Serialize(result, ToolJsonOptions)
+    };
+
+    /// <summary>发送前把完整请求写入调试日志：逐条打印消息（含系统提示词、记忆、技能清单），再列出本次可调用的工具。</summary>
+    private static void LogRequest(
+        string endpoint,
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<AITool> tools)
+    {
+        var builder = new StringBuilder();
+        builder.Append("LLM request ").Append(endpoint)
+            .Append(" model=").Append(model.ModelId)
+            .Append(" messages=").Append(messages.Count)
+            .Append(" tools=").Append(tools.Count);
+
+        foreach (var message in messages)
+        {
+            builder.Append("\n--- ").Append(message.Role).Append(" ---\n");
+            if (message.Text is { Length: > 0 } text)
+                builder.Append(text);
+            else if (message.Contents.Count > 0)
+                builder.Append('[').Append(string.Join("、", message.Contents.Select(DescribeContent))).Append(']');
+            else
+                builder.Append("(空)");
+        }
+
+        if (tools.Count > 0)
+        {
+            builder.Append("\n工具：");
+            foreach (var tool in tools) builder.Append("\n- ").Append(tool.Name);
+        }
+
+        Logger.Debug(builder.ToString());
+    }
+
+    private static string DescribeContent(AIContent content) => content switch
+    {
+        FunctionCallContent call => $"调用 {call.Name}",
+        FunctionResultContent => "工具结果",
+        TextReasoningContent => "思考内容",
+        _ => content.GetType().Name
     };
 
     /// <summary>BaseUrl 视为 base 地址；如果用户填了完整接口路径，去掉 /chat/completions 再交给 SDK。</summary>

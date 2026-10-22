@@ -5,7 +5,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Serilog;
+using SoufflePet.Models;
 
 namespace SoufflePet.Services;
 
@@ -24,6 +26,18 @@ public interface ISkillService
     /// <summary>列出全部技能（同名只保留先扫描到的）。目录不存在或文件解析失败只记日志。</summary>
     IReadOnlyList<SkillInfo> Discover();
 
+    /// <summary>列出已启用的技能：<see cref="SouffleSettings.DisabledSkills"/> 中的名字忽略大小写。</summary>
+    IReadOnlyList<SkillInfo> DiscoverEnabled();
+
+    /// <summary>技能是否启用（停用列表按名称、忽略大小写匹配）。</summary>
+    bool IsEnabled(SkillInfo skill);
+
+    /// <summary>
+    /// 每轮对话注入系统提示词的技能清单（仅 name 与 description 两项 frontmatter），
+    /// 让模型知道有哪些技能可用，再按需调用 read_skill 读取正文。没有已启用技能时返回空串。
+    /// </summary>
+    string BuildCatalog();
+
     /// <summary>读取技能正文（去掉 YAML frontmatter）；文件不存在时返回空字符串。</summary>
     string ReadContent(SkillInfo skill);
 }
@@ -32,7 +46,7 @@ public interface ISkillService
 /// 技能目录约定：每个技能占一个子目录，内含带 YAML frontmatter（name/description）的 SKILL.md；
 /// 也支持直接放在技能目录下的单个 *.md 文件。正文即 SKILL.md 去掉 frontmatter 后的内容。
 /// </summary>
-public sealed class SkillService : ISkillService
+public sealed class SkillService(SouffleSettings settings) : ISkillService
 {
     private static readonly ILogger Logger = Log.ForContext<SkillService>();
 
@@ -74,6 +88,26 @@ public sealed class SkillService : ISkillService
         }
 
         return [.. skills.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    public IReadOnlyList<SkillInfo> DiscoverEnabled() => [.. Discover().Where(IsEnabled)];
+
+    public bool IsEnabled(SkillInfo skill) =>
+        !settings.DisabledSkills.Any(d => string.Equals(d, skill.Name, StringComparison.OrdinalIgnoreCase));
+
+    public string BuildCatalog()
+    {
+        var skills = DiscoverEnabled();
+        if (skills.Count == 0) return string.Empty;
+
+        var builder = new StringBuilder("可用技能（任务与某个技能相关时，先调用 read_skill 读取完整说明，再按说明执行）：");
+        foreach (var skill in skills)
+        {
+            builder.Append("\n- ").Append(skill.Name);
+            if (skill.HasDescription) builder.Append("：").Append(skill.Description);
+        }
+
+        return builder.ToString();
     }
 
     public string ReadContent(SkillInfo skill)
