@@ -4,7 +4,7 @@
 
 # SoufflePet
 
-基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D桌面桌宠。
+基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D 桌面桌宠，内置可调用本地工具的 LLM 对话。
 
 > **许可证**：主程序 [GPL-3.0-or-later](LICENSE)，内嵌 Live2DCSharpSDK 子项目 [MIT](Live2DCSharpSDK.Framework/LICENSE)，详见文末[「许可证」](#许可证)章节。
 
@@ -21,6 +21,68 @@
 - **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
 - **手动模式**：托盘可勾选「游戏模式」「音乐模式」，不等待检测直接进入对应状态（调试/演示用）
 - **口型同步**：在音乐模式（自动检测或手动开启）下，根据当前播放的音乐，自动同步模型的口型
+- **LLM 对话**：`Ctrl+Alt+Space` 或右键单击桌宠呼出对话窗口，支持 OpenAI 兼容接口、流式回复、思考过程展示、工具调用、MCP 集成、技能与长期记忆（详见下节）
+
+## LLM 对话
+
+`Ctrl+Alt+Space` 或右键单击桌宠呼出对话窗口（再次触发收起）。窗口为单例，隐藏后内容保留；停止按钮可中断当前一轮生成。
+
+### 对话模型
+
+走 OpenAI 兼容接口。首次启动 `ChatModels` 为空，在对话窗口的模型菜单里点「添加模型」填写即可：
+
+| 字段 | 说明 |
+| --- | --- |
+| `Name` | 显示名称（模型列表里看到的名字） |
+| `ModelId` | 请求中的 `model` 字段，例如 `deepseek-chat` |
+| `BaseUrl` | 兼容接口地址，例如 `https://api.example.com/v1` |
+| `ApiKey` | API 密钥，可留空 |
+| `Provider` | 可选的提供商标注，仅用于展示 |
+
+以上写入 `SoufflePet.json` 的 `ChatModels` 数组，`ChatModelName` 记录当前选中的模型。人设由 `ChatSystemPrompt` 决定，称呼 `PetName` 会同步到窗口标题与默认人设。
+
+### 工具调用
+
+模型可调用以下本地工具，声明由方法签名与 `Description` 自动生成：
+
+| 工具 | 作用 |
+| --- | --- |
+| `get_current_time` | 当前日期、时间、星期与时区 |
+| `get_expressions` / `set_expression` | 列出与切换 Live2D 表情 |
+| `run_shell_command` | 执行 PowerShell 命令（超时与输出长度有上限） |
+| `list_windows` | 列出当前可见窗口 |
+| `take_screenshot` | 截取光标所在显示器，或按标题截取指定窗口（被遮挡也能截到） |
+| `ask_user` | 向用户提问：分页面板 + 预设选项（可带说明）+ 自由输入，全部作答后结果回传模型 |
+| `remember` / `forget` / `recall` | 长期记忆的写入、删除与关键词检索 |
+| `read_skill` | 读取某个技能的完整说明 |
+
+每轮最多 `MaxToolRounds` 次工具调用（默认 10）。命令执行受 `ToolApproval` 控制：`Manual` 每次在消息区弹出审批气泡等用户点「允许」，`FullAccess` 直接执行。工具调用与思考过程在消息里以折叠面板展示，展开可看参数与结果。
+
+### MCP 服务器
+
+对话窗口「更多操作 → MCP 服务器…」里配置，写入 `McpServers`。支持 Stdio（本地子进程，指定命令与参数）与 Http（远程服务）两种传输方式，启用的服务器在下次对话时连接，其工具以「服务器名\_工具名」暴露给模型。
+
+### 技能
+
+技能是模型按需读取的说明文档，放在 `.agents/skills/<技能名>/SKILL.md` 或 `.agents/skills/<技能名>.md`。扫描目录：
+
+- 应用目录下的 `.agents/skills`、`.souffle/skills`
+- 用户家目录下的 `.agents/skills`
+
+已启用的技能会以清单形式注入系统提示词，模型需要时用 `read_skill` 取正文；`DisabledSkills` 记录被停用的技能。设置界面支持从 zip 压缩包安装技能。
+
+### 长期记忆
+
+`ChatMemoryEnabled` 打开时对话落盘到 `%AppData%\SoufflePet`：
+
+- `conversations.jsonl`：每轮问答与工具调用记录（启动时据此重建请求上下文）
+- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等）
+
+检索用中文 2-gram + BM25，不依赖分词库或向量服务。
+
+### 用量统计
+
+每轮结束在助手气泡底部显示本轮 token 用量，窗口底部显示有史以来的累计输入 / 输出与缓存命中率（`ChatUsage`）。
 
 ## 两种运行模式
 
@@ -53,9 +115,14 @@ dotnet run --project SoufflePet -- --webview
 ```
 SoufflePet.sln
 ├─ SoufflePet/                  # 主程序（Avalonia 桌面应用）
-│  ├─ Views/                     # 窗口层
+│  ├─ Views/                     # 窗口与视图层（桌宠窗口、对话窗口、MCP / 技能设置）
 │  │  ├─ WebViewPetWindow.cs    #   WebView 版窗口（纯代码，+ 本地静态服务器）
 │  │  └─ NativePetWindow.cs      #   原生版窗口（拖拽 / 穿透 / 全局光标）
+│  ├─ ViewModels/                # 对话、MCP、技能与提问面板的视图模型
+│  ├─ Services/                  # LLM 对话、工具调用、MCP、技能、记忆、表情与检测
+│  ├─ Models/                    # 设置、消息、模型与 MCP 配置等数据模型
+│  ├─ Utils/                     # 截图等辅助代码
+│  ├─ Styles/                    # 深色玻璃面板等外观样式
 │  ├─ native/                    # 原生渲染控件
 │  │  ├─ NativePetControl.cs     #   OpenGL 渲染循环、逐像素命中检测
 │  │  └─ AvaloniaApi.cs          #   Avalonia GlInterface → OpenGLApi 桥接
@@ -140,7 +207,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 }
 ```
 
-取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。**默认留空表示不切换表情**——表情名因模型而异，换模型后请按实际表情文件填写，否则自动表情不会生效。
+取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。默认值是「手柄」「麦克风」——表情名因模型而异，换模型后请按实际表情文件填写，否则自动表情不会生效；留空表示不切换表情。
 
 ## 许可证
 
