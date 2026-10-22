@@ -580,12 +580,21 @@ public partial class ChatViewModel : ViewModelBase
         if (recent.Count == 0) return;
 
         Messages.Clear();
+
+        // 思考气泡：与生成时一致，排在本条正文（或工具记录）气泡之前
+        void AddReasoningBubble(string? reasoning)
+        {
+            if (string.IsNullOrEmpty(reasoning)) return;
+            Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true));
+        }
+
         foreach (var turn in recent)
         {
             if (string.Equals(turn.Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase))
             {
                 // 工具记录按标准结构重建进请求历史，界面上按工具气泡展示（展示时截断）
                 AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text, turn.Reasoning);
+                AddReasoningBubble(turn.Reasoning);
                 Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true));
                 continue;
             }
@@ -595,6 +604,7 @@ public partial class ChatViewModel : ViewModelBase
             {
                 _history.Add(new ChatMessage(ChatRole.Assistant,
                     [new TextReasoningContent(turn.Reasoning), new TextContent(turn.Text)]));
+                AddReasoningBubble(turn.Reasoning);
             }
             else
             {
