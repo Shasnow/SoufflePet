@@ -1,8 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SoufflePet.ViewModels"
+        xmlns:models="using:SoufflePet.Models"
         x:Class="SoufflePet.Views.ChatWindow"
         x:DataType="vm:ChatViewModel"
+        x:CompileBindings="True"
         Title="{Binding WindowTitle}"
         Width="452"
         Height="652"
@@ -14,6 +16,597 @@
         Topmost="True"
         ShowInTaskbar="False"
         RequestedThemeVariant="Dark">
-    <!-- 内容交给 ViewLocator：DataContext 是 ChatViewModel 时自动实例化 ChatView -->
-    <ContentControl Content="{Binding}" />
+    <!-- 深色玻璃面板的外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <!-- 留出 ShadowMargin，避免面板阴影被窗口边界裁掉 -->
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="{Binding PetInitial}"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding PetName}" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="LLM 对话" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <!-- 提问面板：模型调用 ask_user 时出现在消息区下方、输入框上方，全部回答后提交给模型 -->
+                <Border Grid.Row="3"
+                        Margin="12,0,12,8"
+                        Padding="12,10"
+                        CornerRadius="12"
+                        Background="#1FE8879B"
+                        BorderBrush="#59E8879B"
+                        BorderThickness="1"
+                        IsVisible="{Binding IsAsking}">
+                    <!-- 模板内部以 AskUser 为数据上下文，避免在面板隐藏时对 null 取子属性 -->
+                    <ContentControl Content="{Binding AskUser}"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate x:DataType="vm:AskUserViewModel">
+                                <Grid RowDefinitions="Auto,Auto,Auto">
+                                    <!-- 顶部：标题 + 右上角页码与翻页按钮 -->
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="需要你补充一些信息"
+                                                   FontSize="12.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#F2FFFFFF"
+                                                   VerticalAlignment="Center" />
+
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    Spacing="2"
+                                                    VerticalAlignment="Center">
+                                            <Button Classes="ghost"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Padding="0"
+                                                    ToolTip.Tip="上一题"
+                                                    ToolTip.Placement="Top"
+                                                    ToolTip.VerticalOffset="-6"
+                                                    Command="{Binding PreviousCommand}">
+                                                <Path Data="M5,0 L0,5 L5,10"
+                                                      Stroke="#B3FFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      StrokeJoin="Round"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" />
+                                            </Button>
+                                            <TextBlock Text="{Binding PageText}"
+                                                       MinWidth="36"
+                                                       TextAlignment="Center"
+                                                       FontSize="11"
+                                                       Foreground="#B3FFFFFF"
+                                                       VerticalAlignment="Center" />
+                                            <Button Classes="ghost"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Padding="0"
+                                                    ToolTip.Tip="下一题"
+                                                    ToolTip.Placement="Top"
+                                                    ToolTip.VerticalOffset="-6"
+                                                    Command="{Binding NextCommand}">
+                                                <Path Data="M0,0 L5,5 L0,10"
+                                                      Stroke="#B3FFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      StrokeJoin="Round"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- 当前问题：一页一个，选项每行一个 -->
+                                    <ScrollViewer Grid.Row="1"
+                                                  Margin="0,8,0,0"
+                                                  MaxHeight="220"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ContentControl Content="{Binding CurrentQuestion}"
+                                                        HorizontalContentAlignment="Stretch">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="vm:AskQuestionViewModel">
+                                                    <StackPanel Spacing="6">
+                                                        <TextBlock Text="{Binding Text}"
+                                                                   FontSize="12.5"
+                                                                   LineHeight="18"
+                                                                   TextWrapping="Wrap"
+                                                                   Foreground="#F2FFFFFF" />
+
+                                                        <!-- 预设选项 + 固定的「其他（自由输入）」，每行一个 -->
+                                                        <ItemsControl ItemsSource="{Binding Options}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <StackPanel Spacing="2" />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:AskOptionViewModel">
+                                                                    <RadioButton GroupName="{Binding GroupName}"
+                                                                                 IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                                 HorizontalAlignment="Stretch"
+                                                                                 HorizontalContentAlignment="Stretch"
+                                                                                 Padding="4,3"
+                                                                                 FontSize="12"
+                                                                                 Foreground="#D9FFFFFF">
+                                                                        <StackPanel Spacing="1">
+                                                                            <TextBlock Text="{Binding Text}"
+                                                                                       TextWrapping="NoWrap"
+                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                            <!-- 说明小字：不换行，超长截断，悬停看全文 -->
+                                                                            <TextBlock Text="{Binding Description}"
+                                                                                       IsVisible="{Binding HasDescription}"
+                                                                                       FontSize="10.5"
+                                                                                       Foreground="#8CFFFFFF"
+                                                                                       TextWrapping="NoWrap"
+                                                                                       TextTrimming="CharacterEllipsis"
+                                                                                       ToolTip.Tip="{Binding Description}"
+                                                                                       ToolTip.Placement="Top"
+                                                                                       ToolTip.VerticalOffset="-6"
+                                                                                       ToolTip.ShowDelay="300" />
+                                                                        </StackPanel>
+                                                                    </RadioButton>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+
+                                                        <!-- 选中自由输入项后展开；按 Enter 进入下一题 -->
+                                                        <TextBox Classes="field"
+                                                                 IsVisible="{Binding IsCustomSelected}"
+                                                                 Text="{Binding CustomText, Mode=TwoWay}"
+                                                                 AcceptsReturn="False"
+                                                                 PlaceholderText="输入你的回答，按 Enter 下一题"
+                                                                 KeyDown="OnAnswerInputKeyDown" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
+                                    </ScrollViewer>
+
+                                    <StackPanel Grid.Row="2"
+                                                Orientation="Horizontal"
+                                                HorizontalAlignment="Right"
+                                                Spacing="8"
+                                                Margin="0,8,0,0">
+                                        <Button Classes="secondary"
+                                                Content="取消"
+                                                Command="{Binding CancelCommand}" />
+                                        <Button Classes="primary"
+                                                Content="提交"
+                                                Command="{Binding SubmitCommand}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </Border>
+
+                <!-- 消息区 -->
+                <ScrollViewer Name="MessageScroll"
+                              Grid.Row="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              AllowAutoHide="True">
+                    <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="10" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:ChatMessage">
+                                <Border Classes="bubble"
+                                        Classes.user="{Binding IsUser}"
+                                        Classes.tool="{Binding IsTool}"
+                                        Classes.thinking="{Binding IsReasoning}"
+                                        Classes.approval="{Binding IsApproval}">
+                                    <StackPanel Spacing="7">
+                                        <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看 -->
+                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                  IsVisible="{Binding IsReasoning}"
+                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                  Header="{Binding ReasoningHeader}">
+                                            <TextBlock Text="{Binding Text}"
+                                                       TextWrapping="Wrap" />
+                                        </Expander>
+
+                                        <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果 -->
+                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                  IsVisible="{Binding IsToolPanel}"
+                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                            <Expander.Header>
+                                                <TextBlock Text="{Binding ToolHeader}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Expander.Header>
+                                            <TextBlock Text="{Binding ToolBody}"
+                                                       TextWrapping="Wrap" />
+                                        </Expander>
+
+                                        <TextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
+
+                                        <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
+                                        <TextBlock Text="{Binding UsageText}"
+                                                   IsVisible="{Binding HasUsage}"
+                                                   FontSize="10.5"
+                                                   LineHeight="16"
+                                                   Foreground="#59FFFFFF" />
+
+                                        <!-- 手动审批：等待用户决定时才显示按钮 -->
+                                        <StackPanel Orientation="Horizontal"
+                                                    Spacing="7"
+                                                    IsVisible="{Binding IsPending}">
+                                            <Button Classes="approval accept"
+                                                    Content="允许"
+                                                    Command="{Binding ApproveCommand}" />
+                                            <Button Classes="approval reject"
+                                                    Content="拒绝"
+                                                    Command="{Binding RejectCommand}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <!-- 输入区：多行文本框 + 下方「附件 / 模型 / 发送」操作行 -->
+                <Border Grid.Row="4"
+                        Margin="12,4,12,12"
+                        Padding="10,8"
+                        CornerRadius="12"
+                        Background="#0FFFFFFF"
+                        BorderBrush="#22FFFFFF"
+                        BorderThickness="1">
+                    <Grid RowDefinitions="Auto,Auto">
+                        <!-- 外观交给 .bare 样式覆盖主题底色，并去掉聚焦时的蓝色装饰层 -->
+                        <TextBox Name="InputBox"
+                                 Classes="bare"
+                                 Text="{Binding Draft, Mode=TwoWay}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 PlaceholderText="{Binding InputPlaceholder}"
+                                 FocusAdorner="{x:Null}"
+                                 Foreground="#F2FFFFFF"
+                                 CaretBrush="#E8879B"
+                                 FontSize="13"
+                                 LineHeight="20"
+                                 Padding="2"
+                                 MinHeight="62"
+                                 MaxHeight="132" />
+
+                        <!-- 左侧操作项允许收缩裁剪，发送按钮固定在右侧，永远不会被顶出窗口 -->
+                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="*,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
+                                <Button Name="MoreButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="更多操作"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
+                                        Command="{Binding ToggleMoreCommand}">
+                                    <Path Data="M0,6 L12,6 M6,0 L6,12"
+                                            Stroke="#8CFFFFFF"
+                                            StrokeThickness="1.4"
+                                            StrokeLineCap="Round"
+                                            VerticalAlignment="Center" />
+                                </Button>
+                                <Button Name="ApprovalButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="命令执行审批规则"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
+                                        Command="{Binding ToggleApprovalPickerCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <Ellipse Width="6" Height="6" Fill="#E8879B" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding ApprovalButtonText}" Classes="muted" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Name="ModelButton"
+                                        Classes="ghost"
+                                        ToolTip.Tip="选择模型"
+                                        ToolTip.Placement="Top"
+                                        ToolTip.VerticalOffset="-6"
+                                        Command="{Binding ToggleModelPickerCommand}">
+                                    <TextBlock Text="{Binding ModelButtonText}"
+                                               Classes="muted"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Button>
+
+
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    Classes="primary"
+                                    Content="发送"
+                                    IsVisible="{Binding !IsGenerating}"
+                                    Command="{Binding SendCommand}" />
+
+                            <!-- 生成期间同一位置换成停止按钮 -->
+                            <Button Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    Classes="primary"
+                                    Content="停止"
+                                    IsVisible="{Binding IsGenerating}"
+                                    Command="{Binding StopCommand}" />
+
+                            <!-- 模型选择浮层：列表底部固定一个「添加模型」入口 -->
+                            <Popup Grid.Column="0" IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #ModelButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="236"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="选择模型"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <ListBox Name="ModelList"
+                                                 Classes="modelList"
+                                                 ItemsSource="{Binding Models}"
+                                                 SelectedItem="{Binding SelectedModel, Mode=TwoWay}"
+                                                 MaxHeight="190"
+                                                 PointerReleased="OnModelListPointerReleased">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="models:ChatModelConfig">
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontSize="12.5"
+                                                               Foreground="#F2FFFFFF" />
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <Border Height="1" Background="#14FFFFFF" Margin="4,3" />
+
+                                        <Button Classes="ghost"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Padding="8,6"
+                                                Command="{Binding OpenAddModelCommand}">
+                                            <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                                <Path Data="M0,6 L12,6 M6,0 L6,12"
+                                                      Stroke="#8CFFFFFF"
+                                                      StrokeThickness="1.4"
+                                                      StrokeLineCap="Round"
+                                                      VerticalAlignment="Center" />
+                                                <TextBlock Text="添加模型" Classes="muted" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+
+                            <!-- 更多操作浮层：MCP 服务器与技能配置入口 -->
+                            <Popup Grid.Column="0" IsOpen="{Binding IsMoreOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #MoreButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="212"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="更多操作"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <Button Classes="modeItem" Command="{Binding OpenMcpSettingsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="MCP 服务器…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="配置模型可调用的外部工具"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding OpenSkillsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="技能…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="管理模型可读取的技能说明"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+
+                            <!-- 审批规则浮层：手动审批逐个确认，完全访问直接执行 -->
+                            <Popup Grid.Column="0" IsOpen="{Binding IsApprovalPickerOpen, Mode=TwoWay}"
+                                   PlacementTarget="{Binding #ApprovalButton}"
+                                   Placement="TopEdgeAlignedLeft"
+                                   VerticalOffset="-4"
+                                   IsLightDismissEnabled="True">
+                                <Border Width="212"
+                                        Padding="6"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        BoxShadow="0 10 28 0 #80000000">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="命令执行权限"
+                                                   FontSize="11"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,4,8,2" />
+
+                                        <Button Classes="modeItem" Command="{Binding UseManualApprovalCommand}">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="手动审批" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="每次执行命令前询问"
+                                                               FontSize="10.5"
+                                                               Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="✓"
+                                                           FontSize="12"
+                                                           Foreground="#E8879B"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding IsManualApproval}" />
+                                            </Grid>
+                                        </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding UseFullAccessCommand}">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <StackPanel Spacing="1">
+                                                    <TextBlock Text="完全访问" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                    <TextBlock Text="不再询问，直接执行"
+                                                               FontSize="10.5"
+                                                               Foreground="#66FFFFFF" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="✓"
+                                                           FontSize="12"
+                                                           Foreground="#E8879B"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding IsFullAccess}" />
+                                            </Grid>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- 有史以来的 token 用量与缓存命中率 -->
+                <TextBlock Grid.Row="5"
+                           Margin="16,0,16,10"
+                           HorizontalAlignment="Right"
+                           Text="{Binding UsageSummaryText}"
+                           FontSize="10.5"
+                           Foreground="#59FFFFFF" />
+
+                <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
+                <Grid Grid.Row="0" Grid.RowSpan="6"
+                      IsVisible="{Binding IsAddingModel}"
+                      Background="#A6000000">
+                    <Border Width="344"
+                            Padding="18"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#F21B1C22"
+                            BorderBrush="#26FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            BoxShadow="0 14 34 0 #80000000">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="添加模型"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F2FFFFFF" />
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="提供商（可选）" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelProvider, Mode=TwoWay}"
+                                         PlaceholderText="例如：DeepSeek" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="名称" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelName, Mode=TwoWay}"
+                                         PlaceholderText="例如：DeepSeek" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="模型标识" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelModelId, Mode=TwoWay}"
+                                         PlaceholderText="例如：deepseek-chat" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="接口地址" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelBaseUrl, Mode=TwoWay}"
+                                         PlaceholderText="https://api.example.com/v1" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="API 密钥" FontSize="11" Foreground="#8CFFFFFF" />
+                                <TextBox Classes="field"
+                                         Text="{Binding NewModelApiKey, Mode=TwoWay}"
+                                         PasswordChar="●"
+                                         PlaceholderText="可留空" />
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding AddModelError}"
+                                       IsVisible="{Binding HasAddModelError}"
+                                       FontSize="11"
+                                       Foreground="#FF9E9E" />
+
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Spacing="8"
+                                        Margin="0,2,0,0">
+                                <Button Classes="ghost"
+                                        Content="取消"
+                                        Command="{Binding CancelAddModelCommand}" />
+                                <Button Classes="primary"
+                                        Content="添加"
+                                        Command="{Binding ConfirmAddModelCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
 </Window>
