@@ -45,6 +45,9 @@ public partial class ChatWindow : Window
         // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
         InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
+        // 工作区浮层是独立顶层：焦点落在浮层内时窗口收不到 Esc，这里用隧道阶段兜住
+        WorkspacePopupRoot.AddHandler(KeyDownEvent, OnWorkspacePopupKeyDown, RoutingStrategies.Tunnel);
+
         Opened += (_, _) =>
         {
             FocusInput();
@@ -60,6 +63,7 @@ public partial class ChatWindow : Window
         {
             if (e.Key != Key.Escape) return;
             e.Handled = true;
+            if (DataContext is ChatViewModel vm && vm.CloseWorkspaceOverlay()) return;
             Hide();
         };
     }
@@ -149,6 +153,51 @@ public partial class ChatWindow : Window
     private void OnModelListPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (DataContext is ChatViewModel vm) vm.IsModelPickerOpen = false;
+    }
+
+    /// <summary>点击历史工作区条目：立即切换过去并关闭浮层。</summary>
+    private void OnWorkspaceItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: WorkspaceItem workspace } && DataContext is ChatViewModel vm)
+            vm.SwitchWorkspace(workspace);
+    }
+
+    /// <summary>点击条目右侧的删除按钮：先弹二次确认，确认后才移除记录。</summary>
+    private void OnDeleteWorkspaceClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: WorkspaceItem workspace } && DataContext is ChatViewModel vm)
+            vm.RequestDeleteWorkspace(workspace);
+    }
+
+    /// <summary>选择工作区：打开系统目录选择框，选好后加入历史并立即切换。</summary>
+    private async void OnPickWorkspaceClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ChatViewModel vm) return;
+
+        try
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "选择工作区",
+                AllowMultiple = false
+            });
+            if (folders.Count == 0) return;
+
+            vm.UseWorkspace(folders[0].Path.LocalPath);
+        }
+        catch (Exception ex)
+        {
+            // 选择器本身出错（平台对话框异常等）只记录，不能让它冒出去带崩进程
+            Logger.Warning(ex, "pick workspace failed");
+        }
+    }
+
+    /// <summary>浮层内的 Esc：先取消删除确认，再关闭浮层。</summary>
+    private void OnWorkspacePopupKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        if (DataContext is ChatViewModel vm) vm.CloseWorkspaceOverlay();
     }
 
     /// <summary>添加附件：只记录绝对路径，随消息以 @路径 发送，模型可随时自行读取。</summary>

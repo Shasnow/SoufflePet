@@ -589,13 +589,175 @@
                     </Grid>
                 </Border>
 
-                <!-- 有史以来的 token 用量与缓存命中率 -->
-                <TextBlock Grid.Row="5"
-                           Margin="16,0,16,10"
-                           HorizontalAlignment="Right"
-                           Text="{Binding UsageSummaryText}"
-                           FontSize="10.5"
-                           Foreground="#59FFFFFF" />
+                <!-- 底部信息栏：左侧切换工作区，右侧有史以来的 token 用量与缓存命中率 -->
+                <Grid Grid.Row="5"
+                      Margin="16,0,16,10"
+                      ColumnDefinitions="*,Auto">
+                    <Button Name="WorkspaceButton"
+                            Classes="ghost"
+                            HorizontalAlignment="Left"
+                            ToolTip.Tip="切换工作区"
+                            ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6"
+                            Command="{Binding ToggleWorkspacePickerCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Path Data="M0.5,2.5 L5,2.5 L6.8,4.5 L13.5,4.5 L13.5,11 L0.5,11 Z"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.2"
+                                  StrokeJoin="Round"
+                                  VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WorkspaceButtonText}"
+                                       Classes="muted"
+                                       MaxWidth="160"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock Grid.Column="1"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Text="{Binding UsageSummaryText}"
+                               FontSize="10.5"
+                               Foreground="#59FFFFFF" />
+
+                    <!-- 工作区选择浮层：历史工作区列表 + 固定在底部的「选择工作区」入口 -->
+                    <Popup IsOpen="{Binding IsWorkspacePickerOpen, Mode=TwoWay}"
+                           PlacementTarget="{Binding #WorkspaceButton}"
+                           Placement="TopEdgeAlignedLeft"
+                           VerticalOffset="-4"
+                           IsLightDismissEnabled="True">
+                        <Border Name="WorkspacePopupRoot"
+                                Width="272"
+                                Padding="6"
+                                Background="#F21B1C22"
+                                BorderBrush="#26FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                BoxShadow="0 10 28 0 #80000000">
+                            <Panel>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="切换工作区"
+                                               FontSize="11"
+                                               Foreground="#66FFFFFF"
+                                               Margin="8,4,8,2" />
+
+                                    <ScrollViewer MaxHeight="190"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding Workspaces}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Spacing="1" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:WorkspaceItem">
+                                                    <Border Classes="workspaceRow"
+                                                            Classes.active="{Binding IsActive}">
+                                                        <Grid ColumnDefinitions="*,Auto">
+                                                            <Button Classes="ghost"
+                                                                    HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Left"
+                                                                    Padding="8,5"
+                                                                    Click="OnWorkspaceItemClick">
+                                                                <StackPanel Spacing="1">
+                                                                    <TextBlock Text="{Binding Name}"
+                                                                               FontSize="12.5"
+                                                                               Foreground="#F2FFFFFF"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding FullPath}"
+                                                                               FontSize="10.5"
+                                                                               Foreground="#66FFFFFF"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </Button>
+
+                                                            <Button Grid.Column="1"
+                                                                    Classes="ghost"
+                                                                    Width="22"
+                                                                    Height="22"
+                                                                    Padding="0"
+                                                                    Margin="0,0,2,0"
+                                                                    VerticalAlignment="Center"
+                                                                    ToolTip.Tip="删除工作区"
+                                                                    ToolTip.Placement="Top"
+                                                                    ToolTip.VerticalOffset="-6"
+                                                                    Click="OnDeleteWorkspaceClick">
+                                                                <Path Data="M2,3 L12,3 M5,3 L5,1.5 L9,1.5 L9,3 M3.5,3 L4.2,12 L9.8,12 L10.5,3"
+                                                                      Stroke="#8CFFFFFF"
+                                                                      StrokeThickness="1.2"
+                                                                      StrokeLineCap="Round"
+                                                                      StrokeJoin="Round"
+                                                                      HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center" />
+                                                            </Button>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+
+                                    <!-- 空状态：没有任何历史工作区时给出提示 -->
+                                    <TextBlock Text="还没有历史工作区，点击下方按钮选择目录"
+                                               IsVisible="{Binding !HasWorkspaces}"
+                                               Margin="8,6,8,8"
+                                               FontSize="11"
+                                               Foreground="#66FFFFFF"
+                                               TextWrapping="Wrap" />
+
+                                    <Border Height="1" Background="#14FFFFFF" Margin="4,3" />
+
+                                    <Button Classes="ghost"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="8,6"
+                                            Click="OnPickWorkspaceClick">
+                                        <StackPanel Orientation="Horizontal" Spacing="7"
+                                                    VerticalAlignment="Center">
+                                            <Path Data="M0.5,2.5 L5,2.5 L6.8,4.5 L13.5,4.5 L13.5,11 L0.5,11 Z"
+                                                  Stroke="#8CFFFFFF"
+                                                  StrokeThickness="1.2"
+                                                  StrokeJoin="Round"
+                                                  VerticalAlignment="Center" />
+                                            <TextBlock Text="选择工作区…" Classes="muted" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+
+                                <!-- 删除二次确认：覆盖在浮层内容上，确认后才真正移除记录 -->
+                                <Border IsVisible="{Binding IsConfirmingWorkspaceDelete}"
+                                        Background="#F21B1C22"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="删除工作区？"
+                                                   FontSize="12.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#F2FFFFFF" />
+                                        <TextBlock Text="{Binding WorkspaceDeletePrompt}"
+                                                   FontSize="11"
+                                                   LineHeight="17"
+                                                   Foreground="#8CFFFFFF"
+                                                   TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal"
+                                                    HorizontalAlignment="Right"
+                                                    Spacing="8">
+                                            <Button Classes="secondary"
+                                                    Content="取消"
+                                                    Command="{Binding CancelDeleteWorkspaceCommand}" />
+                                            <Button Classes="primary"
+                                                    Content="删除"
+                                                    Command="{Binding ConfirmDeleteWorkspaceCommand}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </Panel>
+                        </Border>
+                    </Popup>
+                </Grid>
 
                 <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
                 <Grid Grid.Row="0" Grid.RowSpan="6"

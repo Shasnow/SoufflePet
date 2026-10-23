@@ -99,6 +99,7 @@ public partial class ChatViewModel : ViewModelBase
             : null;
         _initialized = true;
 
+        InitializeWorkspaces();
         LoadRecentHistory();
     }
 
@@ -205,6 +206,176 @@ public partial class ChatViewModel : ViewModelBase
         if (Attachments.Count == 0) return;
         Attachments.RemoveAt(Attachments.Count - 1);
         AttachmentHint = null;
+    }
+
+    /// <summary>历史工作区列表：条目由设置里的路径还原，增删时同步写回设置。</summary>
+    public ObservableCollection<WorkspaceItem> Workspaces { get; } = [];
+
+    public bool HasWorkspaces => Workspaces.Count > 0;
+
+    /// <summary>当前激活的工作区；null 表示使用应用所在目录。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkspaceButtonText))]
+    public partial WorkspaceItem? ActiveWorkspace { get; set; }
+
+    /// <summary>工作区按钮文案：当前激活工作区的完整名称，没有激活项时提示选择。</summary>
+    public string WorkspaceButtonText => ActiveWorkspace?.Name ?? "选择工作区";
+
+    /// <summary>工作区选择浮层是否展开。</summary>
+    [ObservableProperty]
+    public partial bool IsWorkspacePickerOpen { get; set; }
+
+    /// <summary>等待二次确认删除的工作区；null 表示没有待确认的删除。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WorkspaceDeletePrompt))]
+    public partial WorkspaceItem? PendingDeleteWorkspace { get; set; }
+
+    /// <summary>删除二次确认是否显示。</summary>
+    [ObservableProperty]
+    public partial bool IsConfirmingWorkspaceDelete { get; set; }
+
+    public string WorkspaceDeletePrompt => PendingDeleteWorkspace is { } workspace
+        ? $"「{workspace.Name}」将从工作区历史中移除。\n{workspace.FullPath}"
+        : string.Empty;
+
+    /// <summary>浮层被点击外部关闭时，一并取消未完成的删除确认。</summary>
+    partial void OnIsWorkspacePickerOpenChanged(bool value)
+    {
+        if (value) return;
+        IsConfirmingWorkspaceDelete = false;
+        PendingDeleteWorkspace = null;
+    }
+
+    [RelayCommand]
+    private void ToggleWorkspacePicker() => IsWorkspacePickerOpen = !IsWorkspacePickerOpen;
+
+    /// <summary>切换到某个历史工作区：更新高亮与设置，并关闭浮层。</summary>
+    public void SwitchWorkspace(WorkspaceItem workspace)
+    {
+        SetActiveWorkspace(workspace);
+        IsWorkspacePickerOpen = false;
+    }
+
+    /// <summary>选择目录后加入历史并立即切换过去。</summary>
+    public void UseWorkspace(string path)
+    {
+        if (NormalizePath(path) is not { } full) return;
+
+        var workspace = Workspaces.FirstOrDefault(w =>
+            string.Equals(w.FullPath, full, StringComparison.OrdinalIgnoreCase));
+
+        if (workspace is null)
+        {
+            workspace = new WorkspaceItem(full);
+            Workspaces.Add(workspace);
+            OnPropertyChanged(nameof(HasWorkspaces));
+            SaveWorkspaces();
+        }
+
+        SwitchWorkspace(workspace);
+    }
+
+    /// <summary>点击删除：先弹出二次确认，确认后才真正移除。</summary>
+    public void RequestDeleteWorkspace(WorkspaceItem workspace)
+    {
+        PendingDeleteWorkspace = workspace;
+        IsConfirmingWorkspaceDelete = true;
+    }
+
+    [RelayCommand]
+    private void CancelDeleteWorkspace()
+    {
+        IsConfirmingWorkspaceDelete = false;
+        PendingDeleteWorkspace = null;
+    }
+
+    [RelayCommand]
+    private void ConfirmDeleteWorkspace()
+    {
+        if (PendingDeleteWorkspace is not { } workspace) return;
+
+        var wasActive = ReferenceEquals(workspace, ActiveWorkspace);
+        Workspaces.Remove(workspace);
+        OnPropertyChanged(nameof(HasWorkspaces));
+        CancelDeleteWorkspace();
+        SaveWorkspaces();
+
+        // 删掉当前激活项：回落到应用目录，按钮文案同步更新
+        if (wasActive) SetActiveWorkspace(null);
+    }
+
+    /// <summary>Esc：先取消删除确认，再关闭浮层；都没有时返回 false 交给窗口处理。</summary>
+    public bool CloseWorkspaceOverlay()
+    {
+        if (IsConfirmingWorkspaceDelete)
+        {
+            CancelDeleteWorkspace();
+            return true;
+        }
+
+        if (!IsWorkspacePickerOpen) return false;
+        IsWorkspacePickerOpen = false;
+        return true;
+    }
+
+    /// <summary>还原历史工作区与激活项，并把进程工作目录切到激活工作区（没有时用应用目录）。</summary>
+    private void InitializeWorkspaces()
+    {
+        foreach (var path in _settings.WorkspacePaths)
+        {
+            if (NormalizePath(path) is not { } full) continue;
+            if (Workspaces.Any(w => string.Equals(w.FullPath, full, StringComparison.OrdinalIgnoreCase))) continue;
+            Workspaces.Add(new WorkspaceItem(full));
+        }
+
+        var active = Workspaces.FirstOrDefault(w =>
+            string.Equals(w.FullPath, _settings.ActiveWorkspacePath, StringComparison.OrdinalIgnoreCase));
+        foreach (var workspace in Workspaces) workspace.IsActive = ReferenceEquals(workspace, active);
+        ActiveWorkspace = active;
+        ApplyWorkingDirectory(active?.FullPath);
+    }
+
+    private void SetActiveWorkspace(WorkspaceItem? workspace)
+    {
+        ActiveWorkspace = workspace;
+        foreach (var item in Workspaces) item.IsActive = ReferenceEquals(item, workspace);
+        _settings.ActiveWorkspacePath = workspace?.FullPath ?? string.Empty;
+        ApplyWorkingDirectory(workspace?.FullPath);
+    }
+
+    private void SaveWorkspaces() => _settings.WorkspacePaths = [.. Workspaces.Select(w => w.FullPath)];
+
+    /// <summary>
+    /// 把进程工作目录切到工作区：工具的相对路径、命令执行与 AGENTS.md 读取都以此为准；
+    /// 路径为空时回到应用目录。切换失败只记日志，不影响对话。
+    /// </summary>
+    private static void ApplyWorkingDirectory(string? path)
+    {
+        var target = string.IsNullOrEmpty(path) ? AppContext.BaseDirectory : path;
+
+        try
+        {
+            Directory.SetCurrentDirectory(target);
+            Logger.Debug("working directory switched to {Path}", target);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "switch working directory to {Path} failed", target);
+        }
+    }
+
+    /// <summary>把目录转成完整路径；目录不存在或路径非法时返回 null。</summary>
+    private static string? NormalizePath(string path)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path);
+            return Directory.Exists(full) ? full : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
 
@@ -815,4 +986,27 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     private bool CanSend() => !IsGenerating && (!string.IsNullOrWhiteSpace(Draft) || Attachments.Count > 0);
+}
+
+/// <summary>工作区列表项：展示目录名与完整路径，当前激活项高亮。</summary>
+public sealed partial class WorkspaceItem : ObservableObject
+{
+    public WorkspaceItem(string fullPath)
+    {
+        FullPath = fullPath;
+
+        // 目录名即工作区名称；根目录等取不到最后一段时退回完整路径
+        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        Name = Path.GetFileName(trimmed) is { Length: > 0 } name ? name : fullPath;
+    }
+
+    /// <summary>工作区完整路径。</summary>
+    public string FullPath { get; }
+
+    /// <summary>工作区完整名称（路径最后一段）。</summary>
+    public string Name { get; }
+
+    /// <summary>是否为当前激活的工作区。</summary>
+    [ObservableProperty]
+    public partial bool IsActive { get; set; }
 }

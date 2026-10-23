@@ -57,4 +57,16 @@
     <Style Selector="Border.bubble.approval">
         <Setter Property="BorderBrush" Value="#4DE8879B" />
     </Style>
+
+    <!-- 工作区列表项：整行圆角，当前激活项用强调色底色与描边标记 -->
+    <Style Selector="Border.workspaceRow">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.workspaceRow.active">
+        <Setter Property="Background" Value="#33E8879B" />
+        <Setter Property="BorderBrush" Value="#66E8879B" />
+    </Style>
 </Styles>

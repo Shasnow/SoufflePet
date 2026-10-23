@@ -130,6 +130,14 @@ public partial class SouffleSettings : ObservableObject
     [Description("已停用的技能名称（未列出的技能默认启用；技能自动从应用目录与家目录下的 .agents/skills、.souffle/skills 读取）")]
     public partial List<string> DisabledSkills { get; set; } = [];
 
+    [ObservableProperty]
+    [Description("历史工作区路径列表（对话窗口底部的工作区切换记录，可删除）")]
+    public partial List<string> WorkspacePaths { get; set; } = [];
+
+    [ObservableProperty]
+    [Description("当前激活的工作区路径；为空表示应用所在目录（工具相对路径、命令执行与 AGENTS.md 均以此为准）")]
+    public partial string ActiveWorkspacePath { get; set; } = string.Empty;
+
     [Description("有史以来的对话 token 累计用量（每轮结束后累加，用于界面底部的用量统计）")]
     public ChatUsageTotals ChatUsage { get; set; } = new();
 
