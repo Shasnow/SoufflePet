@@ -538,7 +538,16 @@ public partial class ChatViewModel : ViewModelBase
 
     [ObservableProperty] public partial string NewModelProvider { get; set; } = string.Empty;
 
-    [ObservableProperty] public partial string NewModelName { get; set; } = string.Empty;
+    public string NewModelName
+    {
+        get;
+        set
+        {
+            field = value;
+            AddModelError = null;
+            OnPropertyChanged();
+        }
+    } = string.Empty;
 
     [ObservableProperty] public partial string NewModelModelId { get; set; } = string.Empty;
 
@@ -551,8 +560,6 @@ public partial class ChatViewModel : ViewModelBase
     public partial string? AddModelError { get; set; }
 
     public bool HasAddModelError => !string.IsNullOrEmpty(AddModelError);
-
-    partial void OnNewModelNameChanged(string value) => AddModelError = null;
 
     [RelayCommand]
     private void ToggleModelPicker() => IsModelPickerOpen = !IsModelPickerOpen;
