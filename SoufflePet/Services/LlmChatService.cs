@@ -259,10 +259,25 @@ public sealed class LlmChatService : ILlmChatService
                 .ToList();
 
             if (calls.Count == 0) break;
+
+            // 达到最大轮次：新调用不再执行，但每次都要作为工具结果回给模型，
+            // 由模型自行决定基于已有信息作答还是继续请求（继续请求同样只会拿到这条提示）。
             if (round >= _settings.MaxToolRounds)
             {
-                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, stop requesting", _settings.MaxToolRounds);
-                break;
+                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, reject further calls", _settings.MaxToolRounds);
+
+                messages.AddMessages(response);
+                foreach (var call in calls)
+                {
+                    var arguments = FormatArguments(call.Arguments);
+                    var limitText = $"未执行：本次对话已达到最大工具调用轮次（{_settings.MaxToolRounds} 轮）。";
+
+                    yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
+                    messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, limitText)]));
+                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, limitText);
+                }
+
+                continue;
             }
 
             // 把模型的工具调用消息与本地执行结果接回历史，再请求下一轮
