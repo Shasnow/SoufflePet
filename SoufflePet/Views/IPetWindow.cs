@@ -12,6 +12,9 @@ public interface IPetWindow
     /// <summary>自动表情联动：传表情名切换，传 null 恢复默认（无表情）。</summary>
     void SetExpression(string? name);
 
+    /// <summary>当前正在显示的表情名（null = 默认状态/尚未确定）。</summary>
+    string? CurrentExpression { get; }
+
     /// <summary>目光跟随开关：关闭时视线回正并停止跟随光标。</summary>
     void SetGazeFollow(bool enabled);
 

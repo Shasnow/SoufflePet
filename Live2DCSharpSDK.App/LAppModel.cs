@@ -40,6 +40,9 @@ public class LAppModel : CubismUserModel
 
     public List<string> Motions => new(_motions.Keys);
     public List<string> Expressions => new(_expressions.Keys);
+
+    /// <summary>当前生效的表情名（null = 无表情、处于默认状态）。</summary>
+    public string? CurrentExpression { get; private set; }
     public List<(string, int, float)> Parts
     {
         get
@@ -583,6 +586,7 @@ public class LAppModel : CubismUserModel
 
         if (motion != null)
         {
+            CurrentExpression = expressionID;
             _expressionManager.StartMotionPriority(motion, MotionPriority.PriorityForce);
         }
         else
@@ -621,6 +625,7 @@ public class LAppModel : CubismUserModel
     /// </summary>
     public void ResetExpression()
     {
+        CurrentExpression = null;
         _expressionManager.StopAllMotions();
     }
 

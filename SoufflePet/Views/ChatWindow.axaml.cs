@@ -16,18 +16,18 @@ using ChatMessage = SoufflePet.Models.ChatMessage;
 namespace SoufflePet.Views;
 
 /// <summary>
-/// LLM 对话窗口：窗口属性（透明、无边框、置顶、可缩放）+ 对话面板。
-/// 代码后端只保留无法用绑定的交互——拖动/缩放无边框窗口、Esc/关闭只隐藏、消息区自动滚动。
+/// LLM 对话窗口：窗口属性（透明、无边框、置顶、固定尺寸）+ 对话面板。
+/// 代码后端只保留无法用绑定的交互——拖动无边框窗口、Esc/关闭只隐藏、消息区自动滚动。
 /// </summary>
 public partial class ChatWindow : Window
 {
     /// <summary>关闭按钮/Alt+F4 只隐藏窗口，应用退出时由服务调 CloseForShutdown 真正关闭。</summary>
     private bool _allowClose;
 
-    /// <summary>命中钩子只挂一次：Opened 在每次 Hide/Show 后都会再触发。</summary>
-    private bool _resizeHookAttached;
-
     private ChatViewModel? _viewModel;
+
+    /// <summary>WndProc 钩子只挂一次，避免每次 Opened 重复注册。</summary>
+    private bool _resizeHitTestAttached;
 
     public ChatWindow()
     {
@@ -97,11 +97,10 @@ public partial class ChatWindow : Window
     /// </summary>
     private void AttachResizeHitTest()
     {
-        // Opened 每次呼出窗口都会再次触发，钩子只挂一次，避免回调越叠越多
-        if (_resizeHookAttached || !OperatingSystem.IsWindows()) return;
-
+        // Opened 每次显示都可能触发，重复挂会让同一窗口注册多个回调，这里只挂一次
+        if (_resizeHitTestAttached || !OperatingSystem.IsWindows()) return;
+        _resizeHitTestAttached = true;
         Win32Properties.AddWndProcHookCallback(this, OnWndProcHitTest);
-        _resizeHookAttached = true;
     }
 
     private IntPtr OnWndProcHitTest(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -113,16 +112,10 @@ public partial class ChatWindow : Window
         var screen = new PixelPoint((short)(packed & 0xFFFF), (short)((packed >> 16) & 0xFFFF));
         var point = this.PointToClient(screen);
 
-        // PointToClient 返回物理像素，而 ClientSize 与 ResizeBorderThickness 都是 DIP：
-        // 先把鼠标位置换算成 DIP，否则高缩放下感应区会偏到画面内侧（右侧与底边尤其明显）。
-        var scaling = RenderScaling > 0 ? RenderScaling : 1.0;
-        var x = point.X / scaling;
-        var y = point.Y / scaling;
-
-        var left = x <= ResizeBorderThickness;
-        var right = x >= ClientSize.Width - ResizeBorderThickness;
-        var top = y <= ResizeBorderThickness;
-        var bottom = y >= ClientSize.Height - ResizeBorderThickness;
+        var left = point.X <= ResizeBorderThickness;
+        var right = point.X >= ClientSize.Width - ResizeBorderThickness;
+        var top = point.Y <= ResizeBorderThickness;
+        var bottom = point.Y >= ClientSize.Height - ResizeBorderThickness;
 
         var hit = (left, right, top, bottom) switch
         {

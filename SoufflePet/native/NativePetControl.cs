@@ -175,6 +175,13 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         else _model.SetExpression(name);
     }
 
+    /// <summary>
+    /// 当前正在显示的表情名（null = 默认状态）。模型尚未加载时返回缓存的待设表情，
+    /// 单击轮换、自动联动与工具切换都会经过模型，因此这里始终是实际生效的那个。
+    /// </summary>
+    public string? CurrentExpression =>
+        _model?.CurrentExpression ?? (_hasPendingExpression ? _pendingExpression : null);
+
     /// <summary>目光跟随开关：转发给模型的 EnableFaceTracking；模型加载前先缓存。</summary>
     public void SetGazeFollow(bool enabled)
     {

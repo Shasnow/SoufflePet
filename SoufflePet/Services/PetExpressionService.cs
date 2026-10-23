@@ -68,6 +68,12 @@ public sealed class PetExpressionService
     }
 
     /// <summary>
+    /// 当前窗口实际显示的表情名（null = 默认状态，或窗口还没准备好）。
+    /// 由窗口侧跟踪，自动联动、工具切换与单击轮换的结果都能反映出来。
+    /// </summary>
+    public string? GetCurrentExpression() => _petWindow?.CurrentExpression;
+
+    /// <summary>
     /// 切换表情（空名字表示清除、恢复默认）。名字先按模型声明校验，
     /// 避免 SDK 对未知表情抛 KeyNotFoundException；实际写入切回 UI 线程。
     /// </summary>

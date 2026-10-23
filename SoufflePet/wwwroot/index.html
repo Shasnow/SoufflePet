@@ -367,6 +367,7 @@ async function main() {
       if (em) em.resetExpression();
       curExpr = null;
     }
+    tellHost({ type: 'expression', name: curExpr });   // 回报实际表情，供宿主查询当前表情
   }
 
   // 左键单击模型 -> 轮换表情（按 EXPRESSIONS 顺序循环）

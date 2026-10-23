@@ -299,6 +299,9 @@ public class NativePetWindow : Window, IPetWindow
         _control.SetExpression(name);
     }
 
+    /// <summary>当前表情：取自模型层，包含单击轮换与自动联动切换的结果。</summary>
+    public string? CurrentExpression => _control.CurrentExpression;
+
     /// <summary>托盘菜单：目光跟随开关（关闭时视线回正并停止跟随光标）。</summary>
     public void SetGazeFollow(bool enabled)
     {

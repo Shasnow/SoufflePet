@@ -106,6 +106,10 @@ public sealed class ChatTools
                 "get_expressions",
                 "列出当前 Live2D 模型可用的表情名称。"),
             AIFunctionFactory.Create(
+                GetCurrentExpression,
+                "get_current_expression",
+                "获取此刻正在显示的 Live2D 表情。"),
+            AIFunctionFactory.Create(
                 SetExpression,
                 "set_expression",
                 "切换桌宠的 Live2D 表情。表情名必须是 get_expressions 返回的之一；"
@@ -187,7 +191,7 @@ public sealed class ChatTools
         if (string.IsNullOrWhiteSpace(apiKey))
             return "联网搜索未配置：请在 SoufflePet.json 中填写 WebSearchApiKey（百度千帆 API Key）后重启应用。";
 
-        query = query?.Trim() ?? string.Empty;
+        query = query.Trim();
         if (query.Length == 0) return "搜索关键词不能为空。";
 
         var payload = new Dictionary<string, object?>
@@ -199,10 +203,8 @@ public sealed class ChatTools
         };
         if (!string.IsNullOrWhiteSpace(recency)) payload["search_recency_filter"] = recency.Trim();
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, WebSearchEndpoint)
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
-        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, WebSearchEndpoint);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
 
         using var response = await _httpClientFactory.CreateClient(WebSearchClientName)
@@ -267,6 +269,11 @@ public sealed class ChatTools
             ? $"当前模型 {_settings.ModelName} 没有配置表情。"
             : $"当前模型 {_settings.ModelName} 的可用表情：{string.Join("、", names)}。";
     }
+
+    private string GetCurrentExpression() =>
+        _expressions.GetCurrentExpression() is { Length: > 0 } name
+            ? $"当前表情：「{name}」。"
+            : "当前没有显示表情（默认状态）。";
 
     private Task<string> SetExpression(
         [Description("表情名称，必须是 get_expressions 列出的名字；空字符串表示清除表情、恢复默认")]

@@ -160,6 +160,12 @@ public class WebViewPetWindow : Window, IPetWindow
     /// <summary>当前自动表情状态（页面模型异步加载完成前缓存，ready 后重放）。</summary>
     private string? _autoExpression;
 
+    /// <summary>页面回报的当前实际表情名（含单击轮换的结果，null = 默认状态）。</summary>
+    private volatile string? _currentExpression;
+
+    /// <summary>当前实际表情：以页面回报为准，宿主缓存的自动表情状态可能已被单击轮换覆盖。</summary>
+    public string? CurrentExpression => _currentExpression;
+
     /// <summary>把自动表情状态推给页面（页面未加载完成时 InvokeScript 会抛异常，忽略即可）。</summary>
     private void PushAutoExpression()
     {
@@ -427,6 +433,15 @@ public class WebViewPetWindow : Window, IPetWindow
                 var sharedStarted = doc.RootElement.TryGetProperty("shared", out var s) && s.ValueKind == JsonValueKind.True;
                 Logger.Information("page render pause applied={Paused} appTicker={App} sharedTicker={Shared}",
                     paused.ValueKind == JsonValueKind.True, appStarted, sharedStarted);
+                return;
+            }
+            if (kind == "expression")
+            {
+                // 页面回报当前实际表情（自动联动、清除与单击轮换都会上报）
+                _currentExpression = doc.RootElement.TryGetProperty("name", out var name)
+                                     && name.ValueKind == JsonValueKind.String
+                    ? name.GetString()
+                    : null;
                 return;
             }
             if (kind == "hit")
