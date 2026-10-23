@@ -299,19 +299,19 @@ public sealed class LlmChatService : ILlmChatService
 
                 var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
 
-                // 工具返回 AIContent 集合（截图、read_file 的图片/音频等）：文本作为工具结果，
-                // 媒体内容作为独立用户消息附加，让支持多模态的模型真正看到画面、听到声音。
+                // 工具返回 AIContent 集合（截图、read_file 的图片/音频、MCP 返回的媒体等）：
+                // 文本作为工具结果，媒体内容作为独立用户消息附加，让支持多模态的模型真正看到画面、听到声音。
                 if (result is IEnumerable<AIContent> contents)
                 {
                     var list = contents as IList<AIContent> ?? [.. contents];
                     var text = ExtractText(list);
-                    if (list.OfType<DataContent>().FirstOrDefault() is { } media)
+                    var media = list.OfType<DataContent>().ToList();
+                    if (media.Count > 0)
                     {
                         var summary = text.Length > 0 ? text : "工具返回了媒体内容。";
                         messages.Add(new ChatMessage(ChatRole.Tool,
                             [new FunctionResultContent(call.CallId, summary)]));
-                        messages.Add(new ChatMessage(ChatRole.User,
-                            [new DataContent(media.Data, media.MediaType)]));
+                        messages.Add(new ChatMessage(ChatRole.User, [.. media]));
                         yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, summary);
                         continue;
                     }
@@ -467,16 +467,121 @@ public sealed class LlmChatService : ILlmChatService
     }
 
     /// <summary>
-    /// 把工具结果规整成统一形态：MCP 工具会把 CallToolResult 的 Content 列表映射成 AIContent 集合返回，
-    /// 单个内容块则直接返回一个 AIContent；这里统一包装成集合，其余类型原样返回。
+    /// 把工具结果规整成统一形态：单个内容块包装成集合；MCP 工具返回的 JsonElement
+    /// （序列化的 CallToolResult）解析成 AIContent 集合，其余类型原样返回。
     /// </summary>
     private static object? NormalizeToolResult(object? result) => result switch
     {
         null => null,
         AIContent content => new[] { content },
         IEnumerable<AIContent> contents => contents as IList<AIContent> ?? [.. contents],
+        JsonElement element => ResolveMcpJsonResult(element) ?? result,
         _ => result
     };
+
+    /// <summary>解析 MCP 工具结果；不是 CallToolResult 结构时返回 null（调用方保持原样）。</summary>
+    private static IReadOnlyList<AIContent>? ResolveMcpJsonResult(JsonElement element)
+    {
+        if (ConvertMcpResult(element) is not { } contents) return null;
+        if (contents.Count > 0) return contents;
+
+        // 结构匹配但没解析出可用内容（例如损坏的 base64）：给占位文本，绝不能把原始 JSON 塞进提示词
+        return [new TextContent("工具返回的内容无法解析。")];
+    }
+
+    /// <summary>
+    /// 解析 MCP 工具结果：InvokeAsync 返回的是序列化的 CallToolResult，
+    /// 形如 {"content":[{"type":"text","text":"…"},{"type":"image","data":"base64","mimeType":"image/png"}]}。
+    /// 不解析就会被当普通文本塞进提示词——模型看不到图，还白烧几十万字符的 base64 token。
+    /// 不是这种结构时返回 null，调用方保持原样。
+    /// </summary>
+    private static IReadOnlyList<AIContent>? ConvertMcpResult(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        if (!element.TryGetProperty("content", out var blocks) || blocks.ValueKind != JsonValueKind.Array) return null;
+
+        var contents = new List<AIContent>(blocks.GetArrayLength());
+        foreach (var block in blocks.EnumerateArray()) AppendMcpContent(block, contents);
+        return contents;
+    }
+
+    private static void AppendMcpContent(JsonElement block, List<AIContent> contents)
+    {
+        if (block.ValueKind != JsonValueKind.Object) return;
+
+        var type = GetString(block, "type");
+        switch (type)
+        {
+            case "text":
+                if (GetString(block, "text") is { } text) contents.Add(new TextContent(text));
+                break;
+
+            case "image":
+            case "audio":
+                if (DecodeBase64(GetString(block, "data")) is { } data)
+                {
+                    var mediaType = GetString(block, "mimeType")
+                        ?? (type == "image" ? "image/png" : "audio/wav");
+                    contents.Add(new DataContent(data, mediaType));
+                }
+                break;
+
+            case "resource":
+                if (block.TryGetProperty("resource", out var resource) && resource.ValueKind == JsonValueKind.Object)
+                    AppendMcpResource(resource, contents);
+                break;
+
+            case "resource_link":
+                var uri = GetString(block, "uri");
+                var name = GetString(block, "name") ?? uri;
+                if (name is not null) contents.Add(new TextContent($"资源链接：{name}（{uri}）"));
+                break;
+        }
+    }
+
+    /// <summary>内嵌资源：text 直接作为文本；blob 仅还原图片/音频，其余类型只提示链接，避免 base64 撑爆提示词。</summary>
+    private static void AppendMcpResource(JsonElement resource, List<AIContent> contents)
+    {
+        if (GetString(resource, "text") is { } text)
+        {
+            contents.Add(new TextContent(text));
+            return;
+        }
+
+        var mediaType = GetString(resource, "mimeType");
+        var uri = GetString(resource, "uri");
+        var blob = GetString(resource, "blob");
+
+        if (blob is not null && mediaType is not null
+            && (mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                || mediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            && DecodeBase64(blob) is { } data)
+        {
+            contents.Add(new DataContent(data, mediaType));
+            return;
+        }
+
+        if (uri is not null) contents.Add(new TextContent($"资源：{uri}（{mediaType ?? "未知类型"}，内容未展开）"));
+    }
+
+    private static string? GetString(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static byte[]? DecodeBase64(string? base64)
+    {
+        if (string.IsNullOrWhiteSpace(base64)) return null;
+
+        try
+        {
+            return Convert.FromBase64String(base64);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>把内容集合里的文本块拼成多行文本。</summary>
     private static string ExtractText(IEnumerable<AIContent> contents) =>
