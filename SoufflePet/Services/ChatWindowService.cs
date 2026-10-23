@@ -113,8 +113,11 @@ public sealed class ChatWindowService : IChatWindowService, IDisposable
 
         var wa = screen.WorkingArea;
         var scaling = anchor.RenderScaling > 0 ? anchor.RenderScaling : 1.0;
-        var w = (int)Math.Round(window.Width * scaling);
-        var h = (int)Math.Round(window.Height * scaling);
+        // 窗口可被拖拽改尺寸，Bounds 才是当前实际大小；尚未量出布局时回退到 XAML 里的初始值
+        var widthDip = window.Bounds.Width > 0 ? window.Bounds.Width : window.Width;
+        var heightDip = window.Bounds.Height > 0 ? window.Bounds.Height : window.Height;
+        var w = (int)Math.Round(widthDip * scaling);
+        var h = (int)Math.Round(heightDip * scaling);
         var gap = (int)Math.Round(GapDip * scaling);
         var anchorW = (int)Math.Round(anchor.Bounds.Width * scaling);
         var anchorH = (int)Math.Round(anchor.Bounds.Height * scaling);

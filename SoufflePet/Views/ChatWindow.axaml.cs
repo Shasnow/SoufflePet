@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -15,13 +16,16 @@ using ChatMessage = SoufflePet.Models.ChatMessage;
 namespace SoufflePet.Views;
 
 /// <summary>
-/// LLM 对话窗口：窗口属性（透明、无边框、置顶、固定尺寸）+ 对话面板。
-/// 代码后端只保留无法用绑定的交互——拖动无边框窗口、Esc/关闭只隐藏、消息区自动滚动。
+/// LLM 对话窗口：窗口属性（透明、无边框、置顶、可缩放）+ 对话面板。
+/// 代码后端只保留无法用绑定的交互——拖动/缩放无边框窗口、Esc/关闭只隐藏、消息区自动滚动。
 /// </summary>
 public partial class ChatWindow : Window
 {
     /// <summary>关闭按钮/Alt+F4 只隐藏窗口，应用退出时由服务调 CloseForShutdown 真正关闭。</summary>
     private bool _allowClose;
+
+    /// <summary>命中钩子只挂一次：Opened 在每次 Hide/Show 后都会再触发。</summary>
+    private bool _resizeHookAttached;
 
     private ChatViewModel? _viewModel;
 
@@ -35,7 +39,11 @@ public partial class ChatWindow : Window
         // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
         InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
-        Opened += (_, _) => FocusInput();
+        Opened += (_, _) =>
+        {
+            FocusInput();
+            AttachResizeHitTest();
+        };
         Closing += (_, e) =>
         {
             if (_allowClose) return;
@@ -65,6 +73,74 @@ public partial class ChatWindow : Window
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         BeginMoveDrag(e);
+    }
+
+    /// <summary>窗口最外圈用于缩放的感应宽度（DIP）。</summary>
+    private const double ResizeBorderThickness = 6;
+
+    private const uint WmNcHitTest = 0x0084;
+
+    // WM_NCHITTEST 的返回值，命名与 Win32 的 HT* 常量一致
+    private const int HtLeft = 10;
+    private const int HtRight = 11;
+    private const int HtTop = 12;
+    private const int HtTopLeft = 13;
+    private const int HtTopRight = 14;
+    private const int HtBottom = 15;
+    private const int HtBottomLeft = 16;
+    private const int HtBottomRight = 17;
+
+    /// <summary>
+    /// 把窗口最外圈的命中测试交给系统：在 WM_NCHITTEST 里按鼠标位置返回 HTLEFT/HTTOP…，
+    /// 之后缩放拖拽、鼠标指针形状、Aero Snap 都由 DefWindowProc 处理，
+    /// 不用在界面上盖一圈透明控件抢点击。
+    /// </summary>
+    private void AttachResizeHitTest()
+    {
+        // Opened 每次呼出窗口都会再次触发，钩子只挂一次，避免回调越叠越多
+        if (_resizeHookAttached || !OperatingSystem.IsWindows()) return;
+
+        Win32Properties.AddWndProcHookCallback(this, OnWndProcHitTest);
+        _resizeHookAttached = true;
+    }
+
+    private IntPtr OnWndProcHitTest(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WmNcHitTest) return IntPtr.Zero;
+
+        // lParam 的低/高 16 位是屏幕坐标 x/y（物理像素，多屏时可能为负，按 short 取符号）
+        var packed = lParam.ToInt64();
+        var screen = new PixelPoint((short)(packed & 0xFFFF), (short)((packed >> 16) & 0xFFFF));
+        var point = this.PointToClient(screen);
+
+        // PointToClient 返回物理像素，而 ClientSize 与 ResizeBorderThickness 都是 DIP：
+        // 先把鼠标位置换算成 DIP，否则高缩放下感应区会偏到画面内侧（右侧与底边尤其明显）。
+        var scaling = RenderScaling > 0 ? RenderScaling : 1.0;
+        var x = point.X / scaling;
+        var y = point.Y / scaling;
+
+        var left = x <= ResizeBorderThickness;
+        var right = x >= ClientSize.Width - ResizeBorderThickness;
+        var top = y <= ResizeBorderThickness;
+        var bottom = y >= ClientSize.Height - ResizeBorderThickness;
+
+        var hit = (left, right, top, bottom) switch
+        {
+            (true, _, true, _) => HtTopLeft,
+            (_, true, true, _) => HtTopRight,
+            (true, _, _, true) => HtBottomLeft,
+            (_, true, _, true) => HtBottomRight,
+            (true, _, _, _) => HtLeft,
+            (_, true, _, _) => HtRight,
+            (_, _, true, _) => HtTop,
+            (_, _, _, true) => HtBottom,
+            _ => 0
+        };
+
+        if (hit == 0) return IntPtr.Zero;
+
+        handled = true;
+        return new IntPtr(hit);
     }
 
     /// <summary>关闭按钮只是隐藏窗口，便于热键重新呼出（真正关闭由 CloseForShutdown 负责）。</summary>
