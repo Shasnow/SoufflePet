@@ -124,11 +124,11 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 ReadFile,
                 "read_file",
-                "读取本地文件"),
+                "读取文件内容。支持文本、图片、音频。"),
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
-                "在用户的 Windows 电脑上执行 PowerShell 命令，返回退出码、标准输出和错误输出。"
+                "执行 PowerShell 命令，返回退出码、标准输出和错误输出。"
                 + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
                 + "不要执行格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
             AIFunctionFactory.Create(
