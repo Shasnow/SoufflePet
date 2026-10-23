@@ -131,6 +131,10 @@ public partial class SouffleSettings : ObservableObject
     public partial List<string> DisabledSkills { get; set; } = [];
 
     [ObservableProperty]
+    [Description("已停用的插件 id（未列出的插件默认启用；插件从应用目录 plugins 与家目录 .souffle/plugins 读取）")]
+    public partial List<string> DisabledPlugins { get; set; } = [];
+
+    [ObservableProperty]
     [Description("历史工作区路径列表（对话窗口底部的工作区切换记录，可删除）")]
     public partial List<string> WorkspacePaths { get; set; } = [];
 

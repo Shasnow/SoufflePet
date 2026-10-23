@@ -16,6 +16,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using SoufflePet.Models;
+using SoufflePet.Services.Plugins;
 using SoufflePet.Utils;
 
 namespace SoufflePet.Services;
@@ -76,6 +77,7 @@ public sealed class ChatTools
     private readonly ChatMemory _memory;
     private readonly IMcpToolService _mcp;
     private readonly ISkillService _skills;
+    private readonly IPluginService _plugins;
     private readonly UserQuestionService _questions;
 
     public ChatTools(
@@ -86,6 +88,7 @@ public sealed class ChatTools
         ChatMemory memory,
         IMcpToolService mcp,
         ISkillService skills,
+        IPluginService plugins,
         UserQuestionService questions)
     {
         _settings = settings;
@@ -95,19 +98,18 @@ public sealed class ChatTools
         _memory = memory;
         _mcp = mcp;
         _skills = skills;
+        _plugins = plugins;
         _questions = questions;
         Tools =
         [
             AIFunctionFactory.Create(
                 GetCurrentTime,
                 "get_current_time",
-                "获取当前的本地日期、时间、星期和时区。用户问到现在几点、今天几号、星期几时先调用它，不要凭空推测。"),
+                "获取当前本地日期、时间、星期和时区。"),
             AIFunctionFactory.Create(
                 WebSearch,
                 "web_search",
-                "联网搜索实时信息：返回若干网页的标题、链接和摘要。"
-                + "用户问到新闻、天气、价格、赛事、近期事件，或必须依赖最新外部信息才能回答时调用；"
-                + "常识问题、本地文件与本地信息不要调用。"),
+                "联网搜索实时信息，返回网页标题、链接和摘要。"),
             AIFunctionFactory.Create(
                 GetExpressions,
                 "get_expressions",
@@ -115,22 +117,19 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 GetCurrentExpression,
                 "get_current_expression",
-                "获取此刻正在显示的 Live2D 表情。"),
+                "获取当前显示的 Live2D 表情。"),
             AIFunctionFactory.Create(
                 SetExpression,
                 "set_expression",
-                "切换桌宠的 Live2D 表情。表情名必须是 get_expressions 返回的之一；"
-                + "传空字符串表示清除表情、恢复默认。"),
+                "切换桌宠的 Live2D 表情；空字符串表示恢复默认。"),
             AIFunctionFactory.Create(
                 ReadFile,
                 "read_file",
-                "读取文件内容。支持文本、图片、音频。"),
+                "读取文件内容，支持文本、图片、音频。"),
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
-                "执行 PowerShell 命令，返回退出码、标准输出和错误输出。"
-                + "仅在用户明确要求执行命令/脚本，或必须读取本机信息才能回答时调用；"
-                + "不要执行格式化、修改系统设置等破坏性命令，也不要做与用户请求无关的操作。"),
+                "执行 PowerShell 命令，返回退出码与输出。"),
             AIFunctionFactory.Create(
                 ListWindows,
                 "list_windows",
@@ -138,46 +137,56 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 AskUser,
                 "ask_user",
-                "向用户提问以补全信息：一次可以问多个问题，每个问题给出 2-5 个预设选项（可带一句说明），"
-                + "界面会固定再附带一个「其他」选项。用户回答完所有问题后返回问答结果。"
-                + "当缺少关键信息（喜好、路径、数量、方案选择等）且无法自行推断时使用；"
-                + "能从上下文或工具得到答案的不要问。"),
+                "向用户提问以补全信息：每个问题给 2-5 个预设选项，"
+                + "界面会附带一个「其他」选项；用户全部回答后返回结果。"),
             AIFunctionFactory.Create(
                 TakeScreenshot,
                 "take_screenshot",
-                "截取屏幕画面，图片会直接返回给你查看，同时保存为 PNG 文件。"
-                + "不传 window 时截取光标所在显示器；传 window 时按标题（可只写一部分，不区分大小写）截取该窗口，"
-                + "窗口被遮挡或不在最前也能截到。"),
+                "截取屏幕画面，图片会返回给你，同时保存为 PNG。"
+                + "不传 window 截取光标所在显示器；传 window 按标题截取该窗口（可不完整、不区分大小写，被遮挡也能截）。"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
-                "把值得长期记住的用户信息写入长期记忆（跨会话保留），例如称呼、喜好、常用路径、约定。"
-                + "key 用简短中文词，value 用一句话；同一个 key 再写会覆盖旧值。"),
+                "把用户信息写入长期记忆（跨会话保留）；同一个 key 会覆盖旧值。"),
             AIFunctionFactory.Create(
                 Forget,
                 "forget",
-                "删除长期记忆里的一条记录。用户说「忘掉…」「别再记得…」时调用。"),
+                "删除长期记忆里的一条记录。"),
             AIFunctionFactory.Create(
                 Recall,
                 "recall",
-                "按关键词检索过去的对话记录。用户提到「之前」「上次」「还记得吗」，或需要旧信息才能回答时调用。"),
+                "按关键词检索过去的对话记录。"),
             AIFunctionFactory.Create(
                 ReadSkill,
                 "read_skill",
                 "读取某个技能的完整说明。")
         ];
+        LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
 
     /// <summary>可传给 ChatOptions.Tools 的工具列表。</summary>
     private IReadOnlyList<AITool> Tools { get; }
 
+    /// <summary>本地工具名：插件工具与之重名时由插件服务自动加前缀。</summary>
+    private IReadOnlyCollection<string> LocalToolNames { get; }
+
     /// <summary>
-    /// 本次请求可用的全部工具：本地工具 + 已连接 MCP 服务器的工具（首次调用时连接）。
+    /// 本次请求可用的全部工具：本地工具 + 已启用插件的工具 + 已连接 MCP 服务器的工具（首次调用时连接）。
+    /// 插件或 MCP 失败不影响其余工具。
     /// </summary>
     public async Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken cancellationToken)
     {
+        var pluginTools = await _plugins.GetToolsAsync(LocalToolNames, cancellationToken).ConfigureAwait(false);
         var mcpTools = await _mcp.GetToolsAsync(cancellationToken).ConfigureAwait(false);
-        return mcpTools.Count == 0 ? Tools : [.. Tools, .. mcpTools];
+
+        var tools = new List<AITool>(Tools.Count + pluginTools.Count + mcpTools.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in Tools.Concat(pluginTools).Concat(mcpTools))
+        {
+            if (seen.Add(tool.Name)) tools.Add(tool);
+        }
+
+        return tools;
     }
 
     private static string GetCurrentTime()
@@ -192,9 +201,9 @@ public sealed class ChatTools
     /// 摘要与总量都做截断，避免一次调用把上下文撑爆。
     /// </summary>
     private async Task<string> WebSearch(
-        [Description("搜索关键词，尽量具体；百度侧只取前 72 个字符")]
+        [Description("搜索关键词；百度侧只取前 72 个字符")]
         string query,
-        [Description("可选的时间范围：week 最近7天、month 最近30天、semiyear 最近180天、year 最近365天；不传表示不限时间")]
+        [Description("时间范围：week、month、semiyear、year；不传表示不限")]
         string? recency = null,
         CancellationToken cancellationToken = default)
     {
@@ -287,14 +296,14 @@ public sealed class ChatTools
             : "当前没有显示表情（默认状态）。";
 
     private Task<string> SetExpression(
-        [Description("表情名称，必须是 get_expressions 列出的名字；空字符串表示清除表情、恢复默认")]
+        [Description("表情名称（取自 get_expressions），空字符串表示恢复默认")]
         string? name)
         => _expressions.SetExpressionAsync(name);
 
     private string Remember(
-        [Description("记忆的键，简短中文词，例如「称呼」「常用项目路径」")]
+        [Description("记忆的键，简短词，如「称呼」")]
         string key,
-        [Description("记忆的内容，一句话，例如「主人」")] string value)
+        [Description("记忆的内容，一句话")] string value)
         => _memory.Remember(key, value);
 
     private string Forget(
@@ -302,11 +311,11 @@ public sealed class ChatTools
         => _memory.Forget(key);
 
     private string Recall(
-        [Description("检索关键词，可以是用户问题里的关键词")] string query)
+        [Description("检索关键词")] string query)
         => _memory.Recall(query);
 
     private string ReadSkill(
-        [Description("技能名称，必须是系统提示词中技能清单里的名字")] string name)
+        [Description("技能名称（取自系统提示词的技能清单）")] string name)
     {
         if (_skills.DiscoverEnabled().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
             return $"没有名为「{name}」的可用技能，请从系统提示词的技能清单中选择。";
@@ -325,7 +334,7 @@ public sealed class ChatTools
     /// 停止对话时取消等待，按「用户没有回答」返回。
     /// </summary>
     private async Task<string> AskUser(
-        [Description("要问用户的问题列表，一次可以问多个；每个问题给 2-5 个预设选项")]
+        [Description("问题列表，每个问题给 2-5 个预设选项")]
         AskUserQuestion[]? questions,
         CancellationToken cancellationToken)
     {
@@ -364,11 +373,11 @@ public sealed class ChatTools
     /// 其余二进制文件只回报文件信息，不把乱码塞进提示词。
     /// </summary>
     private static AIContent[] ReadFile(
-        [Description("要读取的文件绝对路径，可带 @ 前缀")]
+        [Description("文件绝对路径，可带 @ 前缀")]
         string path,
-        [Description("文本文件的起始字符位置（从 0 开始），默认 0；图片、音频忽略此参数")]
+        [Description("文本起始字符位置，默认 0")]
         int offset = 0,
-        [Description("本次最多返回的字符数，默认 20000，范围 1-20000；图片、音频忽略此参数")]
+        [Description("最多返回的字符数，默认 20000")]
         int limit = ReadFileMaxChars)
     {
         var target = path.Trim();
@@ -497,7 +506,7 @@ public sealed class ChatTools
     /// 不做 JSON 序列化，对话服务能据此把图片拆出来走多模态通道。
     /// </summary>
     private AIContent[] TakeScreenshot(
-        [Description("要截取的窗口标题，可只写一部分，不区分大小写；不传或传空则截取光标所在显示器")]
+        [Description("窗口标题，可只写一部分；不传则截取光标所在显示器")]
         string? window = null)
     {
         if (!OperatingSystem.IsWindows())
@@ -510,7 +519,9 @@ public sealed class ChatTools
         var label = string.IsNullOrEmpty(target) ? "当前显示器" : $"窗口「{target}」";
         return
         [
-            new TextContent($"已截取{label}画面：{shot.Width}×{shot.Height} 像素，图片已保存到 {shot.FilePath}"),
+            new TextContent(
+                $"已截取{label}：{shot.Width}×{shot.Height} 像素，左上角屏幕坐标 ({shot.ScreenLeft}, {shot.ScreenTop})，"
+                + $"文件 {shot.FilePath}。图片可能被缩小，鼠标坐标需按比例换算后加偏移。"),
             new DataContent(shot.Image, shot.MediaType)
         ];
     }
@@ -529,7 +540,7 @@ public sealed class ChatTools
         {
             var window = windows[i];
             builder.Append(i + 1).Append(". ").Append(window.Title)
-                .Append("（").Append(string.IsNullOrEmpty(window.ProcessName) ? "未知进程" : window.ProcessName).Append('）');
+                .Append('（').Append(string.IsNullOrEmpty(window.ProcessName) ? "未知进程" : window.ProcessName).Append('）');
             if (window.IsMinimized) builder.Append("（已最小化）");
             builder.Append('\n');
         }

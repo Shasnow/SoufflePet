@@ -28,19 +28,32 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="ModelContextProtocol" Version="2.3.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Live2DCSharpSDK.OpenGL\Live2DCSharpSDK.OpenGL.csproj" />
+    <ProjectReference Include="..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Remove="Assets\pet.ico" />
     <AvaloniaResource Include="Assets\pet.ico" />
   </ItemGroup>
+
+  <!-- 若宿主输出目录已有本地调试部署的插件，发布时一并带上；插件工程独立构建，不在解决方案内 -->
+  <Target Name="CopyPluginsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <PluginPublishFile Include="$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\plugins\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PluginPublishFile)"
+          DestinationFiles="@(PluginPublishFile->'$(PublishDir)plugins\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

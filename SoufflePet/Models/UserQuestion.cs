@@ -12,20 +12,20 @@ namespace SoufflePet.Models;
 /// <summary>ask_user 工具的问题参数：模型给出问题正文与预设选项，界面固定再附带一个自由输入项。</summary>
 public sealed class AskUserQuestion
 {
-    [Description("问题正文，一句话，尽量明确")]
+    [Description("问题正文，一句话")]
     public string Question { get; set; } = string.Empty;
 
-    [Description("预设选项，2-5 个；每项是 { text, description }，description 可省略，界面显示为选项下方的小字")]
+    [Description("预设选项，2-5 个；每项 { text, description }，description 可省略")]
     public AskUserOption[]? Options { get; set; }
 }
 
 /// <summary>ask_user 工具的一个预设选项：文本 + 可选说明。</summary>
 public sealed class AskUserOption
 {
-    [Description("选项文本，尽量简短，用”（推荐）“表示推荐此选项")]
+    [Description("选项文本，简短；用「（推荐）」标记推荐项")]
     public string Text { get; set; } = string.Empty;
 
-    [Description("可选的补充说明，一句话；界面上以不加换行的小字显示在选项文本下方")]
+    [Description("可选说明，一句话")]
     public string? Description { get; set; }
 }
 

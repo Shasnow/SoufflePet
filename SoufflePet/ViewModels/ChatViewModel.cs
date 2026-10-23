@@ -51,6 +51,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IMcpSettingsWindowService _mcpSettings;
     private readonly IMcpToolService _mcpTools;
     private readonly ISkillsWindowService _skillsWindow;
+    private readonly IPluginsWindowService _pluginsWindow;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -76,6 +77,7 @@ public partial class ChatViewModel : ViewModelBase
         IMcpSettingsWindowService mcpSettings,
         IMcpToolService mcpTools,
         ISkillsWindowService skillsWindow,
+        IPluginsWindowService pluginsWindow,
         UserQuestionService questions)
     {
         _settings = settings;
@@ -85,6 +87,7 @@ public partial class ChatViewModel : ViewModelBase
         _mcpSettings = mcpSettings;
         _mcpTools = mcpTools;
         _skillsWindow = skillsWindow;
+        _pluginsWindow = pluginsWindow;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
         questions.QuestionAsked += OnQuestionAsked;
@@ -585,6 +588,14 @@ public partial class ChatViewModel : ViewModelBase
     {
         IsMoreOpen = false;
         _skillsWindow.Show();
+    }
+
+    /// <summary>打开插件管理窗口（显示前重新扫描插件目录）。</summary>
+    [RelayCommand]
+    private void OpenPlugins()
+    {
+        IsMoreOpen = false;
+        _pluginsWindow.Show();
     }
 
     [RelayCommand]

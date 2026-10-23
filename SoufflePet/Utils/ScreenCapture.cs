@@ -17,9 +17,11 @@ namespace SoufflePet.Utils;
 
 /// <summary>
 /// 一次显示器截图的结果：<see cref="Image" /> 是压缩后回传给模型的数据（<see cref="MediaType" /> 标明格式），
-/// <see cref="FilePath" /> 指向落盘的完整 PNG，<see cref="Width" />/<see cref="Height" /> 是原始分辨率。
+/// <see cref="FilePath" /> 指向落盘的完整 PNG，<see cref="Width" />/<see cref="Height" /> 是原始分辨率，
+/// <see cref="ScreenLeft" />/<see cref="ScreenTop" /> 是画面左上角在屏幕上的物理像素坐标（供鼠标工具定位）。
 /// </summary>
-public sealed record MonitorScreenshot(byte[] Image, string MediaType, string FilePath, int Width, int Height);
+public sealed record MonitorScreenshot(
+    byte[] Image, string MediaType, string FilePath, int Width, int Height, int ScreenLeft, int ScreenTop);
 
 /// <summary>一个可截图的顶层窗口：<see cref="Handle" /> 为窗口句柄，<see cref="ProcessName" /> 便于模型区分同名窗口。</summary>
 public sealed record WindowTarget(IntPtr Handle, string Title, string ProcessName, bool IsMinimized);
@@ -139,7 +141,7 @@ public static class ScreenCapture
     {
         var bounds = GetCurrentMonitorBounds();
         using var bitmap = CaptureScreen(bounds);
-        return BuildResult(bitmap, "screenshot");
+        return BuildResult(bitmap, "screenshot", bounds.Left, bounds.Top);
     }
 
     /// <summary>按标题（可不完整、不区分大小写）截取一个窗口；内容用 PrintWindow 获取，被遮挡也能截到。</summary>
@@ -175,8 +177,8 @@ public static class ScreenCapture
             }
         }
 
-        using var trimmed = TrimInvisibleBorder(full, target.Handle, windowRect);
-        return BuildResult(trimmed, "window");
+        var (trimmed, left, top) = TrimInvisibleBorder(full, target.Handle, windowRect);
+        using (trimmed) return BuildResult(trimmed, "window", left, top);
     }
 
     /// <summary>列出当前可见的顶层窗口（按 z 序，最上层在前），供模型挑选要截图的窗口。</summary>
@@ -232,24 +234,29 @@ public static class ScreenCapture
         return string.Join("、", names) + (windows.Count > 10 ? " 等" : string.Empty);
     }
 
-    /// <summary>裁掉 Win10/11 窗口四周那圈不可见的缩放边框，只保留实际可见的画面。</summary>
-    private static Bitmap TrimInvisibleBorder(Bitmap full, IntPtr handle, NativeRect windowRect)
+    /// <summary>
+    /// 裁掉 Win10/11 窗口四周那圈不可见的缩放边框，只保留实际可见的画面，
+    /// 同时返回可见画面左上角的屏幕坐标（鼠标工具据此换算点击位置）。
+    /// </summary>
+    private static (Bitmap Bitmap, int Left, int Top) TrimInvisibleBorder(
+        Bitmap full, IntPtr handle, NativeRect windowRect)
     {
+        var windowOrigin = (windowRect.Left, windowRect.Top);
         if (DwmGetWindowAttributeRect(handle, DwmwaExtendedFrameBounds, out var visible, Marshal.SizeOf<NativeRect>()) != 0)
-            return new Bitmap(full);
+            return (new Bitmap(full), windowOrigin.Left, windowOrigin.Top);
 
         // 可见区域不可能比窗口本身大；对不上说明两组坐标的 DPI 空间不一致，此时不裁，免得误切内容
         if (visible.Right - visible.Left > full.Width || visible.Bottom - visible.Top > full.Height)
-            return new Bitmap(full);
+            return (new Bitmap(full), windowOrigin.Left, windowOrigin.Top);
 
         var x = visible.Left - windowRect.Left;
         var y = visible.Top - windowRect.Top;
         var width = Math.Min(visible.Right - visible.Left, full.Width - x);
         var height = Math.Min(visible.Bottom - visible.Top, full.Height - y);
         if (x < 0 || y < 0 || width <= 0 || height <= 0 || (x == 0 && y == 0 && width == full.Width && height == full.Height))
-            return new Bitmap(full);
+            return (new Bitmap(full), windowOrigin.Left, windowOrigin.Top);
 
-        return full.Clone(new Rectangle(x, y, width, height), full.PixelFormat);
+        return (full.Clone(new Rectangle(x, y, width, height), full.PixelFormat), visible.Left, visible.Top);
     }
 
     private static bool IsCloaked(IntPtr handle) =>
@@ -303,7 +310,7 @@ public static class ScreenCapture
     }
 
     /// <summary>落盘完整 PNG，并生成回传模型的压缩图片。</summary>
-    private static MonitorScreenshot BuildResult(Bitmap bitmap, string prefix)
+    private static MonitorScreenshot BuildResult(Bitmap bitmap, string prefix, int screenLeft, int screenTop)
     {
         using var stream = new MemoryStream();
         bitmap.Save(stream, ImageFormat.Png);
@@ -315,7 +322,8 @@ public static class ScreenCapture
         File.WriteAllBytes(path, png);
 
         var (image, mediaType) = EncodeForModel(bitmap);
-        return new MonitorScreenshot(image, mediaType, path, bitmap.Width, bitmap.Height);
+        return new MonitorScreenshot(
+            image, mediaType, path, bitmap.Width, bitmap.Height, screenLeft, screenTop);
     }
 
     /// <summary>

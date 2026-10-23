@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SoufflePet.Plugins.InputKit</RootNamespace>
+    <PluginId>input-kit</PluginId>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- 本地调试默认部署到宿主输出目录；发布或不需要时用 -p:DeployToHost=false 关闭 -->
+    <DeployToHost Condition="'$(DeployToHost)' == '' and '$(Configuration)' == 'Debug'">true</DeployToHost>
+    <PluginStageDir>$(MSBuildProjectDirectory)\obj\plugin-package\</PluginStageDir>
+    <PluginPackagePath>$(MSBuildProjectDirectory)\artifacts\$(PluginId)-$(Version).zip</PluginPackagePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 本地调试：把 dll、pdb 与清单部署到宿主的 plugins/input-kit/ -->
+  <Target Name="DeployToHost" AfterTargets="Build" Condition="'$(DeployToHost)' == 'true'">
+    <ItemGroup>
+      <PluginFile Include="$(TargetDir)SoufflePet.Plugin.InputKit.dll;$(TargetDir)SoufflePet.Plugin.InputKit.pdb;$(TargetDir)plugin.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PluginFile)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\SoufflePet\bin\$(Configuration)\$(TargetFramework)\plugins\$(PluginId)\"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- 独立发布：dotnet publish 后在 artifacts/ 生成可导入插件窗口的 zip 包 -->
+  <Target Name="PackPlugin" AfterTargets="Publish">
+    <ItemGroup>
+      <PluginPackageFile Include="$(PublishDir)SoufflePet.Plugin.InputKit.dll;$(PublishDir)plugin.json" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PluginStageDir)" />
+    <Copy SourceFiles="@(PluginPackageFile)" DestinationFolder="$(PluginStageDir)" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\artifacts" />
+    <ZipDirectory SourceDirectory="$(PluginStageDir)" DestinationFile="$(PluginPackagePath)" Overwrite="true" />
+    <Message Importance="high" Text="插件包已生成：$(PluginPackagePath)" />
+  </Target>
+</Project>

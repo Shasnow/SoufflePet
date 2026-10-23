@@ -652,7 +652,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         if (++_padLogTick >= 600)
         {
             _padLogTick = 0;
-            Logger.Debug(
+            Logger.Verbose(
                 "gamepad write LStick=({Lx:0.00},{Ly:0.00}) RStick=({Rx:0.00},{Ry:0.00}) readback Ly={Read:0.00} src={Src}",
                 _padSmooth[0], _padSmooth[1], _padSmooth[2], _padSmooth[3],
                 m.GetParameterValue("LStickY"), state.HasGamepad ? "xinput" : "kb+mouse");

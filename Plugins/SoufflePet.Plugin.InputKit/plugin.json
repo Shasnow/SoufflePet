@@ -1,0 +1,11 @@
+{
+  "id": "input-kit",
+  "name": "键鼠输入工具",
+  "version": "1.0.0",
+  "author": "SoufflePet",
+  "description": "鼠标点击、拖拽、滚轮与键盘按键、组合键、文本输入",
+  "assembly": "SoufflePet.Plugin.InputKit.dll",
+  "entryType": "SoufflePet.Plugins.InputKit.InputKitPlugin",
+  "timeoutSeconds": 30,
+  "config": {}
+}

@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SoufflePet.ViewModels"
+        x:Class="SoufflePet.Views.PluginsWindow"
+        x:DataType="vm:PluginsViewModel"
+        Title="{Binding WindowTitle}"
+        Width="744"
+        Height="588"
+        CanResize="False"
+        WindowDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        RequestedThemeVariant="Dark">
+    <!-- 内容交给 ViewLocator：DataContext 是 PluginsViewModel 时自动实例化 PluginsView -->
+    <ContentControl Content="{Binding}" />
+</Window>

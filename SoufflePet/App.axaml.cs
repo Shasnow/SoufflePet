@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using SoufflePet.Models;
 using SoufflePet.Services;
+using SoufflePet.Services.Plugins;
 using SoufflePet.Utils;
 using SoufflePet.ViewModels;
 using SoufflePet.Views;
@@ -44,6 +45,8 @@ public class App : Application
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
+            // 插件通过 Microsoft.Extensions.Logging 写日志，由 Serilog 统一落到应用日志
+            services.AddLogging(builder => builder.AddSerilog(Log.Logger, dispose: false));
             services.AddSingleton(SouffleSettings.Load());
             // 联网搜索的 HTTP 客户端：由 IHttpClientFactory 统一管理生命周期与连接池
             services.AddHttpClient(ChatTools.WebSearchClientName,
@@ -62,6 +65,7 @@ public class App : Application
             services.AddSingleton<IMcpToolService, McpToolService>();
             services.AddSingleton(McpToolCache.Load()); // 工具信息缓存：重启后直接展示上次获取的工具
             services.AddSingleton<ISkillService, SkillService>();
+            services.AddSingleton<IPluginService, PluginService>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
@@ -70,6 +74,8 @@ public class App : Application
             services.AddSingleton<IMcpSettingsWindowService, McpSettingsWindowService>();
             services.AddSingleton<SkillsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的技能上
             services.AddSingleton<ISkillsWindowService, SkillsWindowService>();
+            services.AddSingleton<PluginsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的插件上
+            services.AddSingleton<IPluginsWindowService, PluginsWindowService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例

@@ -15,7 +15,6 @@
         WindowStartupLocation="Manual"
         TransparencyLevelHint="Transparent"
         Background="Transparent"
-        Topmost="True"
         ShowInTaskbar="False"
         RequestedThemeVariant="Dark">
     <!-- 深色玻璃面板的外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
@@ -526,6 +525,15 @@
                                                            Foreground="#66FFFFFF" />
                                             </StackPanel>
                                         </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding OpenPluginsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="插件…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="查看、启用或导入本地插件工具"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
                                     </StackPanel>
                                 </Border>
                             </Popup>
@@ -621,7 +629,7 @@
                                Foreground="#59FFFFFF" />
 
                     <!-- 工作区选择浮层：历史工作区列表 + 固定在底部的「选择工作区」入口 -->
-                    <Popup IsOpen="{Binding IsWorkspacePickerOpen, Mode=TwoWay}"
+                    <Popup Grid.Column="0" IsOpen="{Binding IsWorkspacePickerOpen, Mode=TwoWay}"
                            PlacementTarget="{Binding #WorkspaceButton}"
                            Placement="TopEdgeAlignedLeft"
                            VerticalOffset="-4"
