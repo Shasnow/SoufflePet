@@ -30,7 +30,7 @@ public partial class SkillItemViewModel : ObservableObject
 
     public bool HasDescription => Skill.HasDescription;
 
-    /// <summary>技能来源目录（应用目录或家目录下的 .agents/skills、.souffle/skills）。</summary>
+    /// <summary>技能来源目录（当前工作区或家目录下的 .agents/skills、.souffle/skills）。</summary>
     public string Source => Skill.Source;
 
     public string FilePath => Skill.FilePath;

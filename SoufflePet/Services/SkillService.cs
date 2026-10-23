@@ -12,7 +12,7 @@ using SoufflePet.Models;
 
 namespace SoufflePet.Services;
 
-/// <summary>一个技能：应用目录或家目录下 <c>.agents/skills</c>、<c>.souffle/skills</c> 中的说明文档。</summary>
+/// <summary>一个技能：当前工作目录、家目录下 <c>.agents/skills</c> 与 <c>.souffle/skills</c> 中的说明文档。</summary>
 public sealed record SkillInfo(string Name, string Description, string Source, string FilePath)
 {
     public bool HasDescription => Description.Length > 0;
@@ -24,10 +24,13 @@ public readonly record struct SkillInstallResult(bool Success, string Message, s
 /// <summary>扫描并读取技能文档。技能本身无需注册，扫描目录即可发现。</summary>
 public interface ISkillService
 {
-    /// <summary>扫描根目录：应用目录下的 <c>.agents/skills</c>、<c>.souffle/skills</c>，以及家目录下的 <c>.agents/skills</c>。</summary>
+    /// <summary>扫描根目录：当前工作目录下的 <c>.agents/skills</c>、<c>.souffle/skills</c>，以及家目录下的 <c>.agents/skills</c>、<c>.souffle/skills</c>；跟着进程工作目录走，切换工作区后立即生效。</summary>
     IReadOnlyList<string> SearchDirectories { get; }
 
-    /// <summary>目录在界面上展示用的标签：应用目录内给相对路径，家目录等外部目录用 <c>~/</c> 开头。</summary>
+    /// <summary>技能安装目录：固定为用户家目录下的 <c>.souffle/skills</c>，不随工作区变化。</summary>
+    string InstallDirectory { get; }
+
+    /// <summary>目录在界面上展示用的标签：工作目录内给相对路径，家目录等外部目录用 <c>~/</c> 开头。</summary>
     string DescribeDirectory(string directory);
 
     /// <summary>列出全部技能（同名只保留先扫描到的）。目录不存在或文件解析失败只记日志。</summary>
@@ -48,10 +51,7 @@ public interface ISkillService
     /// <summary>读取技能正文（去掉 YAML frontmatter）；文件不存在时返回空字符串。</summary>
     string ReadContent(SkillInfo skill);
 
-    /// <summary>
-    /// 从压缩包安装技能：包内需包含 SKILL.md（可位于一级子目录中），
-    /// 解压到技能目录下以技能名命名的子目录，同名目录会被覆盖。返回安装结果。
-    /// </summary>
+    /// <summary>从压缩包安装技能：解压到家目录下的 <c>.souffle/skills</c>，与工作区无关。返回安装结果。</summary>
     SkillInstallResult Install(string archivePath);
 }
 
@@ -63,12 +63,28 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
 {
     private static readonly ILogger Logger = Log.ForContext<SkillService>();
 
-    public IReadOnlyList<string> SearchDirectories { get; } =
-    [
-        Path.Combine(AppContext.BaseDirectory, ".agents", "skills"),
-        Path.Combine(AppContext.BaseDirectory, ".souffle", "skills"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agents", "skills")
-    ];
+    public IReadOnlyList<string> SearchDirectories
+    {
+        get
+        {
+            // 每次取当前工作目录：工作区切换后技能目录要跟着走，不能构造时算完就固定
+            var current = Environment.CurrentDirectory;
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            List<string> directories =
+            [
+                Path.Combine(current, ".agents", "skills"),
+                Path.Combine(current, ".souffle", "skills"),
+                Path.Combine(home, ".agents", "skills"),
+                InstallDirectory
+            ];
+
+            return [.. directories.Distinct(StringComparer.OrdinalIgnoreCase)];
+        }
+    }
+
+    public string InstallDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".souffle", "skills");
 
     public IReadOnlyList<SkillInfo> Discover()
     {
@@ -159,7 +175,8 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
             var prefix = entry.FullName[..^entry.Name.Length]; // 形如 "my-skill/"，根目录时为空串
             var folder = ResolveFolderName(entry, prefix, archivePath);
 
-            var target = Path.Combine(SearchDirectories[0], folder);
+            // 安装固定落在用户级目录：不随工作区切换而变，换项目也能用
+            var target = Path.Combine(InstallDirectory, folder);
             var existed = Directory.Exists(target);
             Directory.CreateDirectory(target);
 
@@ -240,20 +257,25 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
         path.StartsWith("__MACOSX/", StringComparison.OrdinalIgnoreCase)
         || path.Split('/').Any(part => part.StartsWith('.'));
 
-    /// <summary>技能目录在界面上的标签：应用目录内用相对路径，家目录等外部目录用 ~ 开头。</summary>
+    /// <summary>技能目录在界面上的标签：工作目录内用相对路径，家目录用 ~ 开头，其余给绝对路径。</summary>
     public string DescribeDirectory(string directory)
     {
-        var relative = Path.GetRelativePath(AppContext.BaseDirectory, directory);
+        if (RelativeWithin(Environment.CurrentDirectory, directory) is { } fromCurrent) return fromCurrent;
 
-        // 不同盘符时 GetRelativePath 会直接返回绝对路径，这种情况交给下面的家目录分支处理
-        if (!Path.IsPathRooted(relative) && !relative.StartsWith("..", StringComparison.Ordinal))
-            return relative.Replace('\\', '/');
+        if (RelativeWithin(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), directory) is { } fromHome)
+            return $"~/{fromHome}";
 
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var fromHome = Path.GetRelativePath(home, directory);
-        return !Path.IsPathRooted(fromHome) && !fromHome.StartsWith("..", StringComparison.Ordinal)
-            ? $"~/{fromHome.Replace('\\', '/')}"
-            : directory.Replace('\\', '/');
+        return directory.Replace('\\', '/');
+    }
+
+    /// <summary>directory 位于 baseDirectory 内时返回斜杠形式的相对路径，否则返回 null（跨盘符也算在外）。</summary>
+    private static string? RelativeWithin(string baseDirectory, string directory)
+    {
+        var relative = Path.GetRelativePath(baseDirectory, directory);
+
+        // 不同盘符时 GetRelativePath 会直接返回绝对路径
+        if (Path.IsPathRooted(relative) || relative.StartsWith("..", StringComparison.Ordinal)) return null;
+        return relative.Replace('\\', '/');
     }
 
     /// <summary>取技能目录下的 SKILL.md（文件名忽略大小写）。</summary>

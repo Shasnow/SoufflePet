@@ -80,6 +80,9 @@ public partial class SkillsViewModel : ViewModelBase
         }
 
         SelectedSkill = Skills.FirstOrDefault(s => s.Name == selectedName) ?? Skills.FirstOrDefault();
+
+        // 工作区可能已经切走，提示行里的扫描目录要跟着刷新
+        OnPropertyChanged(nameof(SearchHint));
         UpdateStatus();
     }
 
@@ -101,13 +104,14 @@ public partial class SkillsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>在资源管理器中打开技能目录；两个目录都不存在时打开应用目录。</summary>
+    /// <summary>在资源管理器中打开技能目录；都不存在时打开（并创建）安装目录。</summary>
     [RelayCommand]
     private void OpenFolder()
     {
-        var target = _skills.SearchDirectories.FirstOrDefault(Directory.Exists) ?? AppContext.BaseDirectory;
+        var target = _skills.SearchDirectories.FirstOrDefault(Directory.Exists) ?? _skills.InstallDirectory;
         try
         {
+            Directory.CreateDirectory(target);
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
         }
         catch (Exception ex)

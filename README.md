@@ -66,10 +66,10 @@
 
 技能是模型按需读取的说明文档，放在 `.agents/skills/<技能名>/SKILL.md` 或 `.agents/skills/<技能名>.md`。扫描目录：
 
-- 应用目录下的 `.agents/skills`、`.souffle/skills`
-- 用户家目录下的 `.agents/skills`
+- 当前工作区（对话窗口底部可切换）下的 `.agents/skills`、`.souffle/skills`
+- 用户家目录下的 `.agents/skills`、`.souffle/skills`
 
-已启用的技能会以清单形式注入系统提示词，模型需要时用 `read_skill` 取正文；`DisabledSkills` 记录被停用的技能。设置界面支持从 zip 压缩包安装技能。
+已启用的技能会以清单形式注入系统提示词，模型需要时用 `read_skill` 取正文；`DisabledSkills` 记录被停用的技能。设置界面支持从 zip 压缩包安装技能，安装位置固定为用户家目录下的 `.souffle/skills`，不随工作区变化。
 
 ### 长期记忆
 
