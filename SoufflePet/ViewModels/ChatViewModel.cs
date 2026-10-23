@@ -49,6 +49,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ChatToolAccess _toolAccess;
     private readonly ChatMemory _memory;
     private readonly IMcpSettingsWindowService _mcpSettings;
+    private readonly IMcpToolService _mcpTools;
     private readonly ISkillsWindowService _skillsWindow;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
@@ -73,6 +74,7 @@ public partial class ChatViewModel : ViewModelBase
         ChatToolAccess toolAccess,
         ChatMemory memory,
         IMcpSettingsWindowService mcpSettings,
+        IMcpToolService mcpTools,
         ISkillsWindowService skillsWindow,
         UserQuestionService questions)
     {
@@ -81,6 +83,7 @@ public partial class ChatViewModel : ViewModelBase
         _toolAccess = toolAccess;
         _memory = memory;
         _mcpSettings = mcpSettings;
+        _mcpTools = mcpTools;
         _skillsWindow = skillsWindow;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
@@ -216,10 +219,16 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>当前激活的工作区；null 表示使用应用所在目录。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WorkspaceButtonText))]
+    [NotifyPropertyChangedFor(nameof(WorkspaceToolTip))]
     public partial WorkspaceItem? ActiveWorkspace { get; set; }
 
     /// <summary>工作区按钮文案：当前激活工作区的完整名称，没有激活项时提示选择。</summary>
     public string WorkspaceButtonText => ActiveWorkspace?.Name ?? "选择工作区";
+
+    /// <summary>工作区按钮的悬浮提示：带上完整路径，便于区分同名目录。</summary>
+    public string WorkspaceToolTip => ActiveWorkspace is { } workspace
+        ? $"切换工作区\n{workspace.FullPath}"
+        : "选择工作区（工具相对路径、命令执行与 AGENTS.md 以此目录为准）";
 
     /// <summary>工作区选择浮层是否展开。</summary>
     [ObservableProperty]
@@ -249,10 +258,10 @@ public partial class ChatViewModel : ViewModelBase
     [RelayCommand]
     private void ToggleWorkspacePicker() => IsWorkspacePickerOpen = !IsWorkspacePickerOpen;
 
-    /// <summary>切换到某个历史工作区：更新高亮与设置，并关闭浮层。</summary>
+    /// <summary>切换到某个历史工作区：更新高亮与设置，并关闭浮层；切换失败时保持原状态。</summary>
     public void SwitchWorkspace(WorkspaceItem workspace)
     {
-        SetActiveWorkspace(workspace);
+        if (!SetActiveWorkspace(workspace)) return;
         IsWorkspacePickerOpen = false;
     }
 
@@ -330,26 +339,61 @@ public partial class ChatViewModel : ViewModelBase
 
         var active = Workspaces.FirstOrDefault(w =>
             string.Equals(w.FullPath, _settings.ActiveWorkspacePath, StringComparison.OrdinalIgnoreCase));
+
+        // 还原失败（目录已失效或无法进入）：清掉激活路径并回落到应用目录，避免每次启动都撞同一个错
+        if (active is not null && !ApplyWorkingDirectory(active.FullPath))
+        {
+            _settings.ActiveWorkspacePath = string.Empty;
+            active = null;
+        }
+
+        if (active is null) ApplyWorkingDirectory(null);
+
         foreach (var workspace in Workspaces) workspace.IsActive = ReferenceEquals(workspace, active);
         ActiveWorkspace = active;
-        ApplyWorkingDirectory(active?.FullPath);
     }
 
-    private void SetActiveWorkspace(WorkspaceItem? workspace)
+    /// <summary>设置激活工作区；进程工作目录切换失败时保持原状态并返回 false。</summary>
+    private bool SetActiveWorkspace(WorkspaceItem? workspace)
     {
+        if (!ApplyWorkingDirectory(workspace?.FullPath)) return false;
+
         ActiveWorkspace = workspace;
         foreach (var item in Workspaces) item.IsActive = ReferenceEquals(item, workspace);
         _settings.ActiveWorkspacePath = workspace?.FullPath ?? string.Empty;
-        ApplyWorkingDirectory(workspace?.FullPath);
+
+        // 工作目录变了：WorkingDirectory 留空的 MCP server 还跑在旧目录里，重连一次让它们跟上
+        if (HasCwdDependentMcpServer()) _ = ResetMcpConnectionsAsync();
+
+        return true;
     }
 
     private void SaveWorkspaces() => _settings.WorkspacePaths = [.. Workspaces.Select(w => w.FullPath)];
 
+    /// <summary>是否存在依赖当前工作目录的 MCP server（stdio 且未显式配置工作目录）。</summary>
+    private bool HasCwdDependentMcpServer() => _settings.McpServers.Any(server =>
+        server.Enabled
+        && server.Transport == McpTransportType.Stdio
+        && string.IsNullOrWhiteSpace(server.WorkingDirectory));
+
+    /// <summary>重连 MCP server，让它们的默认工作目录跟随新的工作区；失败只记日志，不影响对话。</summary>
+    private async Task ResetMcpConnectionsAsync()
+    {
+        try
+        {
+            await _mcpTools.ResetAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "reset MCP connections after workspace switch failed");
+        }
+    }
+
     /// <summary>
     /// 把进程工作目录切到工作区：工具的相对路径、命令执行与 AGENTS.md 读取都以此为准；
-    /// 路径为空时回到应用目录。切换失败只记日志，不影响对话。
+    /// 路径为空时回到应用目录。切换失败只记日志并返回 false，由调用方决定是否回退状态。
     /// </summary>
-    private static void ApplyWorkingDirectory(string? path)
+    private static bool ApplyWorkingDirectory(string? path)
     {
         var target = string.IsNullOrEmpty(path) ? AppContext.BaseDirectory : path;
 
@@ -357,10 +401,12 @@ public partial class ChatViewModel : ViewModelBase
         {
             Directory.SetCurrentDirectory(target);
             Logger.Debug("working directory switched to {Path}", target);
+            return true;
         }
         catch (Exception ex)
         {
             Logger.Warning(ex, "switch working directory to {Path} failed", target);
+            return false;
         }
     }
 

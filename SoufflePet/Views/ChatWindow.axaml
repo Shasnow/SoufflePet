@@ -596,7 +596,7 @@
                     <Button Name="WorkspaceButton"
                             Classes="ghost"
                             HorizontalAlignment="Left"
-                            ToolTip.Tip="切换工作区"
+                            ToolTip.Tip="{Binding WorkspaceToolTip}"
                             ToolTip.Placement="Top"
                             ToolTip.VerticalOffset="-6"
                             Command="{Binding ToggleWorkspacePickerCommand}">
