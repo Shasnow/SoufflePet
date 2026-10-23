@@ -250,8 +250,8 @@
                                                   IsVisible="{Binding IsReasoning}"
                                                   IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
                                                   Header="{Binding ReasoningHeader}">
-                                            <TextBlock Text="{Binding Text}"
-                                                       TextWrapping="Wrap" />
+                                            <SelectableTextBlock Text="{Binding Text}"
+                                                                 TextWrapping="Wrap" />
                                         </Expander>
 
                                         <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果 -->
@@ -262,11 +262,11 @@
                                                 <TextBlock Text="{Binding ToolHeader}"
                                                            TextTrimming="CharacterEllipsis" />
                                             </Expander.Header>
-                                            <TextBlock Text="{Binding ToolBody}"
-                                                       TextWrapping="Wrap" />
+                                            <SelectableTextBlock Text="{Binding ToolBody}"
+                                                                 TextWrapping="Wrap" />
                                         </Expander>
 
-                                        <TextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
+                                        <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
 
                                         <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
                                         <TextBlock Text="{Binding UsageText}"
@@ -301,9 +301,61 @@
                         Background="#0FFFFFFF"
                         BorderBrush="#22FFFFFF"
                         BorderThickness="1">
-                    <Grid RowDefinitions="Auto,Auto">
+                    <Grid RowDefinitions="Auto,Auto,Auto">
+                        <!-- 待发送的附件：只记绝对路径，发送时以 @路径 附加到消息里 -->
+                        <StackPanel Grid.Row="0" Spacing="4">
+                            <ItemsControl ItemsSource="{Binding Attachments}"
+                                          IsVisible="{Binding HasAttachments}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:ChatAttachment">
+                                        <Border Background="#1FFFFFFF"
+                                                CornerRadius="6"
+                                                Padding="6,2"
+                                                Margin="0,0,4,4">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <TextBlock Text="{Binding FileName}"
+                                                           MaxWidth="170"
+                                                           FontSize="10.5"
+                                                           Foreground="#D9FFFFFF"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"
+                                                           ToolTip.Tip="{Binding FullPath}"
+                                                           ToolTip.Placement="Top" />
+                                                <Button Classes="ghost"
+                                                        Width="14"
+                                                        Height="14"
+                                                        Padding="0"
+                                                        ToolTip.Tip="移除附件"
+                                                        ToolTip.Placement="Top"
+                                                        Click="OnRemoveAttachmentClick">
+                                                    <Path Data="M0,0 L6,6 M6,0 L0,6"
+                                                          Stroke="#8CFFFFFF"
+                                                          StrokeThickness="1.2"
+                                                          StrokeLineCap="Round"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="{Binding AttachmentHint}"
+                                       IsVisible="{Binding HasAttachmentHint}"
+                                       FontSize="10.5"
+                                       Foreground="#FF9E9E"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
                         <!-- 外观交给 .bare 样式覆盖主题底色，并去掉聚焦时的蓝色装饰层 -->
-                        <TextBox Name="InputBox"
+                        <TextBox Grid.Row="1"
+                                 Name="InputBox"
                                  Classes="bare"
                                  Text="{Binding Draft, Mode=TwoWay}"
                                  AcceptsReturn="True"
@@ -319,7 +371,7 @@
                                  MaxHeight="132" />
 
                         <!-- 左侧操作项允许收缩裁剪，发送按钮固定在右侧，永远不会被顶出窗口 -->
-                        <Grid Grid.Row="1" Margin="0,6,0,0" ColumnDefinitions="*,Auto">
+                        <Grid Grid.Row="2" Margin="0,6,0,0" ColumnDefinitions="*,Auto">
                             <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
                                 <Button Name="MoreButton"
                                         Classes="ghost"
@@ -428,7 +480,7 @@
                                 </Border>
                             </Popup>
 
-                            <!-- 更多操作浮层：MCP 服务器与技能配置入口 -->
+                            <!-- 更多操作浮层：添加附件、MCP 服务器与技能配置入口 -->
                             <Popup Grid.Column="0" IsOpen="{Binding IsMoreOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding #MoreButton}"
                                    Placement="TopEdgeAlignedLeft"
@@ -446,6 +498,16 @@
                                                    FontSize="11"
                                                    Foreground="#66FFFFFF"
                                                    Margin="8,4,8,2" />
+
+                                        <Button Classes="modeItem" Click="OnAttachClick">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="添加附件…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="所有附件只附带 @绝对路径，模型可随时读取"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Button>
 
                                         <Button Classes="modeItem" Command="{Binding OpenMcpSettingsCommand}">
                                             <StackPanel Spacing="1">

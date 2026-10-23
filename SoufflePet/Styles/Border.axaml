@@ -14,13 +14,14 @@
         <Setter Property="CornerRadius" Value="12,12,4,12" />
         <Setter Property="HorizontalAlignment" Value="Right" />
     </Style>
-    <Style Selector="Border.bubble TextBlock">
+    <!-- 气泡内文本统一用 :is(TextBlock)，同时覆盖可复制的 SelectableTextBlock -->
+    <Style Selector="Border.bubble :is(TextBlock)">
         <Setter Property="TextWrapping" Value="Wrap" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="LineHeight" Value="20" />
         <Setter Property="Foreground" Value="#F2FFFFFF" />
     </Style>
-    <Style Selector="Border.bubble.user TextBlock">
+    <Style Selector="Border.bubble.user :is(TextBlock)">
         <Setter Property="Foreground" Value="#2A141B" />
     </Style>
 
@@ -32,7 +33,7 @@
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="Padding" Value="9,6" />
     </Style>
-    <Style Selector="Border.bubble.tool TextBlock">
+    <Style Selector="Border.bubble.tool :is(TextBlock)">
         <Setter Property="FontSize" Value="11.5" />
         <Setter Property="LineHeight" Value="17" />
         <Setter Property="Foreground" Value="#99FFFFFF" />
@@ -46,7 +47,7 @@
         <Setter Property="CornerRadius" Value="2" />
         <Setter Property="Padding" Value="9,1,0,3" />
     </Style>
-    <Style Selector="Border.bubble.thinking TextBlock">
+    <Style Selector="Border.bubble.thinking :is(TextBlock)">
         <Setter Property="FontSize" Value="11.5" />
         <Setter Property="LineHeight" Value="17" />
         <Setter Property="Foreground" Value="#80FFFFFF" />

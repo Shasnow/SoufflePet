@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -40,6 +41,12 @@ public sealed class ChatTools
     /// 管道写端仍被其持有，EOF 永远不会到来，只能收完已缓冲的输出就返回。
     /// </summary>
     private static readonly TimeSpan OutputDrainTimeout = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>媒体文件（图片/音频）读入内存的最大字节数，超出只回报文件信息、不读内容。</summary>
+    private const long ReadFileMaxBytes = 20L * 1024 * 1024;
+
+    /// <summary>文本文件回传给模型的最大字符数，超出截断。</summary>
+    private const int ReadFileMaxChars = 20_000;
 
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8000;
@@ -114,6 +121,10 @@ public sealed class ChatTools
                 "set_expression",
                 "切换桌宠的 Live2D 表情。表情名必须是 get_expressions 返回的之一；"
                 + "传空字符串表示清除表情、恢复默认。"),
+            AIFunctionFactory.Create(
+                ReadFile,
+                "read_file",
+                "读取本地文件"),
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
@@ -346,6 +357,140 @@ public sealed class ChatTools
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// 读取本地文件并按类型返回合适的内容：文本走文本通道（支持 offset/limit 分段读取）；
+    /// 图片、音频作为 DataContent 返回，由对话服务拆成多模态内容，避免二进制被当成普通文本。
+    /// 其余二进制文件只回报文件信息，不把乱码塞进提示词。
+    /// </summary>
+    private static AIContent[] ReadFile(
+        [Description("要读取的文件绝对路径，可带 @ 前缀")]
+        string path,
+        [Description("文本文件的起始字符位置（从 0 开始），默认 0；图片、音频忽略此参数")]
+        int offset = 0,
+        [Description("本次最多返回的字符数，默认 20000，范围 1-20000；图片、音频忽略此参数")]
+        int limit = ReadFileMaxChars)
+    {
+        var target = path.Trim();
+        if (target.StartsWith('@')) target = target[1..].Trim().Trim('"');
+
+        if (target.Length == 0) return [new TextContent("文件路径不能为空。")];
+        if (Directory.Exists(target)) return [new TextContent($"「{target}」是目录，不能按文件读取。")];
+
+        var info = new FileInfo(target);
+        if (!info.Exists) return [new TextContent($"文件不存在：{target}")];
+
+        var mediaType = GetReadableMediaType(info.Extension);
+        if (mediaType is not null)
+        {
+            // 媒体文件要整份读入内存，过大直接拒绝
+            if (info.Length > ReadFileMaxBytes)
+                return [new TextContent($"文件「{info.Name}」大小为 {FormatSize(info.Length)}，超过 {FormatSize(ReadFileMaxBytes)} 的读取上限，未读取。")];
+
+            var data = File.ReadAllBytes(info.FullName);
+            return
+            [
+                new TextContent($"已读取{DescribeMedia(mediaType)}「{info.Name}」（{FormatSize(info.Length)}）。"),
+                new DataContent(data, mediaType)
+            ];
+        }
+
+        if (GetVideoMediaType(info.Extension) is { } videoType)
+            return [new TextContent($"「{info.Name}」是视频（{FormatSize(info.Length)}，{videoType}），无法直接作为内容读取；"
+                + "如需分析，可用 run_shell_command 配合 ffmpeg 抽取关键帧或音频，再读取生成的文件。")];
+
+        offset = Math.Max(offset, 0);
+        limit = Math.Clamp(limit, 1, ReadFileMaxChars);
+        var start = offset;
+
+        // 文本按分段流式读取：跳过 offset 个字符，再多读一个字符用于判断是否还有后续内容
+        var builder = new StringBuilder();
+        bool hasMore;
+        try
+        {
+            using var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true);
+
+            var buffer = new char[4096];
+            var skip = start;
+            while (skip > 0)
+            {
+                var read = reader.Read(buffer, 0, Math.Min(buffer.Length, skip));
+                if (read <= 0) break;
+                skip -= read;
+            }
+
+            while (builder.Length <= limit)
+            {
+                var read = reader.Read(buffer, 0, Math.Min(buffer.Length, limit + 1 - builder.Length));
+                if (read <= 0) break;
+                builder.Append(buffer, 0, read);
+            }
+
+            hasMore = builder.Length > limit;
+            if (hasMore) builder.Length = limit;
+        }
+        catch (DecoderFallbackException)
+        {
+            return [new TextContent($"「{info.Name}」是二进制文件（{FormatSize(info.Length)}），无法按文本读取。")];
+        }
+
+        if (builder.ToString().Contains('\0'))
+            return [new TextContent($"「{info.Name}」是二进制文件（{FormatSize(info.Length)}），无法按文本读取。")];
+
+        if (builder.Length == 0)
+            return [new TextContent($"已到文件末尾：「{info.Name}」共 {FormatSize(info.Length)}，起始位置 {start} 之后没有内容。")];
+
+        var header = start == 0
+            ? $"文件 {info.FullName}（{FormatSize(info.Length)}）："
+            : $"文件 {info.FullName}（{FormatSize(info.Length)}，从第 {start} 个字符开始）：";
+        if (hasMore)
+            builder.Append($"\n…（已截断，本次返回 {limit} 字符；可传 offset={start + limit} 继续读取）");
+
+        return [new TextContent($"{header}\n{builder}")];
+    }
+
+    /// <summary>可转成多模态内容直接交给模型的媒体类型（图片、音频）；其他返回 null。</summary>
+    private static string? GetReadableMediaType(string extension) => extension.ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        ".mp3" => "audio/mpeg",
+        ".wav" => "audio/wav",
+        ".m4a" => "audio/mp4",
+        ".aac" => "audio/aac",
+        ".ogg" or ".oga" => "audio/ogg",
+        ".flac" => "audio/flac",
+        _ => null
+    };
+
+    /// <summary>视频没有通用的多模态通道，只用于给出提示。</summary>
+    private static string? GetVideoMediaType(string extension) => extension.ToLowerInvariant() switch
+    {
+        ".mp4" => "video/mp4",
+        ".webm" => "video/webm",
+        ".mov" => "video/quicktime",
+        ".avi" => "video/x-msvideo",
+        ".mkv" => "video/x-matroska",
+        _ => null
+    };
+
+    private static string DescribeMedia(string mediaType) => mediaType.Split('/')[0] switch
+    {
+        "image" => "图片",
+        "audio" => "音频",
+        _ => "文件"
+    };
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / 1024d / 1024d:0.#} MB",
+        >= 1024 => $"{bytes / 1024d:0.#} KB",
+        _ => $"{bytes} 字节"
+    };
 
     /// <summary>
     /// 截图结果直接以 AIContent 集合返回：AIFunctionFactory 对可赋值给 IEnumerable&lt;T&gt; 的声明类型

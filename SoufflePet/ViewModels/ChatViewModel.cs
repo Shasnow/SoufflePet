@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -79,6 +80,13 @@ public partial class ChatViewModel : ViewModelBase
         toolAccess.ApprovalRequested += OnApprovalRequested;
         questions.QuestionAsked += OnQuestionAsked;
 
+        // 附件区的显隐与发送按钮的可用性都取决于附件数量
+        Attachments.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasAttachments));
+            SendCommand.NotifyCanExecuteChanged();
+        };
+
         // 首次启动列表为空且没有已保存的模型名，此时保持未选中状态。
         SelectedModel = settings.ChatModelName is { Length: > 0 } name
             ? Models.FirstOrDefault(m => m.Name == name)
@@ -128,6 +136,71 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     public partial string Draft { get; set; } = string.Empty;
+
+    /// <summary>待随下一条消息发送的附件：只记绝对路径，发送后清空。</summary>
+    public ObservableCollection<ChatAttachment> Attachments { get; } = [];
+
+    /// <summary>附件区提示：只用于添加失败等反馈，没有提示时不显示。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAttachmentHint))]
+    public partial string? AttachmentHint { get; set; }
+
+    public bool HasAttachmentHint => !string.IsNullOrEmpty(AttachmentHint);
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    /// <summary>
+    /// 添加附件：统一只记录本地绝对路径（不限类型、不读取内容），
+    /// 发送时以「@路径」写进消息，模型之后可随时用命令或工具读取。
+    /// </summary>
+    public void AddAttachments(IEnumerable<string> paths)
+    {
+        var failed = new List<string>();
+
+        foreach (var path in paths)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                failed.Add(Path.GetFileName(path));
+                continue;
+            }
+
+            var info = new FileInfo(full);
+            if (!info.Exists)
+            {
+                failed.Add(info.Name);
+                continue;
+            }
+
+            // 同一个文件重复选择时只保留一份
+            if (Attachments.Any(a => string.Equals(a.FullPath, full, StringComparison.OrdinalIgnoreCase))) continue;
+
+            Attachments.Add(new ChatAttachment(info.Name, full));
+        }
+
+        AttachmentHint = failed.Count == 0 ? null : $"未能添加：{string.Join("、", failed)}";
+    }
+
+    /// <summary>移除一个待发送附件。</summary>
+    public void RemoveAttachment(ChatAttachment attachment)
+    {
+        Attachments.Remove(attachment);
+        AttachmentHint = null;
+    }
+
+    /// <summary>退格键删除最后一个附件：附件按整块移除，不会只删掉半个名字。</summary>
+    public void RemoveLastAttachment()
+    {
+        if (Attachments.Count == 0) return;
+        Attachments.RemoveAt(Attachments.Count - 1);
+        AttachmentHint = null;
+    }
+
 
     /// <summary>是否正在等待/接收助手回复（生成期间发送按钮切换为停止）。</summary>
     [ObservableProperty]
@@ -335,7 +408,8 @@ public partial class ChatViewModel : ViewModelBase
     private async Task SendAsync()
     {
         var text = Draft.Trim();
-        if (text.Length == 0 || IsGenerating) return;
+        var attachments = Attachments.ToList();
+        if (IsGenerating || (text.Length == 0 && attachments.Count == 0)) return;
 
         if (SelectedModel is not { } model)
         {
@@ -350,12 +424,22 @@ public partial class ChatViewModel : ViewModelBase
             return;
         }
 
-        Messages.Add(new Models.ChatMessage(text, isUser: true));
+        // 气泡列出附件名；消息正文统一附加 @绝对路径，模型之后可随时按路径读取
+        var attachmentLines = string.Join("\n", attachments.Select(a => $"[附件] {a.FileName}"));
+        var bubbleText = text.Length == 0 ? attachmentLines
+            : attachments.Count == 0 ? text
+            : $"{text}\n{attachmentLines}";
+        Messages.Add(new Models.ChatMessage(bubbleText, isUser: true));
         Draft = string.Empty;
+        Attachments.Clear();
+        AttachmentHint = null;
 
-        // 用户这轮提问先落历史；占位与错误提示不进入历史
-        _history.Add(new ChatMessage(ChatRole.User, text));
-        _memory.AddTurn("user", text);
+        var pathReferences = attachments.Select(a => $"@{a.FullPath}");
+        var messageText = string.Join("\n", new[] { text }.Concat(pathReferences).Where(line => line.Length > 0));
+
+        // 用户这轮提问先落历史；路径随消息一起保存，后续轮次无需重复添加附件
+        _history.Add(new ChatMessage(ChatRole.User, messageText));
+        _memory.AddTurn(ChatMemory.UserRole, messageText);
         TrimHistory();
 
         // 占位气泡：收到第一段内容时整体替换，避免出现空气泡
@@ -710,5 +794,5 @@ public partial class ChatViewModel : ViewModelBase
             Logger.Debug("history trimmed before={Before} after={After} turns={Turns}", before, _history.Count, userTurns);
     }
 
-    private bool CanSend() => !IsGenerating && !string.IsNullOrWhiteSpace(Draft);
+    private bool CanSend() => !IsGenerating && (!string.IsNullOrWhiteSpace(Draft) || Attachments.Count > 0);
 }

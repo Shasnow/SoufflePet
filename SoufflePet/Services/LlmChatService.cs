@@ -69,16 +69,13 @@ public sealed class LlmChatService : ILlmChatService
     };
 
     /// <summary>
-    /// 单次请求的提示词预算（按字符粗估）：中文约 1 字≈1 token，base64 图片按字符计，
-    /// 留出余量避免撞上上游 1M 的硬上限。超出时依次丢弃最旧轮次、省略图片、截断超长工具结果。
+    /// 单次请求的提示词预算（按字符粗估）：中文约 1 字≈1 token，留出余量避免撞上上游硬上限。
+    /// 图片等 DataContent 不计入；超出时依次丢弃最旧轮次、截断超长工具结果。
     /// </summary>
     private const int PromptCharBudget = 600_000;
 
     /// <summary>预算仍超限时，单条工具结果保留的最大字符数。</summary>
     private const int ToolResultCharCap = 8_000;
-
-    /// <summary>图片因预算被省略时替换成的文本。</summary>
-    private const string ImageOmittedText = "（图片已省略：超出上下文预算，可缩小窗口或重开对话后再试）";
 
     private readonly SouffleSettings _settings;
     private readonly ChatMemory _memory;
@@ -278,19 +275,19 @@ public sealed class LlmChatService : ILlmChatService
 
                 var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
 
-                // 工具返回 AIContent 集合（截图、MCP 图片等）：文本作为工具结果，
-                // 图片作为独立用户消息附加，让支持视觉输入的模型能真正看到画面。
+                // 工具返回 AIContent 集合（截图、read_file 的图片/音频等）：文本作为工具结果，
+                // 媒体内容作为独立用户消息附加，让支持多模态的模型真正看到画面、听到声音。
                 if (result is IEnumerable<AIContent> contents)
                 {
                     var list = contents as IList<AIContent> ?? [.. contents];
                     var text = ExtractText(list);
-                    if (list.OfType<DataContent>().FirstOrDefault() is { } image)
+                    if (list.OfType<DataContent>().FirstOrDefault() is { } media)
                     {
-                        var summary = text.Length > 0 ? text : "工具返回了一张图片。";
+                        var summary = text.Length > 0 ? text : "工具返回了媒体内容。";
                         messages.Add(new ChatMessage(ChatRole.Tool,
                             [new FunctionResultContent(call.CallId, summary)]));
                         messages.Add(new ChatMessage(ChatRole.User,
-                            [new DataContent(image.Data, image.MediaType)]));
+                            [new DataContent(media.Data, media.MediaType)]));
                         yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, summary);
                         continue;
                     }
@@ -311,7 +308,7 @@ public sealed class LlmChatService : ILlmChatService
 
     /// <summary>
     /// 按字符预算裁剪本次请求：先整轮丢弃最旧对话（系统消息与当前提问始终保留），
-    /// 再把图片替换成占位文本，最后截断超长工具结果。
+    /// 再截断超长工具结果；图片等 DataContent 不参与预算计算，始终保留。
     /// </summary>
     private static void TrimToBudget(List<ChatMessage> messages, int historyStart, ref int historyEnd, int budget)
     {
@@ -333,10 +330,7 @@ public sealed class LlmChatService : ILlmChatService
             historyEnd -= nextUser - firstUser;
         }
 
-        // 2. 图片 base64 在只按文本计数的上游约等于 1 token/字符，必要时省略
-        if (total > budget) total = OmitImages(messages, total, budget);
-
-        // 3. 单条工具结果过大时截断，尽量保留对话结构
+        // 2. 单条工具结果过大时截断，尽量保留对话结构
         if (total > budget) total = CapToolResults(messages, total, budget);
 
         if (total > budget)
@@ -351,23 +345,6 @@ public sealed class LlmChatService : ILlmChatService
         for (var i = start; i < end; i++)
             if (messages[i].Role == ChatRole.User) return i;
         return -1;
-    }
-
-    /// <summary>逐条把图片内容替换成占位文本，直到回到预算内。</summary>
-    private static int OmitImages(List<ChatMessage> messages, int total, int budget)
-    {
-        for (var i = 0; i < messages.Count && total > budget; i++)
-        {
-            var message = messages[i];
-            if (!message.Contents.OfType<DataContent>().Any()) continue;
-
-            total -= EstimateChars(message);
-            messages[i] = new ChatMessage(message.Role,
-                message.Contents.Select(c => c is DataContent ? new TextContent(ImageOmittedText) : c).ToList());
-            total += EstimateChars(messages[i]);
-        }
-
-        return total;
     }
 
     /// <summary>逐条截断过长的工具结果，直到回到预算内。</summary>
@@ -388,7 +365,7 @@ public sealed class LlmChatService : ILlmChatService
         return total;
     }
 
-    /// <summary>估算单条消息的字符数：正文 + base64 图片 + 工具参数/结果。</summary>
+    /// <summary>估算单条消息的字符数：正文 + 工具参数/结果；图片等 DataContent 不计入预算。</summary>
     private static int EstimateChars(ChatMessage message)
     {
         var chars = message.Text.Length;
@@ -396,9 +373,6 @@ public sealed class LlmChatService : ILlmChatService
         {
             switch (content)
             {
-                case DataContent data:
-                    chars += data.Data.Length / 3 * 4 + 128; // base64 膨胀 + data URL 前缀
-                    break;
                 case FunctionCallContent call:
                     chars += FormatArguments(call.Arguments).Length;
                     break;

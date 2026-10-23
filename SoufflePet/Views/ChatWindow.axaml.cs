@@ -4,12 +4,16 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Serilog;
+using SoufflePet.Models;
 using SoufflePet.ViewModels;
 using ChatMessage = SoufflePet.Models.ChatMessage;
 
@@ -21,6 +25,8 @@ namespace SoufflePet.Views;
 /// </summary>
 public partial class ChatWindow : Window
 {
+    private static readonly ILogger Logger = Log.ForContext<ChatWindow>();
+
     /// <summary>关闭按钮/Alt+F4 只隐藏窗口，应用退出时由服务调 CloseForShutdown 真正关闭。</summary>
     private bool _allowClose;
 
@@ -145,11 +151,55 @@ public partial class ChatWindow : Window
         if (DataContext is ChatViewModel vm) vm.IsModelPickerOpen = false;
     }
 
-    /// <summary>Enter 发送消息；Shift+Enter（或其他修饰键组合）保留文本框的换行行为。</summary>
+    /// <summary>添加附件：只记录绝对路径，随消息以 @路径 发送，模型可随时自行读取。</summary>
+    private async void OnAttachClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ChatViewModel vm) return;
+        vm.IsMoreOpen = false; // 先收起更多操作浮层，避免对话框关闭后它仍悬在窗口上
+
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "选择附件",
+                AllowMultiple = true
+            });
+            if (files.Count == 0) return;
+
+            vm.AddAttachments(files.Select(file => file.Path.LocalPath));
+            InputBox.Focus();
+        }
+        catch (Exception ex)
+        {
+            // 选择器本身出错（平台对话框异常等）只记录，不能让它冒出去带崩进程
+            Logger.Warning(ex, "pick attachment failed");
+        }
+    }
+
+    /// <summary>点击附件标签上的叉：从待发送列表移除。</summary>
+    private void OnRemoveAttachmentClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ChatAttachment attachment } && DataContext is ChatViewModel vm)
+            vm.RemoveAttachment(attachment);
+    }
+
+    /// <summary>
+    /// 输入框按键：输入框为空时 Backspace 整块删除最后一个附件；Enter 发送消息
+    /// （Shift+Enter 等组合保留文本框的换行行为）。
+    /// </summary>
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
+        if (DataContext is not ChatViewModel vm) return;
+
+        if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && vm.Draft.Length == 0 && vm.HasAttachments)
+        {
+            e.Handled = true;
+            vm.RemoveLastAttachment();
+            return;
+        }
+
         if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None) return;
-        if (DataContext is not ChatViewModel vm || !vm.SendCommand.CanExecute(null)) return;
+        if (!vm.SendCommand.CanExecute(null)) return;
 
         e.Handled = true;
         vm.SendCommand.Execute(null);
