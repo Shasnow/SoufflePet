@@ -32,6 +32,12 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>助手气泡在收到第一段内容前的占位文案。</summary>
     private const string ThinkingText = "正在思考…";
 
+    /// <summary>工具执行期间占位气泡的提示文本。</summary>
+    private const string ToolCallingText = "正在调用工具…";
+
+    /// <summary>模型只输出空白字符时，气泡里显示的提示文本。</summary>
+    private const string BlankText = "（空白内容）";
+
     /// <summary>工具记录里结果的最大展示长度（超出截断，避免撑爆气泡）。</summary>
     private const int ToolResultMaxLength = 300;
 
@@ -471,20 +477,23 @@ public partial class ChatViewModel : ViewModelBase
         // withReasoning 仅在本轮没有工具调用（即最终回复）时为 true，思考内容随这条消息一起保存。
         void CommitSegment(bool withReasoning)
         {
-            if (segment.Length == 0) return;
+            // 正文去空白后（纯空白视作无正文）为空但存在思考内容时同样落库：这条回复仍有思考内容，长期记忆不能丢
+            var hasReasoning = withReasoning && roundReasoning.Length > 0;
+            var content = segment.Trim();
+            if (content.Length == 0 && !hasReasoning) return;
 
             List<AIContent> contents = [];
             string? reasoning = null;
-            if (withReasoning && roundReasoning.Length > 0)
+            if (hasReasoning)
             {
                 reasoning = roundReasoning.ToString();
                 contents.Add(new TextReasoningContent(reasoning));
                 roundReasoning.Clear();
             }
 
-            contents.Add(new TextContent(segment));
+            contents.Add(new TextContent(content));
             _history.Add(new ChatMessage(ChatRole.Assistant, contents));
-            _memory.AddTurn(ChatMemory.AssistantRole, segment, reasoning: reasoning);
+            _memory.AddTurn(ChatMemory.AssistantRole, content, reasoning: reasoning);
             TrimHistory();
             segment = string.Empty;
         }
@@ -495,8 +504,11 @@ public partial class ChatViewModel : ViewModelBase
             CollapseThinking();
             thinking = null;
             var index = Messages.IndexOf(reply);
-            if (segment.Length == 0)
+
+            // 完全没有正文（含只有空白字符）：插在占位气泡前，沿用同一个占位气泡
+            if (segment.Trim().Length == 0)
             {
+                reply.Text = ToolCallingText; // 工具执行中，占位提示改为调用中
                 if (index >= 0) Messages.Insert(index, message);
                 else Messages.Add(message);
                 return;
@@ -504,7 +516,7 @@ public partial class ChatViewModel : ViewModelBase
 
             CommitSegment(withReasoning: false);
             Messages.Insert(index + 1, message);
-            reply = new Models.ChatMessage(ThinkingText, isUser: false);
+            reply = new Models.ChatMessage(ToolCallingText, isUser: false);
             _reply = reply;
             Messages.Insert(index + 2, reply);
         }
@@ -517,6 +529,8 @@ public partial class ChatViewModel : ViewModelBase
                 {
                     case LlmReasoningDelta reasoning:
                         roundReasoning.Append(reasoning.Text);
+                        // 工具已返回、开始新一轮思考：占位提示从「正在调用工具中」恢复
+                        if (segment.Length == 0 && reply.Text == ToolCallingText) reply.Text = ThinkingText;
                         if (thinking is null)
                         {
                             thinking = new Models.ChatMessage(string.Empty, isUser: false, isReasoning: true);
@@ -530,7 +544,9 @@ public partial class ChatViewModel : ViewModelBase
                         // 正文开始输出，思考阶段结束：思考气泡自动收起
                         CollapseThinking();
                         segment += delta.Text;
-                        reply.Text = segment;
+
+                        // 只输出空白字符时气泡显示空白提示，收到实际正文后再整体替换
+                        reply.Text = DisplayText(segment);
                         answered = reply;
                         break;
 
@@ -587,7 +603,8 @@ public partial class ChatViewModel : ViewModelBase
 
             if (segment.Length == 0)
             {
-                if (answered is null) reply.Text = "（没有收到回复）";
+                if (roundReasoning.Length > 0) reply.Text = BlankText; // 只有思考没有正文：显示空白提示
+                else if (answered is null) reply.Text = "（没有收到回复）";
                 else Messages.Remove(reply); // 最后一轮只有工具调用，没有正文可显示
             }
         }
@@ -720,6 +737,9 @@ public partial class ChatViewModel : ViewModelBase
         return result.Length <= ToolResultMaxLength ? text : head + result[..ToolResultMaxLength] + "…";
     }
 
+    /// <summary>气泡展示文本：落库的原始内容只有空白字符时替换为空白提示，避免出现空气泡。</summary>
+    private static string DisplayText(string text) => text.Trim().Length == 0 ? BlankText : text;
+
     /// <summary>启动时把最近几轮对话（含工具调用记录）恢复到界面与请求历史里（有历史时替换掉问候语）。</summary>
     private void LoadRecentHistory()
     {
@@ -763,7 +783,7 @@ public partial class ChatViewModel : ViewModelBase
                 _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
             }
 
-            Messages.Add(new Models.ChatMessage(turn.Text, isUser));
+            Messages.Add(new Models.ChatMessage(DisplayText(turn.Text), isUser));
         }
     }
 

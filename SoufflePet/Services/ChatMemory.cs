@@ -119,8 +119,9 @@ public sealed class ChatMemory
         string? result = null,
         string? reasoning = null)
     {
+        // 正文统一去空白：纯空白视作无正文，只有存在思考内容时才继续落库
         text = text.Trim();
-        if (text.Length == 0) return;
+        if (text.Length == 0 && string.IsNullOrWhiteSpace(reasoning)) return;
 
         var turn = new Turn
         {
