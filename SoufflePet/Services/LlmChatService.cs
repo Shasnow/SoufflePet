@@ -4,6 +4,7 @@
 using System;
 using System.ClientModel;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -77,6 +78,9 @@ public sealed class LlmChatService : ILlmChatService
     /// <summary>预算仍超限时，单条工具结果保留的最大字符数。</summary>
     private const int ToolResultCharCap = 8_000;
 
+    /// <summary>工作目录下的项目说明文件名：每轮对话完整注入系统提示词。</summary>
+    private const string AgentsFileName = "AGENTS.md";
+
     private readonly SouffleSettings _settings;
     private readonly ChatMemory _memory;
     private readonly ChatTools _chatTools;
@@ -149,9 +153,14 @@ public sealed class LlmChatService : ILlmChatService
         using var chatClient = openAiClient.AsIChatClient();
 
         // 系统提示词只作为本次请求的首条消息，不进入界面历史
-        var messages = new List<ChatMessage>(history.Count + 2);
+        var messages = new List<ChatMessage>(history.Count + 3);
         if (_settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
+
+        // 工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
+        var agentsBlock = ReadAgentsDocument();
+        if (agentsBlock.Length > 0)
+            messages.Add(new ChatMessage(ChatRole.System, agentsBlock));
 
         // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）。
         // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入；
@@ -572,6 +581,30 @@ public sealed class LlmChatService : ILlmChatService
         TextReasoningContent => "思考内容",
         _ => content.GetType().Name
     };
+
+    /// <summary>
+    /// 读取工作目录下 AGENTS.md 的完整内容，包成系统提示块；不缓存，每次对话重新读盘，
+    /// 文件不存在、内容为空或读取失败时返回空串（失败只记日志，不影响本次对话）。
+    /// </summary>
+    private static string ReadAgentsDocument()
+    {
+        var path = Path.Combine(Environment.CurrentDirectory, AgentsFileName);
+
+        try
+        {
+            if (!File.Exists(path)) return string.Empty;
+
+            var content = File.ReadAllText(path);
+            return content.Trim().Length == 0
+                ? string.Empty
+                : $"以下是工作目录下 {AgentsFileName} 的内容，是本项目的约定与补充说明，请照此执行：\n\n{content}";
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "read {File} {Path} failed", AgentsFileName, path);
+            return string.Empty;
+        }
+    }
 
     /// <summary>BaseUrl 视为 base 地址；如果用户填了完整接口路径，去掉 /chat/completions 再交给 SDK。</summary>
     private static string BuildEndpoint(string baseUrl)
