@@ -52,7 +52,7 @@ public partial class PluginsViewModel : ViewModelBase
     public string WindowTitle => $"{PetName} · 插件";
 
     /// <summary>标题栏下方的说明文案。</summary>
-    public string ToolHint => "插件向对话模型提供工具，启停立即生效于下一轮对话";
+    public string ToolHint => "插件可向对话模型提供工具，或对模型回复做后处理；启停立即生效于下一轮对话";
 
     /// <summary>列表上方的统计文案。</summary>
     [ObservableProperty]

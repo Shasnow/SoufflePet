@@ -41,6 +41,12 @@ public interface IPluginService : IDisposable
         IReadOnlyCollection<string>? reservedNames = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 为指定模型创建本轮响应的正文过滤器（来自实现了 <see cref="IResponseFilterProvider"/> 的已加载插件）。
+    /// 每轮响应调用一次，返回新实例；插件抛异常时按原样放行。
+    /// </summary>
+    IReadOnlyList<IResponseFilter> CreateResponseFilters(string modelId);
+
     /// <summary>启用或禁用插件：启用立即加载，禁用依次 Shutdown → Unload。</summary>
     Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default);
 
@@ -176,6 +182,40 @@ public sealed class PluginService : IPluginService
             _gate.Release();
             if (changed) RaiseChanged();
         }
+    }
+
+    public IReadOnlyList<IResponseFilter> CreateResponseFilters(string modelId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // 先取快照再调用插件代码，避免持有锁执行外部逻辑
+        List<(string Id, IResponseFilterProvider Provider)> providers = [];
+        lock (_sync)
+        {
+            foreach (var descriptor in _descriptors)
+            {
+                if (!descriptor.Enabled) continue;
+                if (!_loaded.TryGetValue(descriptor.Manifest.Id, out var loaded)) continue;
+                if (loaded.Instance is IResponseFilterProvider provider)
+                    providers.Add((descriptor.Manifest.Id, provider));
+            }
+        }
+
+        var filters = new List<IResponseFilter>();
+        foreach (var (id, provider) in providers)
+        {
+            try
+            {
+                foreach (var filter in provider.CreateResponseFilters(modelId))
+                    filters.Add(new ResponseFilterGuard(filter, this, id));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "plugin {Plugin} create response filters failed", id);
+            }
+        }
+
+        return filters;
     }
 
     public async Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default)
@@ -598,6 +638,51 @@ public sealed class PluginService : IPluginService
         public IPlugin Instance { get; } = instance;
 
         public IReadOnlyList<AIFunction> Tools { get; } = tools;
+    }
+}
+
+/// <summary>
+/// 响应过滤器守卫：插件处理正文时抛异常则原样放行，避免单个插件影响本次回复。
+/// </summary>
+internal sealed class ResponseFilterGuard(
+    IResponseFilter inner,
+    PluginService owner,
+    string pluginId) : IResponseFilter
+{
+    private bool _failed;
+
+    public string Process(string text)
+    {
+        if (_failed) return text;
+        try
+        {
+            return inner.Process(text);
+        }
+        catch (Exception ex)
+        {
+            Fail("处理", ex);
+            return text;
+        }
+    }
+
+    public string Flush()
+    {
+        if (_failed) return string.Empty;
+        try
+        {
+            return inner.Flush();
+        }
+        catch (Exception ex)
+        {
+            Fail("收尾", ex);
+            return string.Empty;
+        }
+    }
+
+    private void Fail(string stage, Exception ex)
+    {
+        _failed = true;
+        owner.RecordFailure(pluginId, $"响应过滤{stage}失败：{ex.Message}");
     }
 }
 

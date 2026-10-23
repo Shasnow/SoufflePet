@@ -1,0 +1,13 @@
+{
+  "id": "dsml-cleaner",
+  "name": "DSML 标记清理",
+  "version": "1.0.0",
+  "author": "SoufflePet",
+  "description": "从模型正文中移除泄漏的 DSML 工具调用标记，可按模型启用",
+  "assembly": "SoufflePet.Plugin.DsmlCleaner.dll",
+  "entryType": "SoufflePet.Plugins.DsmlCleaner.DsmlCleanerPlugin",
+  "timeoutSeconds": 30,
+  "config": {
+    "models": []
+  }
+}

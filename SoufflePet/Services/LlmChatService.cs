@@ -10,6 +10,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -17,6 +18,8 @@ using OpenAI;
 using OpenAI.Chat;
 using Serilog;
 using SoufflePet.Models;
+using SoufflePet.Plugin.Sdk;
+using SoufflePet.Services.Plugins;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 #pragma warning disable SCME0001 // JsonPatch 目前仍是 OpenAI SDK 的实验性 API
@@ -69,6 +72,14 @@ public sealed class LlmChatService : ILlmChatService
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
+    /// <summary>LLM 请求/响应存档的序列化选项：缩进、中文原样、省略空字段，方便直接阅读。</summary>
+    private static readonly JsonSerializerOptions TraceJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     /// <summary>
     /// 单次请求的提示词预算（按字符粗估）：中文约 1 字≈1 token，留出余量避免撞上上游硬上限。
     /// 图片等 DataContent 不计入；超出时依次丢弃最旧轮次、截断超长工具结果。
@@ -85,13 +96,20 @@ public sealed class LlmChatService : ILlmChatService
     private readonly ChatMemory _memory;
     private readonly ChatTools _chatTools;
     private readonly ISkillService _skills;
+    private readonly IPluginService _plugins;
 
-    public LlmChatService(SouffleSettings settings, ChatTools tools, ChatMemory memory, ISkillService skills)
+    public LlmChatService(
+        SouffleSettings settings,
+        ChatTools tools,
+        ChatMemory memory,
+        ISkillService skills,
+        IPluginService plugins)
     {
         _settings = settings;
         _memory = memory;
         _chatTools = tools;
         _skills = skills;
+        _plugins = plugins;
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -199,8 +217,16 @@ public sealed class LlmChatService : ILlmChatService
         var messageBudget = Math.Max(200_000, PromptCharBudget - EstimateToolChars(tools));
         TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
 
-        // 发送前把完整请求写入调试日志，便于排查提示词/记忆/技能/历史是否符合预期
+        // 发送前把请求摘要写入运行日志，便于排查提示词/记忆/技能/历史是否符合预期；
+        // 完整内容另存 JSON（固定文件，每次对话覆盖，只保留最新一次）。
         LogRequest(endpoint, model, messages, tools);
+        var trace = new LlmTraceDocument
+        {
+            Timestamp = DateTimeOffset.Now,
+            Endpoint = endpoint,
+            Model = model.ModelId
+        };
+        var tracePath = BuildTracePath();
 
         var chatOptions = new ChatOptions
         {
@@ -221,8 +247,19 @@ public sealed class LlmChatService : ILlmChatService
             // OpenAI 适配器不会序列化 TextReasoningContent，这里把思考内容补成 reasoning_content
             AttachReasoning(messages);
 
-            // 文本增量即时产出，同时留存完整流以便汇总工具调用
+            // 每轮请求先落盘：即使本次请求失败，也能看到实际发出去的内容
+            var roundTrace = new LlmTraceRound { Round = round, Request = CaptureRequest(messages, tools) };
+            trace.Rounds.Add(roundTrace);
+            WriteTrace(tracePath, trace);
+
+            // 文本增量即时产出，同时留存完整流以便汇总工具调用。
+            // 插件响应过滤器每轮新建，状态不跨轮；处理失败由守卫原样放行。
+            var filters = new ResponseFilterPipeline(_plugins.CreateResponseFilters(model.ModelId));
             var updates = new List<ChatResponseUpdate>();
+            // 上游可能把回复拆成大量碎片甚至空分片：这里自行合并成一条助手消息，
+            // 正文只保留过滤器输出的可见文本（DSML 等已在插件里剔除），思考原样保留。
+            var replyText = new StringBuilder();
+            var replyReasoning = new StringBuilder();
             await using (var enumerator = chatClient
                              .GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
                              .GetAsyncEnumerator(cancellationToken))
@@ -245,16 +282,37 @@ public sealed class LlmChatService : ILlmChatService
                     foreach (var content in update.Contents)
                     {
                         if (content is TextReasoningContent { Text: { Length: > 0 } reasoning })
+                        {
+                            replyReasoning.Append(reasoning);
                             yield return new LlmReasoningDelta(reasoning);
+                        }
                     }
 
-                    if (update.Text is { Length: > 0 } text) yield return new LlmTextDelta(text);
+                    if (update.Text is { Length: > 0 } text)
+                    {
+                        var visible = filters.Process(text);
+                        if (visible.Length > 0)
+                        {
+                            replyText.Append(visible);
+                            yield return new LlmTextDelta(visible);
+                        }
+                    }
                 }
+            }
+
+            var tail = filters.Flush();
+            if (tail.Length > 0)
+            {
+                replyText.Append(tail);
+                yield return new LlmTextDelta(tail);
             }
 
             if (updates.Count == 0) break;
 
             var response = updates.ToChatResponse();
+            roundTrace.Response = CaptureResponse(response);
+            WriteTrace(tracePath, trace);
+
             if (response.Usage is { } usage)
             {
                 inputTokens += usage.InputTokenCount ?? 0;
@@ -269,13 +327,16 @@ public sealed class LlmChatService : ILlmChatService
 
             if (calls.Count == 0) break;
 
+            // 只追加一条合并后的助手消息：上游碎片与空消息不进历史，正文已过响应过滤器
+            var assistantMessage = BuildAssistantMessage(replyText, replyReasoning, calls);
+
             // 达到最大轮次：新调用不再执行，但每次都要作为工具结果回给模型，
             // 由模型自行决定基于已有信息作答还是继续请求（继续请求同样只会拿到这条提示）。
             if (round >= _settings.MaxToolRounds)
             {
                 Logger.Warning("Tool calls exceeded {MaxRounds} rounds, reject further calls", _settings.MaxToolRounds);
 
-                messages.AddMessages(response);
+                messages.Add(assistantMessage);
                 foreach (var call in calls)
                 {
                     var arguments = FormatArguments(call.Arguments);
@@ -290,7 +351,7 @@ public sealed class LlmChatService : ILlmChatService
             }
 
             // 把模型的工具调用消息与本地执行结果接回历史，再请求下一轮
-            messages.AddMessages(response);
+            messages.Add(assistantMessage);
             foreach (var call in calls)
             {
                 var arguments = FormatArguments(call.Arguments);
@@ -603,6 +664,22 @@ public sealed class LlmChatService : ILlmChatService
     };
 
     /// <summary>
+    /// 把本轮流式增量合并成一条助手消息：思考在前、正文居中、工具调用在最后。
+    /// 上游可能把回复拆成大量碎片甚至空分片，直接 AddMessages(response) 会让历史迅速膨胀。
+    /// </summary>
+    private static ChatMessage BuildAssistantMessage(
+        StringBuilder text,
+        StringBuilder reasoning,
+        List<FunctionCallContent> calls)
+    {
+        var contents = new List<AIContent>(calls.Count + 2);
+        if (reasoning.Length > 0) contents.Add(new TextReasoningContent(reasoning.ToString()));
+        if (text.Length > 0) contents.Add(new TextContent(text.ToString()));
+        contents.AddRange(calls);
+        return new ChatMessage(ChatRole.Assistant, contents);
+    }
+
+    /// <summary>
     /// 把助手消息里的思考内容补回请求体：OpenAI 适配器序列化时会忽略 TextReasoningContent，
     /// 而 DeepSeek 等推理模型要求工具循环中回传 reasoning_content。
     /// 做法是构造 SDK 的原始助手消息并打 JsonPatch，适配器会优先使用 RawRepresentation。
@@ -646,46 +723,162 @@ public sealed class LlmChatService : ILlmChatService
         }
     }
 
-    /// <summary>发送前把完整请求写入调试日志：逐条打印消息（含系统提示词、记忆、技能清单），再列出本次可调用的工具。</summary>
+    /// <summary>请求摘要：完整内容见最新一次对话的 JSON 存档（logs/llm/latest.json）。</summary>
     private static void LogRequest(
         string endpoint,
         ChatModelConfig model,
         IReadOnlyList<ChatMessage> messages,
-        IReadOnlyList<AITool> tools)
-    {
-        // 摘要行同时输出到控制台与文件
+        IReadOnlyList<AITool> tools) =>
         Logger.Debug("LLM request {Endpoint} model={Model} messages={Messages} tools={Tools}",
             endpoint, model.ModelId, messages.Count, tools.Count);
 
-        var builder = new StringBuilder();
-        foreach (var message in messages)
-        {
-            builder.Append("\n--- ").Append(message.Role).Append(" ---\n");
-            if (message.Text is { Length: > 0 } text)
-                builder.Append(text);
-            else if (message.Contents.Count > 0)
-                builder.Append('[').Append(string.Join("、", message.Contents.Select(DescribeContent))).Append(']');
-            else
-                builder.Append("(空)");
-        }
-
-        if (tools.Count > 0)
-        {
-            builder.Append("\n工具：");
-            foreach (var tool in tools) builder.Append("\n- ").Append(tool.Name);
-        }
-
-        // FileOnly：只写日志文件，不打到控制台
-        Logger.ForContext("FileOnly", true).Debug(builder.ToString());
+    /// <summary>存档路径固定为 logs/llm/latest.json：每次对话覆盖写入，目录不会无限增长。</summary>
+    private static string BuildTracePath()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "logs", "llm");
+        Directory.CreateDirectory(directory);
+        return Path.Combine(directory, "latest.json");
     }
 
-    private static string DescribeContent(AIContent content) => content switch
+    /// <summary>整份存档覆盖写入：每轮追加后重写，失败只记日志，不影响对话。</summary>
+    private static void WriteTrace(string path, LlmTraceDocument trace)
     {
-        FunctionCallContent call => $"调用 {call.Name}",
-        FunctionResultContent => "工具结果",
-        TextReasoningContent => "思考内容",
-        _ => content.GetType().Name
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(trace, TraceJsonOptions));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "write LLM trace {Path} failed", path);
+        }
+    }
+
+    private static LlmTraceRequest CaptureRequest(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<AITool> tools) => new()
+        {
+            Messages = [.. messages.Select(CaptureMessage)],
+            Tools = [.. tools.Select(tool => new LlmTraceTool
+            {
+                Name = tool.Name,
+                Description = tool.Description,
+                Schema = tool is AIFunction function ? function.JsonSchema.Clone() : null
+            })]
+        };
+
+    private static LlmTraceResponse CaptureResponse(ChatResponse response) => new()
+    {
+        Messages = [.. response.Messages.Select(CaptureMessage)],
+        FinishReason = response.FinishReason?.ToString(),
+        Usage = response.Usage is { } usage
+            ? new LlmTraceUsage
+            {
+                InputTokens = usage.InputTokenCount ?? 0,
+                OutputTokens = usage.OutputTokenCount ?? 0,
+                CachedInputTokens = usage.CachedInputTokenCount ?? 0
+            }
+            : null
     };
+
+    /// <summary>展开单条消息；媒体只记录类型、大小与链接，避免 base64 把存档撑爆。</summary>
+    private static LlmTraceMessage CaptureMessage(ChatMessage message) => new()
+    {
+        Role = message.Role.Value,
+        Contents = [.. message.Contents.Select(CaptureContent)]
+    };
+
+    private static LlmTraceContent CaptureContent(AIContent content) => content switch
+    {
+        TextContent text => new LlmTraceContent { Type = "text", Text = text.Text },
+        TextReasoningContent reasoning => new LlmTraceContent { Type = "reasoning", Text = reasoning.Text },
+        FunctionCallContent call => new LlmTraceContent
+        {
+            Type = "toolCall",
+            Name = call.Name,
+            Arguments = call.Arguments is null
+                ? null
+                : JsonSerializer.SerializeToElement(call.Arguments, ToolJsonOptions)
+        },
+        FunctionResultContent result => new LlmTraceContent
+        {
+            Type = "toolResult",
+            Result = result.Result is null
+                ? null
+                : JsonSerializer.SerializeToElement(result.Result, ToolJsonOptions)
+        },
+        DataContent data => new LlmTraceContent
+        {
+            Type = "media",
+            MediaType = data.MediaType,
+            Bytes = data.Data.Length
+        },
+        UriContent uri => new LlmTraceContent { Type = "mediaLink", Uri = uri.Uri.ToString() },
+        ErrorContent error => new LlmTraceContent { Type = "error", Error = error.Message },
+        _ => new LlmTraceContent { Type = content.GetType().Name }
+    };
+
+    /// <summary>一次对话（从用户提问到最终回复）的完整 LLM 往返存档，工具循环的每轮都在 Rounds 里。</summary>
+    private sealed class LlmTraceDocument
+    {
+        public DateTimeOffset Timestamp { get; init; }
+        public string Endpoint { get; init; } = string.Empty;
+        public string Model { get; init; } = string.Empty;
+        public List<LlmTraceRound> Rounds { get; } = [];
+    }
+
+    private sealed class LlmTraceRound
+    {
+        public int Round { get; init; }
+        public LlmTraceRequest Request { get; init; } = new();
+        public LlmTraceResponse? Response { get; set; }
+    }
+
+    private sealed class LlmTraceRequest
+    {
+        public List<LlmTraceMessage> Messages { get; init; } = [];
+        public List<LlmTraceTool> Tools { get; init; } = [];
+    }
+
+    private sealed class LlmTraceResponse
+    {
+        public List<LlmTraceMessage> Messages { get; init; } = [];
+        public string? FinishReason { get; init; }
+        public LlmTraceUsage? Usage { get; init; }
+    }
+
+    private sealed class LlmTraceUsage
+    {
+        public long InputTokens { get; init; }
+        public long OutputTokens { get; init; }
+        public long CachedInputTokens { get; init; }
+    }
+
+    private sealed class LlmTraceTool
+    {
+        public string Name { get; init; } = string.Empty;
+        public string? Description { get; init; }
+        public JsonElement? Schema { get; init; }
+    }
+
+    private sealed class LlmTraceMessage
+    {
+        public string Role { get; init; } = string.Empty;
+        public List<LlmTraceContent> Contents { get; init; } = [];
+    }
+
+    /// <summary>消息内容：按类型只填相关字段，其余为 null 不落盘。</summary>
+    private sealed class LlmTraceContent
+    {
+        public string Type { get; init; } = string.Empty;
+        public string? Text { get; init; }
+        public string? Name { get; init; }
+        public JsonElement? Arguments { get; init; }
+        public JsonElement? Result { get; init; }
+        public string? MediaType { get; init; }
+        public long? Bytes { get; init; }
+        public string? Uri { get; init; }
+        public string? Error { get; init; }
+    }
 
     /// <summary>
     /// 读取工作目录下 AGENTS.md 的完整内容，包成系统提示块；不缓存，每次对话重新读盘，
@@ -727,4 +920,31 @@ public sealed class LlmChatService : ILlmChatService
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";
+
+    /// <summary>把多个响应过滤器串成管道，按顺序处理每段增量；收尾时再让暂存文本经过后续过滤器。</summary>
+    private sealed class ResponseFilterPipeline(IReadOnlyList<IResponseFilter> filters)
+    {
+        public string Process(string text)
+        {
+            foreach (var filter in filters) text = filter.Process(text);
+            return text;
+        }
+
+        public string Flush()
+        {
+            if (filters.Count == 0) return string.Empty;
+
+            var output = new StringBuilder();
+            for (var i = 0; i < filters.Count; i++)
+            {
+                var text = filters[i].Flush();
+                if (text.Length == 0) continue;
+
+                for (var j = i + 1; j < filters.Count; j++) text = filters[j].Process(text);
+                output.Append(text);
+            }
+
+            return output.ToString();
+        }
+    }
 }

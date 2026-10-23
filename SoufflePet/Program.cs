@@ -17,13 +17,15 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // Serilog：DEBUG 级别，按天滚动写入 logs/pet-YYYYMMDD.log（保留 7 天）；
+        // Serilog：DEBUG 级别，按天滚动写入 logs/pet-YYYYMMDD.log（保留 7 天）。
+        // 完整 LLM 请求/响应不走 Serilog，而是覆盖写入 logs/llm/latest.json（见 LlmChatService）。
         // DEBUG 构建额外输出到控制台。日志模板带 SourceContext（类名）便于定位。
         const string template = "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+        var logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
         var loggerConfig = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.File(
-                Path.Combine(AppContext.BaseDirectory, "logs", "pet-.log"),
+                Path.Combine(logDirectory, "pet-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7,
                 outputTemplate: template);
