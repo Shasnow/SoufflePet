@@ -754,8 +754,8 @@ public partial class ChatViewModel : ViewModelBase
             .Append("」收到一条需要处理的消息（发送者：").Append(sender).Append("）：\n")
             .Append("<<<\n").Append(notification.Content).Append("\n>>>");
 
-        // 落库时同时保存气泡文本：完整提示给模型，恢复历史时展示同一份摘要
-        await RunTurnAsync(model, prompt.ToString(), display);
+        // 落库时同时保存气泡文本与「平台提醒」标记：完整提示给模型，恢复历史时展示同一份摘要
+        await RunTurnAsync(model, prompt.ToString(), display, isPlatformNotice: true);
     }
 
     /// <summary>提醒气泡里的单行摘要：折叠换行并截断，完整内容仍放在给模型的提示里。</summary>
@@ -807,11 +807,20 @@ public partial class ChatViewModel : ViewModelBase
     /// 发起一轮对话：写入历史与长期记忆、插入占位气泡并流式接收回复。
     /// 手输发送（先插用户气泡）与平台提醒（先插提醒气泡）共用这一条链路。
     /// </summary>
-    private async Task RunTurnAsync(ChatModelConfig model, string messageText, string? displayText = null)
+    /// <param name="displayText">气泡展示文本；只影响界面，发给模型的仍是 messageText。</param>
+    /// <param name="isPlatformNotice">
+    /// 该轮是否为平台提醒。与 <paramref name="displayText" /> 无关：任何消息都可以有展示文本，
+    /// 但只有提醒才按提醒样式恢复。
+    /// </param>
+    private async Task RunTurnAsync(
+        ChatModelConfig model,
+        string messageText,
+        string? displayText = null,
+        bool isPlatformNotice = false)
     {
         // 这轮提问先落历史；路径随消息一起保存，后续轮次无需重复添加附件
         _history.Add(new ChatMessage(ChatRole.User, messageText));
-        _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText);
+        _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText, isPlatformNotice: isPlatformNotice);
         TrimHistory();
 
         // 占位气泡：收到第一段内容时整体替换，避免出现空气泡
@@ -1141,8 +1150,9 @@ public partial class ChatViewModel : ViewModelBase
             }
 
             var isUser = string.Equals(turn.Role, ChatMemory.UserRole, StringComparison.OrdinalIgnoreCase);
-            // 平台提醒当初按 user 角色落库（模型需要看到），恢复时改回提醒气泡，不伪装成用户发言
-            var isPlatformNotice = isUser && turn.Display is not null;
+            // 平台提醒当初按 user 角色落库（模型需要看到），恢复时改回提醒气泡，不伪装成用户发言。
+            // 是否提醒只看显式标记，展示文本存在与否不代表消息类型。
+            var isPlatformNotice = isUser && turn.IsPlatformNotice;
             var bubbleText = turn.Display ?? turn.Text;
             if (!isUser && !string.IsNullOrEmpty(turn.Reasoning))
             {

@@ -25,7 +25,8 @@ public readonly record struct MemoryTurn(
     string? Arguments = null,
     string? Result = null,
     string? Reasoning = null,
-    string? Display = null);
+    string? Display = null,
+    bool IsPlatformNotice = false);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -119,7 +120,8 @@ public sealed class ChatMemory
         string? arguments = null,
         string? result = null,
         string? reasoning = null,
-        string? display = null)
+        string? display = null,
+        bool isPlatformNotice = false)
     {
         // 正文统一去空白：纯空白视作无正文，只有存在思考内容时才继续落库
         text = text.Trim();
@@ -135,7 +137,8 @@ public sealed class ChatMemory
             Arguments = arguments,
             Result = result,
             Reasoning = string.IsNullOrWhiteSpace(reasoning) ? null : reasoning.Trim(),
-            Display = string.IsNullOrWhiteSpace(display) ? null : display.Trim()
+            Display = string.IsNullOrWhiteSpace(display) ? null : display.Trim(),
+            IsPlatformNotice = isPlatformNotice
         };
         lock (_gate)
         {
@@ -181,7 +184,7 @@ public sealed class ChatMemory
             var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
                 .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result,
-                    t.Reasoning, t.Display))
+                    t.Reasoning, t.Display, t.IsPlatformNotice))
                 .ToList();
 
             Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
@@ -572,6 +575,9 @@ public sealed class ChatMemory
 
         /// <summary>界面上展示的文本；与发给模型的 Text 不同时使用（例如平台提醒的紧凑摘要）。</summary>
         public string? Display { get; set; }
+
+        /// <summary>该条是否为平台提醒。与 <see cref="Display" /> 相互独立：Display 只表示展示文本不同。</summary>
+        public bool IsPlatformNotice { get; set; }
 
         /// <summary>检索用的切词结果，只在内存里保留。</summary>
         [JsonIgnore]
