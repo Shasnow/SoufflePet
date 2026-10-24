@@ -2,8 +2,12 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using SoufflePet.Services.Plugins;
 
 namespace SoufflePet.ViewModels;
@@ -17,10 +21,14 @@ public partial class PluginItemViewModel : ObservableObject
     {
         Descriptor = descriptor;
         Enabled = descriptor.Enabled;
+        ConfigFields = PluginConfigFieldViewModel.CreateAll(descriptor.Manifest);
     }
 
     /// <summary>启用开关被用户切换（需要立即写回设置并加载/卸载）。</summary>
     public event EventHandler? EnabledChanged;
+
+    /// <summary>用户点击「保存配置」，由外层视图模型写回 plugin.json。</summary>
+    public event EventHandler? ConfigSaveRequested;
 
     public PluginDescriptor Descriptor { get; }
 
@@ -69,6 +77,24 @@ public partial class PluginItemViewModel : ObservableObject
         _ when Descriptor.ToolNames.Count == 0 => "该插件没有提供工具",
         _ => string.Join('\n', Descriptor.ToolNames.Select(name => $"· {name}")),
     };
+
+    /// <summary>配置表单；清单未声明 configSchema 时为空。</summary>
+    public IReadOnlyList<PluginConfigFieldViewModel> ConfigFields { get; }
+
+    public bool HasConfig => ConfigFields.Count > 0;
+
+    /// <summary>把表单当前值组装成 config 对象，供保存。</summary>
+    public JsonElement BuildConfig()
+    {
+        var config = new JsonObject();
+        foreach (var field in ConfigFields) config[field.Key] = field.ToJson();
+
+        using var document = JsonDocument.Parse(config.ToJsonString());
+        return document.RootElement.Clone();
+    }
+
+    [RelayCommand]
+    private void SaveConfig() => ConfigSaveRequested?.Invoke(this, EventArgs.Empty);
 
     [ObservableProperty]
     public partial bool Enabled { get; set; }

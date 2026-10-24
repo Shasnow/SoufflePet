@@ -8,6 +8,9 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -50,6 +53,9 @@ public interface IPluginService : IDisposable
     /// <summary>启用或禁用插件：启用立即加载，禁用依次 Shutdown → Unload。</summary>
     Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default);
 
+    /// <summary>保存插件配置：写回 plugin.json 的 config 段，并让运行中的实例按新配置重新加载。</summary>
+    Task SaveConfigAsync(string pluginId, JsonElement config, CancellationToken cancellationToken = default);
+
     /// <summary>重新扫描插件目录（保留已加载实例的状态）。</summary>
     void Discover();
 
@@ -69,6 +75,13 @@ public sealed class PluginService : IPluginService
     private const int MaxToolNameLength = 64;
 
     private const string ManifestFileName = "plugin.json";
+
+    /// <summary>写回 plugin.json 时保持缩进与中文原样，方便用户直接查看。</summary>
+    private static readonly JsonSerializerOptions ManifestWriteOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private readonly SouffleSettings _settings;
     private readonly ILoggerFactory _loggerFactory;
@@ -261,6 +274,69 @@ public sealed class PluginService : IPluginService
                 descriptor.Error = null;
                 changed = true;
             }
+        }
+        finally
+        {
+            _gate.Release();
+            if (changed) RaiseChanged();
+        }
+    }
+
+    public async Task SaveConfigAsync(string pluginId, JsonElement config, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var changed = false;
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var descriptor = Snapshot()
+                .FirstOrDefault(d => string.Equals(d.Manifest.Id, pluginId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"找不到插件「{pluginId}」");
+
+            // 只替换 config 段，保留清单里的其它字段；JSON 注释会在重写时丢失
+            var manifestPath = Path.Combine(descriptor.Directory, ManifestFileName);
+            var root = JsonNode.Parse(
+                await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false),
+                documentOptions: new JsonDocumentOptions
+                {
+                    CommentHandling = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true,
+                }) as JsonObject ?? throw new InvalidDataException("plugin.json 根节点不是对象");
+
+            var incoming = JsonNode.Parse(config.GetRawText());
+            JsonNode? mergedConfig;
+            if (root["config"] is JsonObject existing && incoming is JsonObject patch)
+            {
+                // 只覆盖表单提交的键，保留未在 configSchema 中声明的配置
+                foreach (var (key, value) in patch)
+                    existing[key] = value?.DeepClone();
+                mergedConfig = existing;
+            }
+            else
+            {
+                mergedConfig = incoming;
+                root["config"] = mergedConfig;
+            }
+
+            await File.WriteAllTextAsync(
+                manifestPath,
+                root.ToJsonString(ManifestWriteOptions),
+                cancellationToken).ConfigureAwait(false);
+
+            descriptor.Manifest.Config = mergedConfig is null
+                ? null
+                : JsonSerializer.SerializeToElement(mergedConfig);
+
+            // 已加载的实例立即按新配置重建；启用中的插件顺带完成首次加载
+            if (_loaded.ContainsKey(descriptor.Manifest.Id))
+                await UnloadAsync(descriptor).ConfigureAwait(false);
+
+            if (descriptor.Enabled)
+                await LoadAsync(descriptor, cancellationToken).ConfigureAwait(false);
+
+            changed = true;
+            Logger.Information("plugin {Plugin} config saved", descriptor.Manifest.Id);
         }
         finally
         {

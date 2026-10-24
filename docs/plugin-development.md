@@ -80,6 +80,7 @@ SoufflePet（宿主）
 | `entryType` | 否 | 入口类型全名；省略时取程序集内唯一的 `PluginBase` 子类 |
 | `timeoutSeconds` | 否 | 单个工具调用超时秒数，宿主限制 1–300，默认 30 |
 | `config` | 否 | 任意 JSON，原样交给 `PluginContext.Configuration` |
+| `configSchema` | 否 | 配置表单描述；声明后插件窗口会生成可视化配置，见第 6 节 |
 
 ### HelloPlugin.cs
 
@@ -194,17 +195,44 @@ internal sealed class MyFilter
 
 ## 6. 配置与日志
 
-```csharp
-// plugin.json 的 config 段（JsonElement?）
-var config = context.Configuration;
+插件窗口会为 `configSchema` 声明的字段生成可视化表单；保存时写回 `plugin.json` 的 `config` 段，并立即重新加载插件。
 
-// 日志会带上插件 id 写入应用日志
+```json
+"config": {
+  "enabled": true,
+  "retry": 3,
+  "mode": "fast",
+  "models": ["deepseek-chat"]
+},
+"configSchema": [
+  { "key": "enabled", "label": "启用扩展", "type": "boolean" },
+  { "key": "retry", "label": "重试次数", "type": "number" },
+  { "key": "mode", "label": "模式", "type": "select", "options": ["fast", "safe"] },
+  { "key": "models", "label": "适用模型", "type": "list", "description": "每行一个；留空表示全部" }
+]
+```
+
+| type | 界面控件 | JSON 值 |
+| --- | --- | --- |
+| `text` | 单行输入框 | 字符串 |
+| `multiline` | 多行输入框 | 字符串 |
+| `number` | 单行输入框，保存时校验 | 数字 |
+| `boolean` | 勾选框 | 布尔 |
+| `select` | 下拉框 | `options` 中的字符串 |
+| `list` | 多行输入框 | 字符串数组（每行一项） |
+
+- `key` 必须在 `configSchema` 内唯一，且与 `config` 的属性名**完全一致（大小写敏感）**；`label` 省略时显示 `key`。写成 `Models` 而 `config` 里是 `models` 时，界面读不到当前值，保存还会新增一个插件不会读取的键，因此请逐字对齐。
+- 未在 `configSchema` 中声明的 `config` 键仍会原样传给插件，只是界面上不可编辑。
+- 保存会重写整个 `plugin.json`（统一缩进，注释不保留）；插件目录不可写时保存失败，界面会提示原因。
+- 插件在 `OnInitializedAsync` 中读取 `Context.Configuration`；保存后宿主自动卸载并按新配置重新加载。
+
+日志会带上插件 id 写入应用日志：
+
+```csharp
 context.Logger.LogInformation("初始化完成");
 context.Logger.LogWarning("配置缺失，使用默认值");
 context.Logger.LogError(exception, "请求失败");
 ```
-
-本期不提供插件配置表单，`config` 由插件作者写在 `plugin.json` 中随包分发；用户也可以直接编辑已安装插件目录下的 `plugin.json`（修改后重启应用生效）。
 
 ## 7. 打包与导入
 

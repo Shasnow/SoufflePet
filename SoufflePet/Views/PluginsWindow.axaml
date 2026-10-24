@@ -3,6 +3,7 @@
         xmlns:vm="using:SoufflePet.ViewModels"
         x:Class="SoufflePet.Views.PluginsWindow"
         x:DataType="vm:PluginsViewModel"
+        x:CompileBindings="True"
         Title="{Binding WindowTitle}"
         Width="744"
         Height="588"
@@ -13,6 +14,275 @@
         Background="Transparent"
         ShowInTaskbar="False"
         RequestedThemeVariant="Dark">
-    <!-- 内容交给 ViewLocator：DataContext 是 PluginsViewModel 时自动实例化 PluginsView -->
-    <ContentControl Content="{Binding}" />
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="插"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="插件" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：插件列表 -->
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,2">
+                            <TextBlock Text="插件" Classes="section" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="导入插件：上传含 plugin.json 的压缩包"
+                                        Click="OnInstallClick">
+                                    <TextBlock Text="导入" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="重新扫描插件目录"
+                                        Command="{Binding RefreshCommand}">
+                                    <TextBlock Text="刷新" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="在资源管理器中打开插件目录"
+                                        Command="{Binding OpenFolderCommand}">
+                                    <TextBlock Text="打开" Classes="muted" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="1" Margin="4,0,4,6" Spacing="1">
+                            <TextBlock Text="{Binding Status}"
+                                       Classes="label"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <!-- 导入/切换结果：失败时提示原因 -->
+                            <TextBlock Text="{Binding Message}"
+                                       IsVisible="{Binding HasMessage}"
+                                       FontSize="10.5"
+                                       Foreground="#8CFFFFFF"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <ListBox Grid.Row="2"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Plugins}"
+                                 SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:PluginItemViewModel">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                        <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip.Tip="停用后模型无法调用该插件的工具" />
+                                        <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="12.5"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Subtitle}"
+                                                       FontSize="10.5"
+                                                       Foreground="#66FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：插件详情 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0">
+
+                        <StackPanel VerticalAlignment="Center"
+                                    Spacing="4"
+                                    IsVisible="{Binding !HasSelection}">
+                            <TextBlock Text="没有找到插件"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="在应用目录 plugins 或 ~/.souffle/plugins 下放置 plugin.json，或点「导入」上传压缩包"
+                                       FontSize="10.5"
+                                       Foreground="#66FFFFFF"
+                                       HorizontalAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- 详情通过 ContentControl + DataTemplate 绑定：未选中时内容为 null，不会产生空引用绑定错误 -->
+                        <ContentControl Content="{Binding SelectedPlugin}"
+                                        HorizontalContentAlignment="Stretch"
+                                        VerticalContentAlignment="Stretch">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate x:DataType="vm:PluginItemViewModel">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Spacing="6" Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+
+                                            <TextBlock Text="{Binding Description}"
+                                                       IsVisible="{Binding HasDescription}"
+                                                       FontSize="11"
+                                                       Foreground="#8CFFFFFF"
+                                                       TextWrapping="Wrap" />
+
+                                            <Border Height="1" Background="#14FFFFFF" Margin="0,4" />
+
+                                            <TextBlock Text="{Binding StateText, StringFormat='状态：{0}'}"
+                                                       FontSize="11.5"
+                                                       Foreground="#D9FFFFFF"
+                                                       TextWrapping="Wrap" />
+
+                                            <TextBlock Text="{Binding FailureText}"
+                                                       IsVisible="{Binding HasFailure}"
+                                                       FontSize="11"
+                                                       Foreground="#E5B96F" />
+
+                                            <TextBlock Text="{Binding Version, StringFormat='版本：{0}'}"
+                                                       FontSize="11"
+                                                       Foreground="#8CFFFFFF" />
+
+                                            <TextBlock Text="{Binding Author, StringFormat='作者：{0}'}"
+                                                       IsVisible="{Binding HasAuthor}"
+                                                       FontSize="11"
+                                                       Foreground="#8CFFFFFF" />
+
+                                            <TextBlock Text="{Binding Source, StringFormat='来源：{0}'}"
+                                                       FontSize="11"
+                                                       Foreground="#8CFFFFFF" />
+
+                                            <TextBlock Text="{Binding Id, StringFormat='id：{0}'}"
+                                                       FontSize="10.5"
+                                                       Foreground="#66FFFFFF" />
+
+                                            <TextBlock Text="工具" Classes="label" Margin="0,4,0,0" />
+
+                                            <SelectableTextBlock Text="{Binding ToolSummary}"
+                                                                 FontSize="11"
+                                                                 Foreground="#D9FFFFFF"
+                                                                 LineHeight="17"
+                                                                 TextWrapping="Wrap" />
+
+                                            <TextBlock Text="配置"
+                                                       Classes="label"
+                                                       Margin="0,6,0,0"
+                                                       IsVisible="{Binding HasConfig}" />
+
+                                            <ItemsControl ItemsSource="{Binding ConfigFields}"
+                                                          IsVisible="{Binding HasConfig}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:PluginConfigFieldViewModel">
+                                                        <StackPanel Spacing="3" Margin="0,2,0,4">
+                                                            <TextBlock Text="{Binding Label}"
+                                                                       FontSize="11.5"
+                                                                       Foreground="#D9FFFFFF" />
+                                                            <TextBlock Text="{Binding Description}"
+                                                                       IsVisible="{Binding HasDescription}"
+                                                                       FontSize="10.5"
+                                                                       Foreground="#66FFFFFF"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBox Classes="field"
+                                                                     Text="{Binding Text, Mode=TwoWay}"
+                                                                     IsVisible="{Binding IsText}" />
+                                                            <TextBox Classes="field"
+                                                                     Text="{Binding Text, Mode=TwoWay}"
+                                                                     IsVisible="{Binding IsMultiline}"
+                                                                     AcceptsReturn="True"
+                                                                     Height="64"
+                                                                     TextWrapping="Wrap" />
+                                                            <TextBox Classes="field"
+                                                                     Text="{Binding Text, Mode=TwoWay}"
+                                                                     IsVisible="{Binding IsList}"
+                                                                     AcceptsReturn="True"
+                                                                     Height="64"
+                                                                     TextWrapping="Wrap"
+                                                                     PlaceholderText="每行一个" />
+                                                            <CheckBox IsChecked="{Binding Bool, Mode=TwoWay}"
+                                                                      IsVisible="{Binding IsBool}"
+                                                                      Content="启用" />
+                                                            <ComboBox ItemsSource="{Binding Options}"
+                                                                      SelectedItem="{Binding Text, Mode=TwoWay}"
+                                                                      IsVisible="{Binding IsSelect}"
+                                                                      HorizontalAlignment="Stretch" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <Button Classes="primary"
+                                                    Content="保存配置"
+                                                    Command="{Binding SaveConfigCommand}"
+                                                    IsVisible="{Binding HasConfig}"
+                                                    HorizontalAlignment="Left"
+                                                    Padding="14,4"
+                                                    Margin="0,2,0,0" />
+                                            <TextBlock Text="保存后立即重新加载插件。"
+                                                       IsVisible="{Binding HasConfig}"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF" />
+
+                                            <TextBlock Text="{Binding Directory, StringFormat='目录：{0}'}"
+                                                       Margin="0,4,0,0"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip.Tip="{Binding Directory}" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
 </Window>

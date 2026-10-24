@@ -9,5 +9,13 @@
   "timeoutSeconds": 30,
   "config": {
     "models": []
-  }
+  },
+  "configSchema": [
+    {
+      "key": "models",
+      "label": "适用模型",
+      "type": "list",
+      "description": "填写模型 id，每行一个；留空表示对所有模型生效。"
+    }
+  ]
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -45,6 +47,9 @@ public sealed class PluginManifest
     /// <summary>插件自定义配置：原样交给 <see cref="PluginContext.Configuration" />。</summary>
     public JsonElement? Config { get; set; }
 
+    /// <summary>配置表单描述；为空表示该插件没有可视化配置。</summary>
+    public List<PluginConfigField>? ConfigSchema { get; set; }
+
     [JsonIgnore]
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Id : Name;
 
@@ -65,6 +70,22 @@ public sealed class PluginManifest
         if (string.IsNullOrWhiteSpace(Assembly)) return "plugin.json 缺少 assembly";
         if (Path.IsPathRooted(Assembly) || Assembly.Split('/', '\\').Any(part => part == ".."))
             return "assembly 必须是插件目录内的相对路径";
+
+        if (ConfigSchema is { Count: > 0 })
+        {
+            // 与 config 的读写保持一致：JSON 属性名大小写敏感，这里也按大小写敏感判重
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var field in ConfigSchema)
+            {
+                if (string.IsNullOrWhiteSpace(field.Key))
+                    return "configSchema 中存在缺少 key 的项";
+                if (!keys.Add(field.Key))
+                    return $"configSchema 中 key「{field.Key}」重复";
+                if (!PluginConfigField.SupportedTypes.Contains(field.Type))
+                    return $"configSchema 中「{field.Key}」的 type「{field.Type}」不支持";
+            }
+        }
+
         return null;
     }
 }

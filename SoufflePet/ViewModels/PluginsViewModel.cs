@@ -52,7 +52,7 @@ public partial class PluginsViewModel : ViewModelBase
     public string WindowTitle => $"{PetName} · 插件";
 
     /// <summary>标题栏下方的说明文案。</summary>
-    public string ToolHint => "插件可向对话模型提供工具，或对模型回复做后处理；启停立即生效于下一轮对话";
+    public string ToolHint => "插件可向对话模型提供工具，或对模型回复做后处理；启停与配置保存立即生效";
 
     /// <summary>列表上方的统计文案。</summary>
     [ObservableProperty]
@@ -75,13 +75,18 @@ public partial class PluginsViewModel : ViewModelBase
         {
             var selectedId = SelectedPlugin?.Id;
 
-            foreach (var item in Plugins) item.EnabledChanged -= OnItemEnabledChanged;
+            foreach (var item in Plugins)
+            {
+                item.EnabledChanged -= OnItemEnabledChanged;
+                item.ConfigSaveRequested -= OnItemConfigSaveRequested;
+            }
             Plugins.Clear();
 
             foreach (var descriptor in _plugins.Plugins)
             {
                 var item = new PluginItemViewModel(descriptor);
                 item.EnabledChanged += OnItemEnabledChanged;
+                item.ConfigSaveRequested += OnItemConfigSaveRequested;
                 Plugins.Add(item);
             }
 
@@ -150,6 +155,27 @@ public partial class PluginsViewModel : ViewModelBase
         }
 
         Reload();
+    }
+
+    private async void OnItemConfigSaveRequested(object? sender, EventArgs e)
+    {
+        if (_reloading || sender is not PluginItemViewModel item) return;
+
+        try
+        {
+            await _plugins.SaveConfigAsync(item.Id, item.BuildConfig());
+            Message = $"已保存「{item.Name}」的配置";
+            Reload();
+        }
+        catch (FormatException ex)
+        {
+            Message = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "save plugin {Plugin} config failed", item.Id);
+            Message = $"保存配置失败：{ex.Message}";
+        }
     }
 
     private void UpdateStatus()
