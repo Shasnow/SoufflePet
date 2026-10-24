@@ -1,0 +1,70 @@
+{
+  "id": "napcat",
+  "name": "NapCat QQ 消息平台",
+  "version": "1.0.0",
+  "author": "SoufflePet",
+  "description": "通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ：私聊或群聊里被 @ 时主动提醒桌宠，并可在最近一次会话里回复消息",
+  "assembly": "SoufflePet.Plugin.NapCat.dll",
+  "entryType": "SoufflePet.Plugins.NapCat.NapCatPlugin",
+  "timeoutSeconds": 30,
+  "config": {
+    "wsUrl": "ws://127.0.0.1:3001",
+    "accessToken": "",
+    "allowedUsers": [],
+    "allowedGroups": [],
+    "requireAtInGroup": true,
+    "wakeOnPrivateMessage": true,
+    "filterSelfMessage": false,
+    "maxReplyChars": 1500
+  },
+  "configSchema": [
+    {
+      "key": "wsUrl",
+      "label": "WebSocket 地址",
+      "type": "text",
+      "description": "NapCat 需开启「WebSocket 服务器」，插件以客户端方式连接，例如 ws://127.0.0.1:3001。"
+    },
+    {
+      "key": "accessToken",
+      "label": "访问令牌",
+      "type": "text",
+      "description": "与 NapCat 的 WebSocket 服务令牌一致；没有设置就留空。"
+    },
+    {
+      "key": "allowedUsers",
+      "label": "允许的私聊 QQ 号",
+      "type": "list",
+      "description": "每行一个 QQ 号；留空表示不启用白名单，所有私聊都放行。"
+    },
+    {
+      "key": "allowedGroups",
+      "label": "允许的群号",
+      "type": "list",
+      "description": "每行一个群号；留空表示不启用白名单，所有群聊都放行。"
+    },
+    {
+      "key": "requireAtInGroup",
+      "label": "群聊仅 @ 时提醒",
+      "type": "boolean",
+      "description": "开启后只有 @ 桌宠的群消息才会唤醒它；关闭后允许群里的每条消息都唤醒。"
+    },
+    {
+      "key": "wakeOnPrivateMessage",
+      "label": "私聊消息提醒桌宠",
+      "type": "boolean",
+      "description": "收到允许用户的私聊时主动提醒桌宠；关闭后只记录、不唤醒。"
+    },
+    {
+      "key": "filterSelfMessage",
+      "label": "过滤自己发出的消息",
+      "type": "boolean",
+      "description": "开启后忽略机器人自己发出的消息，避免自己回复自己；默认关闭，需要时可手动开启。"
+    },
+    {
+      "key": "maxReplyChars",
+      "label": "单条消息字数上限",
+      "type": "number",
+      "description": "超长回复会拆成多条发送，范围 200-4000。"
+    }
+  ]
+}

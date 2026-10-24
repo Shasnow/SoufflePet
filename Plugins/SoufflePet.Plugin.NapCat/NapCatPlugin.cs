@@ -1,0 +1,1193 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Shasnow
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using SoufflePet.Plugin.Sdk;
+
+namespace SoufflePet.Plugins.NapCat;
+
+/// <summary>
+/// NapCat（OneBot 11）消息平台：以正向 WebSocket 客户端连接 NapCat，接收消息事件并用同一连接发送 action。
+/// 群聊里 @ 到桌宠（或按配置关掉 @ 限制后任意群消息）、以及允许用户的私聊会通过
+/// <see cref="OnMentioned" /> 主动唤醒桌宠；支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
+/// </summary>
+public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatformConversation
+{
+    /// <summary>全局未读队列中最多保留的消息条数，超出时丢弃最早的。</summary>
+    private const int MaxUnreadMessages = 30;
+
+    /// <summary>每个会话最多保留的历史消息条数，供按会话读取使用。</summary>
+    private const int MaxHistoryMessages = 50;
+
+    /// <summary>最多保留的会话数，超出时淘汰最久未活跃的会话。</summary>
+    private const int MaxConversations = 200;
+
+    /// <summary>引用消息里展示的被引用正文最大字数。</summary>
+    private const int QuotedSummaryLength = 60;
+
+    /// <summary>解析阶段给引用段留的占位，反查拿到正文后原地替换。</summary>
+    private const string QuotePlaceholder = "（引用）";
+
+    /// <summary>记住的自身发送消息 id 数量上限，用于识别他人引用桌宠消息。</summary>
+    private const int MaxSentMessageIds = 200;
+
+    /// <summary>缓存的反查引用摘要条数上限。</summary>
+    private const int MaxQuoteLabels = 200;
+
+    /// <summary>发送 action 后等待 NapCat 响应的超时。</summary>
+    private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>断线后的重连间隔。</summary>
+    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
+
+    /// <summary>单条 WebSocket 消息的长度上限，防止异常数据无限占用内存。</summary>
+    private const int MaxPayloadBytes = 8 * 1024 * 1024;
+
+    /// <summary>消息字符串里 OneBot 的 CQ 码，用于解析 message_format=string 的平台。</summary>
+    private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);
+
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly Lock _sync = new();
+    private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new(StringComparer.Ordinal);
+    private readonly List<(string ConversationId, string Line)> _unread = [];
+    private readonly Dictionary<string, List<string>> _history = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _conversationNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _lastActive = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _sentMessageIds = new();
+    private readonly HashSet<string> _sentMessageIdSet = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _quoteLabels = new(StringComparer.Ordinal);
+    private readonly Queue<string> _quoteLabelOrder = new();
+    private readonly CancellationTokenSource _cts = new();
+
+    private ClientWebSocket? _socket;
+    private Task? _pump;
+
+    private string _wsUrl = string.Empty;
+    private string _accessToken = string.Empty;
+    private HashSet<long> _allowedUsers = [];
+    private HashSet<long> _allowedGroups = [];
+    private bool _requireAtInGroup = true;
+    private bool _wakeOnPrivateMessage = true;
+
+    /// <summary>是否过滤机器人自己发出的消息，默认关闭。</summary>
+    private bool _filterSelfMessage;
+    private int _maxReplyChars = 1500;
+
+    /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
+    private long _selfId;
+
+    /// <summary>最近一次可回复的会话：发送消息时按它决定私聊还是群聊，以及目标 id。</summary>
+    private (string Kind, long Id)? _lastConversation;
+
+    /// <summary>平台 id，供 get_platform_messages / send_platform_message 参数使用。</summary>
+    public string Id => "napcat";
+
+    /// <summary>收到需要桌宠处理的消息时触发，由宿主订阅后唤醒桌宠。</summary>
+    public event EventHandler<PlatformIncomingMessage>? OnMentioned;
+
+    protected override Task OnInitializedAsync(CancellationToken cancellationToken)
+    {
+        ReadConfiguration();
+
+        if (!Uri.TryCreate(_wsUrl, UriKind.Absolute, out var uri) || (uri.Scheme != "ws" && uri.Scheme != "wss"))
+        {
+            Context.Logger.LogWarning("NapCat WebSocket 地址无效：{Url}，插件不会发起连接", _wsUrl);
+            return Task.CompletedTask;
+        }
+
+        Context.Logger.LogInformation(
+            "NapCat 平台将连接 {Url}；私聊白名单 {Users} 个，群白名单 {Groups} 个",
+            _wsUrl,
+            _allowedUsers.Count,
+            _allowedGroups.Count);
+
+        _pump = Task.Run(() => RunAsync(uri, _cts.Token), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    public Task SendMessageAsync(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return Task.CompletedTask;
+
+        (string Kind, long Id) conversation;
+        lock (_sync)
+        {
+            if (_lastConversation is not { } last)
+                throw new InvalidOperationException("NapCat 还没有收到过可回复的消息，无法确定发送目标。");
+            conversation = last;
+        }
+
+        return SendToConversationAsync(conversation, message);
+    }
+
+    /// <summary>向指定会话发送消息；conversationId 形如 group:12345 或 private:777。</summary>
+    public async Task SendConversationMessageAsync(string conversationId, string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+
+        if (!TryParseConversationId(conversationId, out var conversation))
+            throw new ArgumentException(
+                $"无法识别的会话 id「{conversationId}」，应形如 group:12345 或 private:777。",
+                nameof(conversationId));
+
+        await SendToConversationAsync(conversation, message).ConfigureAwait(false);
+    }
+
+    /// <summary>列出本次运行期间收到过消息的会话，按最近活跃排序。</summary>
+    public Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync()
+    {
+        lock (_sync)
+        {
+            IReadOnlyList<PlatformConversation> list = _history
+                .Where(pair => pair.Value.Count > 0)
+                .OrderByDescending(pair =>
+                    _lastActive.TryGetValue(pair.Key, out var time) ? time : DateTimeOffset.MinValue)
+                .Select(pair => new PlatformConversation(pair.Key, _conversationNames.GetValueOrDefault(pair.Key)))
+                .ToList();
+            return Task.FromResult(list);
+        }
+    }
+
+    /// <summary>
+    /// 读取指定会话最近的消息：优先向 NapCat 查询历史（含插件启动前的消息），
+    /// 未连接或查询失败时退回本次运行缓存；读取后该会话视为已读。
+    /// </summary>
+    public async Task<string> GetConversationMessagesAsync(string conversationId, int limit = 20)
+    {
+        var id = NormalizeConversationId(conversationId);
+        if (id.Length == 0 || !TryParseConversationId(id, out var conversation)) return string.Empty;
+
+        var count = Math.Clamp(limit, 1, MaxHistoryMessages);
+        var remote = await FetchHistoryAsync(conversation, count).ConfigureAwait(false);
+
+        lock (_sync)
+        {
+            _unread.RemoveAll(entry => string.Equals(entry.ConversationId, id, StringComparison.OrdinalIgnoreCase));
+
+            if (remote.Count > 0) return string.Join('\n', remote);
+            if (!_history.TryGetValue(id, out var history) || history.Count == 0) return string.Empty;
+
+            return string.Join('\n', history.Skip(Math.Max(0, history.Count - count)));
+        }
+    }
+
+    /// <summary>
+    /// 通过 OneBot 历史接口拉取会话最近的消息；未连接、接口不支持或返回为空时返回空列表，
+    /// 由调用方退回本地缓存。
+    /// </summary>
+    private async Task<IReadOnlyList<string>> FetchHistoryAsync(
+        (string Kind, long Id) conversation,
+        int count)
+    {
+        ClientWebSocket? socket;
+        lock (_sync) socket = _socket;
+        if (socket is not { State: WebSocketState.Open }) return [];
+
+        var id = $"{conversation.Kind}:{conversation.Id.ToString(CultureInfo.InvariantCulture)}";
+        var isGroup = conversation.Kind == "group";
+        var parameters = isGroup
+            ? new Dictionary<string, object?>
+            {
+                ["group_id"] = conversation.Id,
+                ["count"] = count,
+            }
+            : new Dictionary<string, object?>
+            {
+                ["user_id"] = conversation.Id,
+                ["count"] = count,
+            };
+
+        try
+        {
+            var response = await SendActionAsync(
+                    socket,
+                    isGroup ? "get_group_msg_history" : "get_friend_msg_history",
+                    parameters)
+                .ConfigureAwait(false);
+
+            if (!response.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                return [];
+            if (!data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array)
+                return [];
+
+            var lines = new List<string>();
+            foreach (var message in messages.EnumerateArray())
+            {
+                if (message.ValueKind != JsonValueKind.Object) continue;
+
+                var parsed = ParseMessage(message);
+                var text = parsed.Text;
+                if (string.IsNullOrWhiteSpace(text)) continue;
+
+                // 反查过的引用直接用缓存里的摘要替换占位，没缓存过就保留「（引用）」
+                if (parsed.QuotedId is { } quotedHistoryId && TryGetQuoteLabel(quotedHistoryId) is { } quotedLabel)
+                    text = text.Replace(QuotePlaceholder, quotedLabel, StringComparison.Ordinal);
+
+                var sender = GetSenderName(message, GetInt64(message, "user_id"));
+                lines.Add($"[{id}] {sender}：{text}");
+            }
+
+            Context.Logger.LogInformation("从 NapCat 读取会话 {Conversation} 的历史消息 {Count} 条", id, lines.Count);
+            return lines;
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogDebug(ex, "读取 NapCat 历史消息失败，改用本地缓存");
+            return [];
+        }
+    }
+
+    public Task<string> ReceiveMessageAsync()
+    {
+        lock (_sync)
+        {
+            if (_unread.Count == 0) return Task.FromResult(string.Empty);
+
+            var text = string.Join('\n', _unread.Select(entry => entry.Line));
+            _unread.Clear();
+            return Task.FromResult(text);
+        }
+    }
+
+    private async Task SendToConversationAsync((string Kind, long Id) conversation, string message)
+    {
+        ClientWebSocket? socket;
+        lock (_sync) socket = _socket;
+
+        if (socket is not { State: WebSocketState.Open })
+            throw new InvalidOperationException("NapCat WebSocket 未连接，消息没有发送。");
+
+        var isGroup = conversation.Kind == "group";
+        foreach (var chunk in SplitMessage(message, _maxReplyChars))
+        {
+            var parameters = isGroup
+                ? new Dictionary<string, object?>
+                {
+                    ["group_id"] = conversation.Id,
+                    ["message"] = chunk,
+                    ["auto_escape"] = true,
+                }
+                : new Dictionary<string, object?>
+                {
+                    ["user_id"] = conversation.Id,
+                    ["message"] = chunk,
+                    ["auto_escape"] = true,
+                };
+
+            var response = await SendActionAsync(
+                    socket,
+                    isGroup ? "send_group_msg" : "send_private_msg",
+                    parameters)
+                .ConfigureAwait(false);
+
+            // 记住自己发出的消息 id，供之后快速识别「他人引用桌宠消息」
+            var sentId = response.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+                ? GetString(data, "message_id")
+                : null;
+            if (sentId is null)
+                Context.Logger.LogDebug("NapCat 发送响应缺少 message_id：{Raw}", response.GetRawText());
+            RememberSentMessageId(sentId);
+        }
+
+        Context.Logger.LogInformation("已向{Kind} {Id} 发送消息", isGroup ? "群" : "用户", conversation.Id);
+    }
+
+    public override async Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 已释放过，忽略
+        }
+
+        ClientWebSocket? socket;
+        lock (_sync) socket = _socket;
+        if (socket is { State: WebSocketState.Open })
+        {
+            using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try
+            {
+                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "shutdown", closeTimeout.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Context.Logger.LogDebug(ex, "关闭 NapCat WebSocket 时出错");
+            }
+        }
+
+        if (_pump is { } pump)
+        {
+            try
+            {
+                await pump.WaitAsync(TimeSpan.FromSeconds(3), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Context.Logger.LogDebug(ex, "等待 NapCat 连接循环退出时超时");
+            }
+        }
+
+        List<TaskCompletionSource<JsonElement>> pending;
+        lock (_sync)
+        {
+            pending = [.. _pending.Values];
+            _pending.Clear();
+        }
+
+        foreach (var completion in pending) completion.TrySetCanceled();
+
+        _cts.Dispose();
+        try
+        {
+            _sendGate.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 已有发送操作释放过，忽略
+        }
+    }
+
+    /// <summary>连接循环：连上后持续接收事件，断开或异常时等待一段时间再重连。</summary>
+    private async Task RunAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            ClientWebSocket? socket = null;
+            try
+            {
+                socket = new ClientWebSocket();
+                socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+                if (!string.IsNullOrWhiteSpace(_accessToken))
+                    socket.Options.SetRequestHeader("Authorization", $"Bearer {_accessToken}");
+
+                await socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
+                lock (_sync) _socket = socket;
+                Context.Logger.LogInformation("NapCat WebSocket 已连接：{Url}", uri);
+
+                await PumpAsync(socket, cancellationToken).ConfigureAwait(false);
+                Context.Logger.LogWarning("NapCat WebSocket 已断开");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Context.Logger.LogWarning(ex, "NapCat WebSocket 连接异常");
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    if (ReferenceEquals(_socket, socket)) _socket = null;
+                }
+
+                socket?.Dispose();
+            }
+
+            try
+            {
+                await Task.Delay(ReconnectDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    /// <summary>读取 WebSocket 帧：把分片拼成完整 JSON，再分派给事件或 action 响应。</summary>
+    private async Task PumpAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[16 * 1024];
+        using var payload = new MemoryStream();
+
+        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        {
+            var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken)
+                .ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                Context.Logger.LogInformation(
+                    "NapCat 关闭了连接：{Status} {Reason}",
+                    result.CloseStatus,
+                    result.CloseStatusDescription);
+                return;
+            }
+
+            payload.Write(buffer, 0, result.Count);
+            if (payload.Length > MaxPayloadBytes)
+            {
+                Context.Logger.LogWarning("NapCat 推送的单条数据超过 {Size} 字节，已丢弃", MaxPayloadBytes);
+                payload.SetLength(0);
+                continue;
+            }
+
+            if (!result.EndOfMessage) continue;
+
+            var json = Encoding.UTF8.GetString(payload.GetBuffer(), 0, (int)payload.Length);
+            payload.SetLength(0);
+            HandlePayload(json);
+        }
+    }
+
+    private void HandlePayload(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+
+            // 先看 echo：这是本插件发出的 action 的响应
+            if (root.TryGetProperty("echo", out var echo) && echo.ValueKind == JsonValueKind.String)
+            {
+                CompletePending(echo.GetString()!, root);
+                return;
+            }
+
+            if (GetString(root, "post_type") != "message") return;
+            HandleMessage(root);
+        }
+        catch (JsonException ex)
+        {
+            Context.Logger.LogWarning(ex, "解析 NapCat 推送内容失败");
+        }
+    }
+
+    private void HandleMessage(JsonElement root)
+    {
+        var selfId = GetInt64(root, "self_id");
+        if (selfId > 0) _selfId = selfId;
+
+        var userId = GetInt64(root, "user_id");
+        if (userId <= 0) return;
+        if (_filterSelfMessage && userId == _selfId) return;
+
+        var parsed = ParseMessage(root);
+        var text = parsed.Text;
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var sender = GetSenderName(root, userId);
+        var messageId = GetString(root, "message_id");
+        var messageType = GetString(root, "message_type");
+
+        if (messageType == "group")
+        {
+            var groupId = GetInt64(root, "group_id");
+            // 白名单为空表示不启用白名单，全部放行
+            if (groupId <= 0 || (_allowedGroups.Count > 0 && !_allowedGroups.Contains(groupId))) return;
+
+            var conversationId = $"group:{groupId.ToString(CultureInfo.InvariantCulture)}";
+            var line = $"[{conversationId}] {sender}：{text}";
+            QueueMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
+            lock (_sync) _lastConversation = ("group", groupId);
+
+            // 引用了某条消息时，先反查被引用的正文补进这一行，再决定要不要唤醒桌宠
+            if (parsed.QuotedId is { } quotedId)
+                _ = EnrichQuoteAsync(
+                    quotedId,
+                    conversationId,
+                    line,
+                    sender,
+                    messageId,
+                    parsed.MentionsSelf || !_requireAtInGroup);
+            // 关掉 @ 限制后，群里每条消息都会唤醒桌宠
+            else if (parsed.MentionsSelf || !_requireAtInGroup)
+                RaiseMentioned(line, sender, messageId);
+            return;
+        }
+
+        if (messageType == "private")
+        {
+            // 白名单为空表示不启用白名单，全部放行
+            if (_allowedUsers.Count > 0 && !_allowedUsers.Contains(userId)) return;
+
+            var conversationId = $"private:{userId.ToString(CultureInfo.InvariantCulture)}";
+            var line = $"[{conversationId}] {sender}：{text}";
+            QueueMessage(conversationId, line, sender);
+            lock (_sync) _lastConversation = ("private", userId);
+
+            if (parsed.QuotedId is { } quotedId)
+                _ = EnrichQuoteAsync(quotedId, conversationId, line, sender, messageId, _wakeOnPrivateMessage);
+            else if (_wakeOnPrivateMessage)
+                RaiseMentioned(line, sender, messageId);
+        }
+    }
+
+    /// <summary>解析出的消息正文、是否 @/引用桌宠、以及首条被引用消息 id（供事后校验）。</summary>
+    private sealed record ParsedMessage(string Text, bool MentionsSelf, string? QuotedId);
+
+    /// <summary>解析消息正文：支持 OneBot 的数组段格式，也兼容 string + CQ 码格式。</summary>
+    private ParsedMessage ParseMessage(JsonElement root)
+    {
+        if (root.TryGetProperty("message", out var message))
+        {
+            if (message.ValueKind == JsonValueKind.Array) return ParseSegments(message);
+            if (message.ValueKind == JsonValueKind.String) return ParseCqCode(message.GetString() ?? string.Empty);
+        }
+
+        return ParseCqCode(GetString(root, "raw_message") ?? string.Empty);
+    }
+
+    private ParsedMessage ParseSegments(JsonElement segments)
+    {
+        var builder = new StringBuilder();
+        var mentionsSelf = false;
+        string? quotedId = null;
+
+        foreach (var segment in segments.EnumerateArray())
+        {
+            if (segment.ValueKind != JsonValueKind.Object) continue;
+            if (!segment.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object) continue;
+
+            switch (GetString(segment, "type"))
+            {
+                case "reply":
+                    // 引用的消息是桌宠自己发出的，同样视为在叫桌宠；正文内容稍后用 get_msg 反查补上
+                    var id = GetString(data, "id") ?? GetString(data, "message_id");
+                    if (string.IsNullOrWhiteSpace(id)) break;
+
+                    // 先用占位表示这是一条引用，读历史时也能看出回复关系
+                    builder.Append(QuotePlaceholder);
+                    quotedId ??= id;
+                    if (IsSentBySelf(id)) mentionsSelf = true;
+
+                    break;
+
+                case "text":
+                    builder.Append(GetString(data, "text"));
+                    break;
+
+                case "at":
+                    var qq = GetString(data, "qq");
+                    if (qq == "all")
+                    {
+                        builder.Append("@全体成员");
+                    }
+                    else if (qq == _selfId.ToString(CultureInfo.InvariantCulture))
+                    {
+                        mentionsSelf = true;
+                        builder.Append("@你");
+                    }
+                    else if (!string.IsNullOrEmpty(qq))
+                    {
+                        builder.Append('@').Append(qq);
+                    }
+
+                    break;
+
+                case "image":
+                    builder.Append("[图片]");
+                    break;
+                case "face":
+                    builder.Append("[表情]");
+                    break;
+                case "record":
+                    builder.Append("[语音]");
+                    break;
+                case "video":
+                    builder.Append("[视频]");
+                    break;
+                case "file":
+                    builder.Append("[文件]");
+                    break;
+                case "forward":
+                    builder.Append("[合并转发]");
+                    break;
+                case "json":
+                case "xml":
+                    builder.Append("[卡片消息]");
+                    break;
+            }
+        }
+
+        return new ParsedMessage(builder.ToString().Trim(), mentionsSelf, quotedId);
+    }
+
+    /// <summary>解析 CQ 码字符串；非文本段替换成可读占位，@ 自己时记录提醒标记。</summary>
+    private ParsedMessage ParseCqCode(string raw)
+    {
+        var builder = new StringBuilder();
+        var mentionsSelf = false;
+        string? quotedId = null;
+        var index = 0;
+
+        foreach (Match match in CqCodePattern.Matches(raw))
+        {
+            builder.Append(UnescapeCqText(raw[index..match.Index]));
+            index = match.Index + match.Length;
+
+            var type = match.Groups[1].Value;
+            var arguments = match.Groups[2].Value;
+            switch (type)
+            {
+                case "reply":
+                    var id = FindCqArgument(arguments, "id");
+                    if (string.IsNullOrWhiteSpace(id)) break;
+
+                    builder.Append(QuotePlaceholder);
+                    quotedId ??= id;
+                    if (IsSentBySelf(id)) mentionsSelf = true;
+
+                    break;
+
+                case "at":
+                    var qq = FindCqArgument(arguments, "qq");
+                    if (qq == "all")
+                    {
+                        builder.Append("@全体成员");
+                    }
+                    else if (qq == _selfId.ToString(CultureInfo.InvariantCulture))
+                    {
+                        mentionsSelf = true;
+                        builder.Append("@你");
+                    }
+                    else if (!string.IsNullOrEmpty(qq))
+                    {
+                        builder.Append('@').Append(qq);
+                    }
+
+                    break;
+
+                case "image":
+                    builder.Append("[图片]");
+                    break;
+                case "face":
+                    builder.Append("[表情]");
+                    break;
+                case "record":
+                    builder.Append("[语音]");
+                    break;
+                case "video":
+                    builder.Append("[视频]");
+                    break;
+                case "file":
+                    builder.Append("[文件]");
+                    break;
+                case "forward":
+                    builder.Append("[合并转发]");
+                    break;
+                case "json":
+                case "xml":
+                    builder.Append("[卡片消息]");
+                    break;
+            }
+        }
+
+        builder.Append(UnescapeCqText(raw[index..]));
+        return new ParsedMessage(builder.ToString().Trim(), mentionsSelf, quotedId);
+    }
+
+    /// <summary>把一条消息写入全局未读队列与所属会话的历史记录。</summary>
+    private void QueueMessage(string conversationId, string line, string? displayName)
+    {
+        lock (_sync)
+        {
+            _unread.Add((conversationId, line));
+            while (_unread.Count > MaxUnreadMessages) _unread.RemoveAt(0);
+
+            if (!_history.TryGetValue(conversationId, out var history))
+            {
+                history = [];
+                _history[conversationId] = history;
+            }
+
+            history.Add(line);
+            while (history.Count > MaxHistoryMessages) history.RemoveAt(0);
+
+            if (!string.IsNullOrWhiteSpace(displayName)) _conversationNames[conversationId] = displayName;
+            _lastActive[conversationId] = DateTimeOffset.Now;
+            TrimConversations();
+        }
+    }
+
+    /// <summary>会话数超过上限时，淘汰最久未活跃的会话及其历史、名称与未读记录（调用方需持有锁）。</summary>
+    private void TrimConversations()
+    {
+        while (_history.Count > MaxConversations)
+        {
+            string? oldest = null;
+            var oldestTime = DateTimeOffset.MaxValue;
+
+            foreach (var pair in _history)
+            {
+                var time = _lastActive.TryGetValue(pair.Key, out var lastActive)
+                    ? lastActive
+                    : DateTimeOffset.MinValue;
+                if (time >= oldestTime) continue;
+
+                oldest = pair.Key;
+                oldestTime = time;
+            }
+
+            if (oldest is null) return;
+
+            _history.Remove(oldest);
+            _conversationNames.Remove(oldest);
+            _lastActive.Remove(oldest);
+            _unread.RemoveAll(entry =>
+                string.Equals(entry.ConversationId, oldest, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>记住自己刚发出的一条消息 id，超出上限时淘汰最早的。</summary>
+    private void RememberSentMessageId(string? messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId)) return;
+
+        var id = messageId.Trim();
+        lock (_sync)
+        {
+            if (!_sentMessageIdSet.Add(id)) return;
+
+            _sentMessageIds.Enqueue(id);
+            while (_sentMessageIds.Count > MaxSentMessageIds)
+                _sentMessageIdSet.Remove(_sentMessageIds.Dequeue());
+        }
+
+        Context.Logger.LogDebug("已记录自己发出的消息 id：{Id}", id);
+    }
+
+    /// <summary>判断被引用的消息是否为桌宠自己发出的。</summary>
+    private bool IsSentBySelf(string? messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId)) return false;
+
+        var id = messageId.Trim();
+        lock (_sync) return _sentMessageIdSet.Contains(id);
+    }
+
+    /// <summary>
+    /// 反查被引用的消息，把它的正文补进这一行：成功时写成「（引用 发送者：摘要）」，
+    /// 失败时退回「[引用你的消息]」标记。补完再按需要唤醒桌宠，保证唤醒文本里带得上引用内容。
+    /// 反查在接收循环之外执行，避免等待自身响应造成死锁。
+    /// </summary>
+    private async Task EnrichQuoteAsync(
+        string quotedId,
+        string conversationId,
+        string line,
+        string sender,
+        string? messageId,
+        bool wake)
+    {
+        try
+        {
+            var quoted = await FetchQuotedAsync(quotedId).ConfigureAwait(false);
+
+            var label = quoted is { } value
+                ? value.IsSelf
+                    ? $"（引用你：{value.Summary}）"
+                    : $"（引用 {value.Sender}：{value.Summary}）"
+                : IsSentBySelf(quotedId)
+                    ? "[引用你的消息]"
+                    : QuotePlaceholder;
+
+            // 反查成功就把摘要缓存下来，之后读远端历史也能显示引用内容
+            if (quoted is not null) RememberQuoteLabel(quotedId, label);
+
+            // 解析阶段留的占位直接替换，避免留下两个引用标记
+            var enriched = line.Contains(QuotePlaceholder, StringComparison.Ordinal)
+                ? line.Replace(QuotePlaceholder, label, StringComparison.Ordinal)
+                : PrefixQuote(line, label + " ");
+            if (!string.Equals(enriched, line, StringComparison.Ordinal))
+                PatchQueuedLine(conversationId, line, enriched);
+
+            if (wake || quoted?.IsSelf == true) RaiseMentioned(enriched, sender, messageId);
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogDebug(ex, "处理被引用消息 {QuotedId} 失败", quotedId);
+            if (wake) RaiseMentioned(line, sender, messageId);
+        }
+    }
+
+    /// <summary>用 get_msg 取回被引用消息的发送者与正文摘要；取不到时返回 null。</summary>
+    private async Task<QuotedMessage?> FetchQuotedAsync(string quotedId)
+    {
+        ClientWebSocket? socket;
+        long selfId;
+        lock (_sync)
+        {
+            socket = _socket;
+            selfId = _selfId;
+        }
+
+        if (socket is not { State: WebSocketState.Open }) return null;
+
+        var response = await SendActionAsync(
+                socket,
+                "get_msg",
+                new Dictionary<string, object?> { ["message_id"] = quotedId })
+            .ConfigureAwait(false);
+
+        if (!response.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object) return null;
+
+        var quotedUserId = GetInt64(data, "user_id");
+        if (quotedUserId <= 0 && data.TryGetProperty("sender", out var quotedSender))
+            quotedUserId = GetInt64(quotedSender, "user_id");
+
+        var summary = Summarize(ParseMessage(data).Text);
+
+        Context.Logger.LogDebug(
+            "引用消息 {QuotedId} 的发送者 {UserId}，桌宠自己 {SelfId}",
+            quotedId,
+            quotedUserId,
+            selfId);
+
+        return new QuotedMessage(
+            quotedUserId > 0 && quotedUserId == selfId,
+            GetSenderName(data, quotedUserId),
+            summary);
+    }
+
+    /// <summary>在「[会话] 发送者：」之后插入引用标记。</summary>
+    private static string PrefixQuote(string line, string prefix)
+    {
+        var index = line.IndexOf('：', StringComparison.Ordinal);
+        return index >= 0 ? line[..(index + 1)] + prefix + line[(index + 1)..] : prefix + line;
+    }
+
+    /// <summary>把被引用的正文压成一行短摘要，避免长文把历史记录撑爆。</summary>
+    private static string Summarize(string text)
+    {
+        var single = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (single.Length == 0) return "[非文本消息]";
+
+        return single.Length <= QuotedSummaryLength ? single : single[..QuotedSummaryLength] + "…";
+    }
+
+    /// <summary>把刚入队的原始行换成补上引用内容的版本：未读队列与会话历史同步更新。</summary>
+    private void PatchQueuedLine(string conversationId, string oldLine, string newLine)
+    {
+        lock (_sync)
+        {
+            for (var i = _unread.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(_unread[i].ConversationId, conversationId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(_unread[i].Line, oldLine, StringComparison.Ordinal))
+                    _unread[i] = (conversationId, newLine);
+            }
+
+            if (!_history.TryGetValue(conversationId, out var history)) return;
+
+            for (var i = history.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(history[i], oldLine, StringComparison.Ordinal))
+                    history[i] = newLine;
+            }
+        }
+    }
+
+    /// <summary>记住已反查到的引用摘要，供后续渲染远端历史时直接使用。</summary>
+    private void RememberQuoteLabel(string quotedId, string label)
+    {
+        lock (_sync)
+        {
+            if (_quoteLabels.ContainsKey(quotedId)) return;
+
+            _quoteLabels[quotedId] = label;
+            _quoteLabelOrder.Enqueue(quotedId);
+            while (_quoteLabelOrder.Count > MaxQuoteLabels)
+                _quoteLabels.Remove(_quoteLabelOrder.Dequeue());
+        }
+    }
+
+    /// <summary>取缓存的引用摘要，未反查过时返回 null。</summary>
+    private string? TryGetQuoteLabel(string quotedId)
+    {
+        lock (_sync) return _quoteLabels.GetValueOrDefault(quotedId);
+    }
+
+    /// <summary>被引用消息的摘要信息。</summary>
+    private sealed record QuotedMessage(bool IsSelf, string Sender, string Summary);
+
+    private void RaiseMentioned(string content, string sender, string? messageId)
+    {
+        var handler = OnMentioned;
+        if (handler is null) return;
+
+        try
+        {
+            handler(this, new PlatformIncomingMessage(Id, content, sender, messageId));
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogWarning(ex, "向宿主转发 NapCat 平台提醒失败");
+        }
+    }
+
+    private void CompletePending(string echo, JsonElement response)
+    {
+        TaskCompletionSource<JsonElement>? completion;
+        lock (_sync)
+        {
+            if (!_pending.TryGetValue(echo, out completion)) return;
+        }
+
+        completion.TrySetResult(response.Clone());
+    }
+
+    /// <summary>发送一条 OneBot action，并等待带相同 echo 的响应；返回整个响应（含 data）。</summary>
+    private async Task<JsonElement> SendActionAsync(
+        ClientWebSocket socket,
+        string action,
+        Dictionary<string, object?> parameters)
+    {
+        var echo = Guid.NewGuid().ToString("N");
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["action"] = action,
+            ["params"] = parameters,
+            ["echo"] = echo,
+        });
+
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_sync) _pending[echo] = completion;
+
+        // ClientWebSocket 不支持并发发送，所有 action（发送消息、查询历史、反查引用）统一排队
+        await _sendGate.WaitAsync(_cts.Token).ConfigureAwait(false);
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(payload);
+            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token)
+                .ConfigureAwait(false);
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            timeout.CancelAfter(ActionTimeout);
+            var response = await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
+
+            var retcode = GetInt64(response, "retcode");
+            if (retcode == 0) return response;
+
+            var reason = GetString(response, "message") ?? GetString(response, "wording") ?? "未知错误";
+            throw new InvalidOperationException($"NapCat 返回错误（retcode {retcode}）：{reason}");
+        }
+        finally
+        {
+            _sendGate.Release();
+            lock (_sync) _pending.Remove(echo);
+        }
+    }
+
+    /// <summary>按字数拆分超长回复，避免拆开代理对（emoji）。</summary>
+    private static IEnumerable<string> SplitMessage(string text, int maxChars)
+    {
+        text = text.Trim();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var length = Math.Min(maxChars, text.Length - index);
+            if (index + length < text.Length && char.IsHighSurrogate(text[index + length - 1])) length--;
+            if (length <= 0) break;
+
+            yield return text.Substring(index, length);
+            index += length;
+        }
+    }
+
+    /// <summary>把会话 id 规范成 kind:id（小写 kind），无法识别时返回空串。</summary>
+    private static string NormalizeConversationId(string conversationId)
+        => TryParseConversationId(conversationId, out var conversation)
+            ? $"{conversation.Kind}:{conversation.Id.ToString(CultureInfo.InvariantCulture)}"
+            : string.Empty;
+
+    /// <summary>解析会话 id：支持 group:群号 / private:QQ号，也兼容 群 / 私聊 前缀以及纯数字（按私聊处理）。</summary>
+    private static bool TryParseConversationId(string conversationId, out (string Kind, long Id) conversation)
+    {
+        conversation = default;
+        var raw = conversationId?.Trim() ?? string.Empty;
+        if (raw.Length == 0) return false;
+
+        var separator = raw.IndexOfAny([':', '：']);
+        var kindText = separator < 0 ? "private" : raw[..separator].Trim();
+        var numberText = separator < 0 ? raw : raw[(separator + 1)..].Trim();
+
+        var kind = kindText.ToLowerInvariant() switch
+        {
+            "group" or "群" or "群聊" => "group",
+            "private" or "user" or "私聊" or "用户" => "private",
+            _ => string.Empty,
+        };
+
+        if (kind.Length == 0) return false;
+        if (!long.TryParse(numberText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) || id <= 0)
+            return false;
+
+        conversation = (kind, id);
+        return true;
+    }
+
+    private void ReadConfiguration()
+    {
+        var config = Context.Configuration;
+        _wsUrl = GetConfigString(config, "wsUrl", "ws://127.0.0.1:3001");
+        _accessToken = GetConfigString(config, "accessToken", string.Empty);
+        _allowedUsers = ReadConfigIds(config, "allowedUsers");
+        _allowedGroups = ReadConfigIds(config, "allowedGroups");
+        _requireAtInGroup = GetConfigBool(config, "requireAtInGroup", true);
+        _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
+        _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
+        _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
+    }
+
+    private static string GetConfigString(JsonElement? config, string key, string fallback)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? fallback,
+            JsonValueKind.Number => value.GetRawText(),
+            _ => fallback,
+        };
+    }
+
+    private static bool GetConfigBool(JsonElement? config, string key, bool fallback)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => fallback,
+        };
+    }
+
+    private static int GetConfigInt(JsonElement? config, string key, int fallback)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt32(out var number) => number,
+            JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => fallback,
+        };
+    }
+
+    /// <summary>读取 QQ 号/群号白名单：支持 config 里的数组，也兼容逗号或空白分隔的字符串。</summary>
+    private static HashSet<long> ReadConfigIds(JsonElement? config, string key)
+    {
+        var ids = new HashSet<long>();
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return ids;
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                {
+                    var raw = item.ValueKind == JsonValueKind.Number ? item.GetRawText() : item.GetString();
+                    AddId(raw, ids);
+                }
+
+                break;
+
+            case JsonValueKind.String:
+                foreach (var part in (value.GetString() ?? string.Empty).Split(
+                             [',', '，', ';', '；', ' ', '\n', '\r', '\t'],
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    AddId(part, ids);
+                }
+
+                break;
+
+            default:
+                AddId(value.GetRawText(), ids);
+                break;
+        }
+
+        return ids;
+    }
+
+    private static void AddId(string? raw, HashSet<long> ids)
+    {
+        if (long.TryParse(raw?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
+            ids.Add(id);
+    }
+
+    private static string GetSenderName(JsonElement root, long userId)
+    {
+        if (root.TryGetProperty("sender", out var sender) && sender.ValueKind == JsonValueKind.Object)
+        {
+            var card = GetString(sender, "card");
+            if (!string.IsNullOrWhiteSpace(card)) return card;
+
+            var nickname = GetString(sender, "nickname");
+            if (!string.IsNullOrWhiteSpace(nickname)) return nickname;
+        }
+
+        return userId.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string? GetString(JsonElement element, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out var value))
+            return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null,
+        };
+    }
+
+    private static long GetInt64(JsonElement element, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out var value))
+            return 0;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt64(out var number) => number,
+            JsonValueKind.String when long.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => 0,
+        };
+    }
+
+    private static string? FindCqArgument(string arguments, string key)
+    {
+        var prefix = key + "=";
+        foreach (var part in arguments.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var item = part.Trim();
+            if (item.StartsWith(prefix, StringComparison.Ordinal)) return item[prefix.Length..];
+        }
+
+        return null;
+    }
+
+    private static string UnescapeCqText(string text)
+    {
+        if (text.Length == 0) return text;
+
+        return text
+            .Replace("&#91;", "[", StringComparison.Ordinal)
+            .Replace("&#93;", "]", StringComparison.Ordinal)
+            .Replace("&#44;", ",", StringComparison.Ordinal)
+            .Replace("&amp;", "&", StringComparison.Ordinal);
+    }
+}
