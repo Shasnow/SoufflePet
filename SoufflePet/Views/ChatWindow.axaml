@@ -236,12 +236,15 @@
                               VerticalScrollBarVisibility="Auto"
                               AllowAutoHide="True"
                               BringIntoViewOnFocusChange="False">
-                    <!-- VirtualizingStackPanel 通过 EffectiveViewportChanged 感知视口，
-                         只创建可见范围内的气泡，消息很长时也不会把全部控件都实例化 -->
+                    <!-- 消息高度差异极大（折叠面板、图片、流式文本），VirtualizingStackPanel
+                         会按平均高度估算未实现项的总高度：流式输出时平均高度不断漂移，
+                         估算的滚动范围随之抖动，贴底滚动会被反复拉回。
+                         这里用普通 StackPanel，布局高度始终精确；恢复的历史只有最近 10 轮，
+                         气泡数量有限，不虚拟化的开销可以接受 -->
                     <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <VirtualizingStackPanel CacheLength="2"/>
+                                <StackPanel/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
