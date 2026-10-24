@@ -16,10 +16,7 @@
         TransparencyLevelHint="Transparent"
         Background="Transparent"
         ShowInTaskbar="False"
-        RequestedThemeVariant="Dark"
-        DragDrop.AllowDrop="True"
-        DragDrop.DragOver="OnWindowDragOver"
-        DragDrop.Drop="OnWindowDrop">
+        RequestedThemeVariant="Dark">
     <!-- 深色玻璃面板的外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
 
     <!-- 面板直接铺满窗口：无边框窗口的真实边界就是可见面板边界，不再留投影用的透明边 -->

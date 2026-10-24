@@ -45,6 +45,12 @@ public partial class ChatWindow : Window
         // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
         InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
+        // 拖放用代码注册：XAML 的附加事件（DragDrop.DragOver="..."）Rider 不会索引到处理函数，
+        // 会把 OnWindowDragOver / OnWindowDrop 误报为未使用；这里直接引用后分析器即可识别
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnWindowDragOver);
+        AddHandler(DragDrop.DropEvent, OnWindowDrop);
+
         // 工作区浮层是独立顶层：焦点落在浮层内时窗口收不到 Esc，这里用隧道阶段兜住
         WorkspacePopupRoot.AddHandler(KeyDownEvent, OnWorkspacePopupKeyDown, RoutingStrategies.Tunnel);
 
@@ -257,7 +263,7 @@ public partial class ChatWindow : Window
     {
         if (DataContext is not ChatViewModel vm) return;
 
-        if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && vm.Draft.Length == 0 && vm.HasAttachments)
+        if (e is { Key: Key.Back, KeyModifiers: KeyModifiers.None } && vm.Draft.Length == 0 && vm.HasAttachments)
         {
             e.Handled = true;
             vm.RemoveLastAttachment();
