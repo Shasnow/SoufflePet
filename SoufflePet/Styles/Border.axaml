@@ -58,6 +58,20 @@
         <Setter Property="BorderBrush" Value="#4DE8879B" />
     </Style>
 
+    <!-- 平台提醒：这轮对话由外部消息触发，描边与文字用强调色提示来源 -->
+    <Style Selector="Border.bubble.notice">
+        <Setter Property="Background" Value="#1AE8879B" />
+        <Setter Property="BorderBrush" Value="#55E8879B" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="9,6" />
+    </Style>
+    <Style Selector="Border.bubble.notice :is(TextBlock)">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="LineHeight" Value="18" />
+        <Setter Property="Foreground" Value="#D9FFFFFF" />
+    </Style>
+
     <!-- 工作区列表项：整行圆角，当前激活项用强调色底色与描边标记 -->
     <Style Selector="Border.workspaceRow">
         <Setter Property="CornerRadius" Value="8" />

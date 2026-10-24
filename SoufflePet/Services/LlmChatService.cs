@@ -514,14 +514,17 @@ public sealed class LlmChatService(
     }
 
     /// <summary>
-    /// 把工具结果规整成统一形态：单个内容块包装成集合；MCP 工具返回的 JsonElement
-    /// （序列化的 CallToolResult）解析成 AIContent 集合，其余类型原样返回。
+    /// 把工具结果规整成统一形态：单个内容块包装成集合；AIFunctionFactory 默认把返回值序列化成
+    /// JsonElement，字符串先还原成纯文本；MCP 工具返回的 JsonElement（序列化的 CallToolResult）
+    /// 解析成 AIContent 集合，其余类型原样返回。
     /// </summary>
     private static object? NormalizeToolResult(object? result) => result switch
     {
         null => null,
         AIContent content => new[] { content },
         IEnumerable<AIContent> contents => contents as IList<AIContent> ?? [.. contents],
+        // 字符串不还原时，OpenAI 适配器按 JSON 原文写入 tool 消息，模型看到的是带引号、换行被转义的字符串
+        JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
         JsonElement element => ResolveMcpJsonResult(element) ?? result,
         _ => result
     };

@@ -17,7 +17,7 @@ public sealed partial class ChatMessage : ObservableObject
     private readonly string _baseText;
 
     public ChatMessage(string text, bool isUser, bool isTool = false, bool isReasoning = false,
-        ToolApprovalRequest? approval = null, bool isExpanded = true)
+        ToolApprovalRequest? approval = null, bool isExpanded = true, bool isPlatformNotice = false)
     {
         Text = text;
         _baseText = text;
@@ -26,6 +26,7 @@ public sealed partial class ChatMessage : ObservableObject
         IsReasoning = isReasoning;
         Approval = approval;
         IsExpanded = isExpanded;
+        IsPlatformNotice = isPlatformNotice;
         // 初始就是收起状态的思考气泡（从历史恢复）已经结束，标题直接显示「已完成」
         IsReasoningDone = !isExpanded;
 
@@ -54,6 +55,9 @@ public sealed partial class ChatMessage : ObservableObject
 
     /// <summary>模型的思考过程（弱化样式展示，不参与上下文）。</summary>
     public bool IsReasoning { get; }
+
+    /// <summary>平台推送的提醒（弱化强调样式展示，表示这轮对话由外部消息触发）。</summary>
+    public bool IsPlatformNotice { get; }
 
     /// <summary>折叠面板的展开状态（思考过程与工具调用共用）：思考结束后自动收起，用户可手动切换。</summary>
     [ObservableProperty]

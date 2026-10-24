@@ -85,16 +85,21 @@ public sealed class PluginService : IPluginService
 
     private readonly SouffleSettings _settings;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly PlatformService _platformService;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly List<PluginDescriptor> _descriptors = [];
     private readonly Dictionary<string, LoadedPlugin> _loaded = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
-    public PluginService(SouffleSettings settings, ILoggerFactory loggerFactory)
+    public PluginService(
+        SouffleSettings settings,
+        ILoggerFactory loggerFactory,
+        PlatformService platformService)
     {
         _settings = settings;
         _loggerFactory = loggerFactory;
+        _platformService = platformService;
         BuiltInDirectory = Path.Combine(AppContext.BaseDirectory, "plugins");
         InstallDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".souffle", "plugins");
@@ -450,6 +455,8 @@ public sealed class PluginService : IPluginService
                 Logger.Warning(ex, "shutdown plugin on dispose failed");
             }
 
+            if (plugin.Instance is IMessagePlatform platform) _platformService.Unregister(platform);
+
             UnloadContext(plugin.Context);
         }
 
@@ -552,6 +559,9 @@ public sealed class PluginService : IPluginService
             _loaded[id] = new LoadedPlugin(context, instance, builtTools);
             context = null; // 所有权移交，禁用时再卸载
 
+            // 插件同时实现了消息平台接口时，交给平台服务统一收发
+            if (instance is IMessagePlatform platform) RegisterPlatform(id, platform);
+
             descriptor.ToolNames = [.. builtTools.Select(t => t.Name)];
             descriptor.State = PluginState.Enabled;
             Logger.Information("plugin {Plugin} loaded with {Count} tools", id, descriptor.ToolNames.Count);
@@ -580,6 +590,8 @@ public sealed class PluginService : IPluginService
             {
                 Logger.Warning(ex, "plugin {Plugin} shutdown failed", id);
             }
+
+            if (loaded.Instance is IMessagePlatform platform) _platformService.Unregister(platform);
 
             UnloadContext(loaded.Context);
         }
@@ -636,6 +648,20 @@ public sealed class PluginService : IPluginService
     }
 
     private void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>把插件提供的消息平台交给平台服务；Id 读取失败只记录日志，不影响插件加载结果。</summary>
+    private void RegisterPlatform(string pluginId, IMessagePlatform platform)
+    {
+        try
+        {
+            _platformService.Register(platform);
+            Logger.Information("plugin {Plugin} registered message platform {Platform}", pluginId, platform.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "plugin {Plugin} register message platform failed", pluginId);
+        }
+    }
 
     /// <summary>卸载加载上下文并尽力回收（JIT 局部变量可能短暂持有引用，属正常现象）。</summary>
     private static void UnloadContext(PluginLoadContext? context)

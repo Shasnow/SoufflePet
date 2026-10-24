@@ -65,6 +65,7 @@ public class App : Application
             services.AddSingleton<IMcpToolService, McpToolService>();
             services.AddSingleton(McpToolCache.Load()); // 工具信息缓存：重启后直接展示上次获取的工具
             services.AddSingleton<ISkillService, SkillService>();
+            services.AddSingleton<PlatformService>();
             services.AddSingleton<IPluginService, PluginService>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
@@ -211,6 +212,11 @@ public class App : Application
 
             // 对话窗口热键（Ctrl+Alt+Space）：同样复用桌宠窗口句柄，须在 Show() 之后注册
             _provider.GetRequiredService<IChatWindowService>().Start(window);
+
+            // 插件推送的平台消息（如被 @）直接进入对话层：生成中排队，窗口不自动弹出，等用户自己打开查看
+            var chatViewModel = _provider.GetRequiredService<ChatViewModel>();
+            _provider.GetRequiredService<PlatformService>().Notified +=
+                (_, notification) => chatViewModel.NotifyPlatformMessage(notification);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
 

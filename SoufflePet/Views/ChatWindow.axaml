@@ -242,7 +242,8 @@
                                         Classes.user="{Binding IsUser}"
                                         Classes.tool="{Binding IsTool}"
                                         Classes.thinking="{Binding IsReasoning}"
-                                        Classes.approval="{Binding IsApproval}">
+                                        Classes.approval="{Binding IsApproval}"
+                                        Classes.notice="{Binding IsPlatformNotice}">
                                     <StackPanel Spacing="7">
                                         <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看 -->
                                         <Expander Theme="{StaticResource ToolExpander}"

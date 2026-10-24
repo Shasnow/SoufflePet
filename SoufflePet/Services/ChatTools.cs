@@ -79,6 +79,7 @@ public sealed class ChatTools
     private readonly ISkillService _skills;
     private readonly IPluginService _plugins;
     private readonly UserQuestionService _questions;
+    private readonly PlatformService _platforms;
 
     public ChatTools(
         SouffleSettings settings,
@@ -89,7 +90,8 @@ public sealed class ChatTools
         IMcpToolService mcp,
         ISkillService skills,
         IPluginService plugins,
-        UserQuestionService questions)
+        UserQuestionService questions,
+        PlatformService platforms)
     {
         _settings = settings;
         _httpClientFactory = httpClientFactory;
@@ -100,6 +102,7 @@ public sealed class ChatTools
         _skills = skills;
         _plugins = plugins;
         _questions = questions;
+        _platforms = platforms;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -159,7 +162,15 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 ReadSkill,
                 "read_skill",
-                "读取某个技能的完整说明。")
+                "读取某个技能的完整说明。"),
+            AIFunctionFactory.Create(
+                GetPlatformMessages,
+                "get_platform_messages",
+                "获取已连接消息平台的最新消息。"),
+            AIFunctionFactory.Create(
+                SendPlatformMessage,
+                "send_platform_message",
+                "向已连接的某个消息平台发送消息。")
         ];
         LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
@@ -327,6 +338,57 @@ public sealed class ChatTools
         return content.Length <= SkillContentMaxLength
             ? builder.Append(content).ToString()
             : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
+    }
+
+    /// <summary>获取插件注册的消息平台的最新消息；不指定平台时逐个读取并汇总。</summary>
+    private async Task<string> GetPlatformMessages(
+        [Description("消息平台 id；留空表示获取所有平台的最新消息")]
+        string? platform = null)
+    {
+        var available = _platforms.Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        var target = platform?.Trim();
+        if (string.IsNullOrEmpty(target))
+        {
+            var messages = await _platforms.GetMessagesAsync().ConfigureAwait(false);
+            var builder = new StringBuilder("各平台最新消息：");
+            foreach (var (id, message) in messages)
+            {
+                builder.Append("\n- ").Append(id).Append('：')
+                    .Append(string.IsNullOrWhiteSpace(message) ? "（无新消息）" : message);
+            }
+
+            return builder.ToString();
+        }
+
+        if (!_platforms.HasPlatform(target))
+            return $"没有找到消息平台「{target}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+
+        var latest = await _platforms.GetMessagesAsync(target).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(latest)
+            ? $"平台「{target}」没有新消息。"
+            : $"平台「{target}」的最新消息：\n{latest}";
+    }
+
+    /// <summary>向插件注册的消息平台发送消息。</summary>
+    private async Task<string> SendPlatformMessage(
+        [Description("消息平台 id，取自 get_platform_messages 返回的平台列表")]
+        string platform,
+        [Description("要发送的消息内容")]
+        string message)
+    {
+        var target = platform.Trim();
+        var available = _platforms.Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        if (string.IsNullOrWhiteSpace(message)) return "消息内容不能为空。";
+
+        if (!_platforms.HasPlatform(target))
+            return $"没有找到消息平台「{target}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+
+        await _platforms.SendMessageAsync(target, message).ConfigureAwait(false);
+        return $"已通过平台「{target}」发送消息。";
     }
 
     /// <summary>
