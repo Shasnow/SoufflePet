@@ -238,7 +238,7 @@
                     <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <VirtualizingStackPanel />
+                                <VirtualizingStackPanel CacheLength="2"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -274,33 +274,42 @@
 
                                         <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
 
-                                        <!-- 本地附件：图片直接预览，其他文件显示为可点击打开的卡片 -->
-                                        <StackPanel Spacing="6" IsVisible="{Binding HasDisplayAttachment}">
-                                            <Button Classes="ghost"
-                                                    Padding="0"
-                                                    HorizontalAlignment="Left"
-                                                    IsVisible="{Binding DisplayAttachment.HasImage}"
-                                                    Command="{Binding DisplayAttachment.OpenCommand}"
-                                                    ToolTip.Tip="{Binding DisplayAttachment.FilePath}"
-                                                    ToolTip.Placement="Top">
-                                                <Image Source="{Binding DisplayAttachment.Image}"
-                                                       MaxWidth="260"
-                                                       MaxHeight="240"
-                                                       Stretch="Uniform" />
-                                            </Button>
-                                            <Button Classes="ghost"
-                                                    Padding="8,4"
-                                                    HorizontalAlignment="Left"
-                                                    IsVisible="{Binding DisplayAttachment.IsFileCard}"
-                                                    Command="{Binding DisplayAttachment.OpenCommand}"
-                                                    ToolTip.Tip="{Binding DisplayAttachment.FilePath}"
-                                                    ToolTip.Placement="Top">
-                                                <TextBlock Text="{Binding DisplayAttachment.FileName}"
-                                                           MaxWidth="240"
-                                                           FontSize="11.5"
-                                                           TextTrimming="CharacterEllipsis" />
-                                            </Button>
-                                        </StackPanel>
+                                        <!-- 本地附件：图片直接预览，其他文件显示为可点击打开的卡片。
+                                             用 ContentControl 承载：Content 为 null 时不实例化模板，
+                                             避免对大多数普通消息绑定 DisplayAttachment 触发空值绑定错误 -->
+                                        <ContentControl Content="{Binding DisplayAttachment}"
+                                                        IsVisible="{Binding HasDisplayAttachment}">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="models:ChatDisplayAttachment">
+                                                    <StackPanel Spacing="6">
+                                                        <Button Classes="ghost"
+                                                                Padding="0"
+                                                                HorizontalAlignment="Left"
+                                                                IsVisible="{Binding HasImage}"
+                                                                Command="{Binding OpenCommand}"
+                                                                ToolTip.Tip="{Binding FilePath}"
+                                                                ToolTip.Placement="Top">
+                                                            <Image Source="{Binding Image}"
+                                                                   MaxWidth="260"
+                                                                   MaxHeight="240"
+                                                                   Stretch="Uniform" />
+                                                        </Button>
+                                                        <Button Classes="ghost"
+                                                                Padding="8,4"
+                                                                HorizontalAlignment="Left"
+                                                                IsVisible="{Binding IsFileCard}"
+                                                                Command="{Binding OpenCommand}"
+                                                                ToolTip.Tip="{Binding FilePath}"
+                                                                ToolTip.Placement="Top">
+                                                            <TextBlock Text="{Binding FileName}"
+                                                                       MaxWidth="240"
+                                                                       FontSize="11.5"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </Button>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
 
                                         <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
                                         <TextBlock Text="{Binding UsageText}"
