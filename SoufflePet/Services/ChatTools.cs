@@ -170,7 +170,15 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 SendPlatformMessage,
                 "send_platform_message",
-                "向已连接的某个消息平台发送消息。")
+                "向已连接的某个消息平台发送消息。"),
+            AIFunctionFactory.Create(
+                GetConversationMessages,
+                "get_conversation_messages",
+                "读取消息平台某个会话（私聊或群聊）的最近消息。"),
+            AIFunctionFactory.Create(
+                SendConversationMessage,
+                "send_conversation_message",
+                "向消息平台的某个会话（私聊或群聊）发送消息。")
         ];
         LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
@@ -373,7 +381,7 @@ public sealed class ChatTools
 
     /// <summary>向插件注册的消息平台发送消息。</summary>
     private async Task<string> SendPlatformMessage(
-        [Description("消息平台 id，取自 get_platform_messages 返回的平台列表")]
+        [Description("消息平台 id")]
         string platform,
         [Description("要发送的消息内容")]
         string message)
@@ -390,6 +398,26 @@ public sealed class ChatTools
         await _platforms.SendMessageAsync(target, message).ConfigureAwait(false);
         return $"已通过平台「{target}」发送消息。";
     }
+
+    /// <summary>读取指定会话的最近消息；会话 id 取自平台消息前缀（如 group:12345、private:777）。</summary>
+    private Task<string> GetConversationMessages(
+        [Description("消息平台 id，例如 napcat")]
+        string platform,
+        [Description("会话 id，形如 group:12345 或 private:777，可从平台消息的 [会话 id] 前缀获取")]
+        string conversation,
+        [Description("最多读取多少条最近消息，默认 20")]
+        int limit = 20)
+        => _platforms.GetConversationMessagesAsync(platform, conversation, limit);
+
+    /// <summary>向指定会话发送消息。</summary>
+    private Task<string> SendConversationMessage(
+        [Description("消息平台 id，例如 napcat")]
+        string platform,
+        [Description("会话 id，形如 group:12345 或 private:777")]
+        string conversation,
+        [Description("要发送的消息内容")]
+        string message)
+        => _platforms.SendConversationMessageAsync(platform, conversation, message);
 
     /// <summary>
     /// 向用户提问：交给对话界面展示提问面板，等用户全部回答后把问答结果回传给模型。

@@ -90,6 +90,52 @@ public class PlatformService : IDisposable
         }
     }
 
+    /// <summary>读取指定平台某个会话的最近消息；返回可直接回传给模型的文本。</summary>
+    public async Task<string> GetConversationMessagesAsync(string platform, string conversationId, int limit = 20)
+    {
+        var available = Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        var id = platform.Trim();
+        var target = available.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
+            return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+
+        if (target is not IMessagePlatformConversation conversations)
+            return $"平台「{target.Id}」不支持按会话读写消息，请改用 get_platform_messages / send_platform_message。";
+
+        var conversation = conversationId.Trim();
+        if (conversation.Length == 0) return "会话 id 不能为空。";
+
+        var text = await conversations.GetConversationMessagesAsync(conversation, Math.Clamp(limit, 1, 50))
+            .ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(text)
+            ? $"平台「{target.Id}」的会话「{conversation}」没有可读取的消息（会话 id 可能不正确，或还没有收到过该会话的消息）。"
+            : $"平台「{target.Id}」会话「{conversation}」的最近消息：\n{text}";
+    }
+
+    /// <summary>向指定平台某个会话发送消息；返回可直接回传给模型的文本。</summary>
+    public async Task<string> SendConversationMessageAsync(string platform, string conversationId, string message)
+    {
+        var available = Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        var id = platform.Trim();
+        var target = available.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
+            return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+
+        if (target is not IMessagePlatformConversation conversations)
+            return $"平台「{target.Id}」不支持按会话读写消息，请改用 get_platform_messages / send_platform_message。";
+
+        var conversation = conversationId.Trim();
+        if (conversation.Length == 0) return "会话 id 不能为空。";
+        if (string.IsNullOrWhiteSpace(message)) return "消息内容不能为空。";
+
+        await conversations.SendConversationMessageAsync(conversation, message).ConfigureAwait(false);
+        return $"已向平台「{target.Id}」的会话「{conversation}」发送消息。";
+    }
+
     /// <summary>订阅平台的提醒事件。</summary>
     private void Attach(IMessagePlatform platform)
     {
