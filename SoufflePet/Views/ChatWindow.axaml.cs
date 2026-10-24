@@ -200,6 +200,23 @@ public partial class ChatWindow : Window
         if (DataContext is ChatViewModel vm) vm.CloseWorkspaceOverlay();
     }
 
+    /// <summary>拖入文件时显示「复制」光标；拖的是文本等非文件内容时不接受。</summary>
+    private void OnWindowDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    /// <summary>把拖入窗口的文件加入待发送附件列表；文件夹等非文件项忽略。</summary>
+    private void OnWindowDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not ChatViewModel vm) return;
+        if (e.DataTransfer.TryGetFiles()?.OfType<IStorageFile>().ToList() is not { Count: > 0 } files) return;
+
+        vm.AddAttachments(files.Select(file => file.Path.LocalPath));
+        e.Handled = true;
+        InputBox.Focus();
+    }
+
     /// <summary>添加附件：只记录绝对路径，随消息以 @路径 发送，模型可随时自行读取。</summary>
     private async void OnAttachClick(object? sender, RoutedEventArgs e)
     {
