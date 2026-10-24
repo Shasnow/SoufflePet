@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using SoufflePet.Plugin.Sdk;
 
 namespace SoufflePet.Plugins.DsmlCleaner;
 
@@ -12,13 +11,20 @@ namespace SoufflePet.Plugins.DsmlCleaner;
 /// 过滤模型正文里泄漏的 DSML 工具调用标记（&lt;｜｜DSML｜｜tool_calls&gt; 等）。
 /// 流式增量可能把标记拆成多段，未闭合的片段会暂存到下一次输入；成块的工具调用内容整段丢弃。
 /// </summary>
-internal sealed class DsmlResponseFilter : IResponseFilter
+internal sealed class DsmlResponseFilter
 {
     /// <summary>迟迟等不到 '&gt;' 时不再当作标记，避免正常文本被无限期扣留。</summary>
     private const int MaxPendingTagLength = 256;
 
     private readonly StringBuilder _buffer = new();
     private readonly Stack<string> _openBlocks = [];
+
+    /// <summary>每轮响应开始前清空状态，避免上一轮的暂存内容串到下一轮。</summary>
+    public void Reset()
+    {
+        _buffer.Clear();
+        _openBlocks.Clear();
+    }
 
     /// <summary>处理一段增量，返回可以展示给用户的部分。</summary>
     public string Process(string text)

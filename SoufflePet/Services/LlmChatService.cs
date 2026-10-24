@@ -253,11 +253,11 @@ public sealed class LlmChatService : ILlmChatService
             WriteTrace(tracePath, trace);
 
             // 文本增量即时产出，同时留存完整流以便汇总工具调用。
-            // 插件响应过滤器每轮新建，状态不跨轮；处理失败由守卫原样放行。
-            var filters = new ResponseFilterPipeline(_plugins.CreateResponseFilters(model.ModelId));
+            // 插件响应钩子每轮重新开始，状态不跨轮；处理失败由管线原样放行。
+            var pipeline = _plugins.CreateResponsePipeline(model.ModelId);
             var updates = new List<ChatResponseUpdate>();
             // 上游可能把回复拆成大量碎片甚至空分片：这里自行合并成一条助手消息，
-            // 正文只保留过滤器输出的可见文本（DSML 等已在插件里剔除），思考原样保留。
+            // 正文只保留响应钩子输出的可见文本（DSML 等已在插件里剔除），思考原样保留。
             var replyText = new StringBuilder();
             var replyReasoning = new StringBuilder();
             await using (var enumerator = chatClient
@@ -290,7 +290,7 @@ public sealed class LlmChatService : ILlmChatService
 
                     if (update.Text is { Length: > 0 } text)
                     {
-                        var visible = filters.Process(text);
+                        var visible = pipeline.Process(text);
                         if (visible.Length > 0)
                         {
                             replyText.Append(visible);
@@ -300,7 +300,7 @@ public sealed class LlmChatService : ILlmChatService
                 }
             }
 
-            var tail = filters.Flush();
+            var tail = pipeline.Flush();
             if (tail.Length > 0)
             {
                 replyText.Append(tail);
@@ -327,7 +327,7 @@ public sealed class LlmChatService : ILlmChatService
 
             if (calls.Count == 0) break;
 
-            // 只追加一条合并后的助手消息：上游碎片与空消息不进历史，正文已过响应过滤器
+            // 只追加一条合并后的助手消息：上游碎片与空消息不进历史，正文已过响应钩子
             var assistantMessage = BuildAssistantMessage(replyText, replyReasoning, calls);
 
             // 达到最大轮次：新调用不再执行，但每次都要作为工具结果回给模型，
@@ -920,31 +920,4 @@ public sealed class LlmChatService : ILlmChatService
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";
-
-    /// <summary>把多个响应过滤器串成管道，按顺序处理每段增量；收尾时再让暂存文本经过后续过滤器。</summary>
-    private sealed class ResponseFilterPipeline(IReadOnlyList<IResponseFilter> filters)
-    {
-        public string Process(string text)
-        {
-            foreach (var filter in filters) text = filter.Process(text);
-            return text;
-        }
-
-        public string Flush()
-        {
-            if (filters.Count == 0) return string.Empty;
-
-            var output = new StringBuilder();
-            for (var i = 0; i < filters.Count; i++)
-            {
-                var text = filters[i].Flush();
-                if (text.Length == 0) continue;
-
-                for (var j = i + 1; j < filters.Count; j++) text = filters[j].Process(text);
-                output.Append(text);
-            }
-
-            return output.ToString();
-        }
-    }
 }

@@ -36,7 +36,7 @@ public sealed class PluginManifest
     /// <summary>入口程序集文件名（相对插件目录），例如 <c>MyPlugin.dll</c>。</summary>
     public string Assembly { get; set; } = string.Empty;
 
-    /// <summary>入口类型全名；省略时取程序集内唯一的 <see cref="IPlugin" /> 实现。</summary>
+    /// <summary>入口类型全名；省略时取程序集内唯一的 <see cref="PluginBase" /> 子类。</summary>
     public string? EntryType { get; set; }
 
     /// <summary>单个工具调用的超时（秒），宿主限制在 1–300，默认 30。</summary>

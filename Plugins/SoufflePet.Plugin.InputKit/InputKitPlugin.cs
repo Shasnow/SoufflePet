@@ -19,39 +19,34 @@ namespace SoufflePet.Plugins.InputKit;
 /// </summary>
 public sealed class InputKitPlugin : PluginBase
 {
-    protected override ValueTask<IReadOnlyList<AIFunction>> CreateToolsAsync(
-        PluginContext context,
-        CancellationToken cancellationToken)
+    protected override void OnToolsBuilding(ICollection<AIFunction> tools)
     {
-        IReadOnlyList<AIFunction> tools =
-        [
-            AIFunctionFactory.Create(
-                MouseClick,
-                "mouse_click",
-                "在屏幕坐标处点击鼠标。坐标是屏幕物理像素，原点为屏幕左上角；"),
-            AIFunctionFactory.Create(
-                MouseDrag,
-                "mouse_drag",
-                "按住鼠标从起点拖到终点后松开，用于拖动窗口、滑块、选择文本等。"),
-            AIFunctionFactory.Create(
-                MouseScroll,
-                "mouse_scroll",
-                "在屏幕坐标处滚动鼠标滚轮，正数向上、负数向下。"),
-            AIFunctionFactory.Create(
-                KeyboardPress,
-                "keyboard_press",
-                "按下并松开一个按键。"),
-            AIFunctionFactory.Create(
-                KeyboardHotkey,
-                "keyboard_hotkey",
-                "按下一组组合键，如 ctrl+s、alt+tab、win+d。"),
-            AIFunctionFactory.Create(
-                KeyboardType,
-                "keyboard_type",
-                "向当前焦点窗口输入文本，支持中文等 Unicode 字符。")
-        ];
-        context.Logger.LogInformation("已就绪，共 {Count} 个工具", tools.Count);
-        return ValueTask.FromResult(tools);
+        tools.Add(AIFunctionFactory.Create(
+            MouseClick,
+            "mouse_click",
+            "在屏幕坐标处点击鼠标。坐标是屏幕物理像素，原点为屏幕左上角；"));
+        tools.Add(AIFunctionFactory.Create(
+            MouseDrag,
+            "mouse_drag",
+            "按住鼠标从起点拖到终点后松开，用于拖动窗口、滑块、选择文本等。"));
+        tools.Add(AIFunctionFactory.Create(
+            MouseScroll,
+            "mouse_scroll",
+            "在屏幕坐标处滚动鼠标滚轮，正数向上、负数向下。"));
+        tools.Add(AIFunctionFactory.Create(
+            KeyboardPress,
+            "keyboard_press",
+            "按下并松开一个按键。"));
+        tools.Add(AIFunctionFactory.Create(
+            KeyboardHotkey,
+            "keyboard_hotkey",
+            "按下一组组合键，如 ctrl+s、alt+tab、win+d。"));
+        tools.Add(AIFunctionFactory.Create(
+            KeyboardType,
+            "keyboard_type",
+            "向当前焦点窗口输入文本，支持中文等 Unicode 字符。"));
+
+        Context.Logger.LogInformation("已就绪，共 {Count} 个工具", tools.Count);
     }
 
     /// <summary>在屏幕坐标处单击/双击：Win32 鼠标事件会真的作用到光标下的程序上。</summary>

@@ -10,6 +10,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Live2DCSharpSDK.OpenGL", "L
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoufflePet.Plugin.Sdk", "SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj", "{D3F5B3EE-7D6F-4486-9484-AD1337448D3C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoufflePet.Plugin.InputKit", "Plugins\SoufflePet.Plugin.InputKit\SoufflePet.Plugin.InputKit.csproj", "{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoufflePet.Plugin.DsmlCleaner", "Plugins\SoufflePet.Plugin.DsmlCleaner\SoufflePet.Plugin.DsmlCleaner.csproj", "{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -80,6 +84,30 @@ Global
 		{D3F5B3EE-7D6F-4486-9484-AD1337448D3C}.Release|x64.Build.0 = Release|Any CPU
 		{D3F5B3EE-7D6F-4486-9484-AD1337448D3C}.Release|x86.ActiveCfg = Release|Any CPU
 		{D3F5B3EE-7D6F-4486-9484-AD1337448D3C}.Release|x86.Build.0 = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|x64.Build.0 = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Debug|x86.Build.0 = Debug|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|x64.ActiveCfg = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|x64.Build.0 = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|x86.ActiveCfg = Release|Any CPU
+		{8890DE0F-3FBC-4554-B50D-E0BDDC49C36B}.Release|x86.Build.0 = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|x64.Build.0 = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Debug|x86.Build.0 = Debug|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|x64.ActiveCfg = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|x64.Build.0 = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|x86.ActiveCfg = Release|Any CPU
+		{94C1FD4C-C7D0-4D5F-AD28-EFFCB2EC8ACC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -7,7 +7,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using SoufflePet.Plugin.Sdk;
 
@@ -17,23 +16,30 @@ namespace SoufflePet.Plugins.DsmlCleaner;
 /// 响应后处理插件：清理模型正文里泄漏的 DSML 工具调用标记。
 /// config.models 为空表示所有模型；填写模型 id 时只处理匹配的模型。
 /// </summary>
-public sealed class DsmlCleanerPlugin : PluginBase, IResponseFilterProvider
+public sealed class DsmlCleanerPlugin : PluginBase
 {
+    private readonly DsmlResponseFilter _filter = new();
     private IReadOnlyList<string> _models = [];
 
-    protected override ValueTask<IReadOnlyList<AIFunction>> CreateToolsAsync(
-        PluginContext context,
-        CancellationToken cancellationToken)
+    protected override Task OnInitializedAsync(CancellationToken cancellationToken)
     {
-        _models = ReadModels(context.Configuration);
-        context.Logger.LogInformation(
-            "DSML 过滤器已就绪，适用模型：{Models}",
+        _models = ReadModels(Context.Configuration);
+        Context.Logger.LogInformation(
+            "DSML 清理已就绪，适用模型：{Models}",
             _models.Count == 0 ? "全部" : string.Join(", ", _models));
-        return ValueTask.FromResult<IReadOnlyList<AIFunction>>([]);
+        return Task.CompletedTask;
     }
 
-    public IReadOnlyList<IResponseFilter> CreateResponseFilters(string modelId) =>
-        AppliesTo(modelId) ? [new DsmlResponseFilter()] : [];
+    protected override bool OnResponseStarting(string modelId)
+    {
+        if (!AppliesTo(modelId)) return false;
+        _filter.Reset();
+        return true;
+    }
+
+    protected override string OnResponseDelta(string text) => _filter.Process(text);
+
+    protected override string OnResponseCompleted() => _filter.Flush();
 
     private bool AppliesTo(string modelId) =>
         _models.Count == 0

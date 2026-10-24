@@ -42,10 +42,10 @@ public interface IPluginService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 为指定模型创建本轮响应的正文过滤器（来自实现了 <see cref="IResponseFilterProvider"/> 的已加载插件）。
-    /// 每轮响应调用一次，返回新实例；插件抛异常时按原样放行。
+    /// 为本轮回复创建正文处理管线：创建时询问已加载插件是否参与（按模型 id），
+    /// 参与插件的异常由管线兜底，原样放行正文。
     /// </summary>
-    IReadOnlyList<IResponseFilter> CreateResponseFilters(string modelId);
+    ResponsePipeline CreateResponsePipeline(string modelId);
 
     /// <summary>启用或禁用插件：启用立即加载，禁用依次 Shutdown → Unload。</summary>
     Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default);
@@ -184,38 +184,38 @@ public sealed class PluginService : IPluginService
         }
     }
 
-    public IReadOnlyList<IResponseFilter> CreateResponseFilters(string modelId)
+    public ResponsePipeline CreateResponsePipeline(string modelId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         // 先取快照再调用插件代码，避免持有锁执行外部逻辑
-        List<(string Id, IResponseFilterProvider Provider)> providers = [];
+        List<(string Id, PluginBase Plugin)> plugins = [];
         lock (_sync)
         {
             foreach (var descriptor in _descriptors)
             {
                 if (!descriptor.Enabled) continue;
                 if (!_loaded.TryGetValue(descriptor.Manifest.Id, out var loaded)) continue;
-                if (loaded.Instance is IResponseFilterProvider provider)
-                    providers.Add((descriptor.Manifest.Id, provider));
+                plugins.Add((descriptor.Manifest.Id, loaded.Instance));
             }
         }
 
-        var filters = new List<IResponseFilter>();
-        foreach (var (id, provider) in providers)
+        var participants = new List<ResponsePipeline.Participant>();
+        foreach (var (id, plugin) in plugins)
         {
             try
             {
-                foreach (var filter in provider.CreateResponseFilters(modelId))
-                    filters.Add(new ResponseFilterGuard(filter, this, id));
+                if (plugin.BeginResponse(modelId))
+                    participants.Add(new ResponsePipeline.Participant(this, id, plugin));
             }
             catch (Exception ex)
             {
-                Logger.Warning(ex, "plugin {Plugin} create response filters failed", id);
+                Logger.Warning(ex, "plugin {Plugin} begin response failed", id);
+                RecordFailure(id, $"响应开始失败：{ex.Message}");
             }
         }
 
-        return filters;
+        return new ResponsePipeline(participants);
     }
 
     public async Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default)
@@ -459,7 +459,7 @@ public sealed class PluginService : IPluginService
             context = new PluginLoadContext(id, assemblyPath);
             var assembly = context.LoadFromAssemblyPath(assemblyPath);
             var type = ResolveEntryType(assembly, descriptor.Manifest.EntryType);
-            if (Activator.CreateInstance(type) is not IPlugin instance)
+            if (Activator.CreateInstance(type) is not PluginBase instance)
                 throw new InvalidOperationException($"入口类型 {type.FullName} 不是有效的插件");
 
             var pluginContext = new PluginContext(
@@ -469,10 +469,14 @@ public sealed class PluginService : IPluginService
                 _loggerFactory.CreateLogger($"Plugin.{id}"));
             await instance.InitializeAsync(pluginContext, cancellationToken).ConfigureAwait(false);
 
-            _loaded[id] = new LoadedPlugin(context, instance, [.. instance.Tools]);
+            // 工具由插件在钩子里自行添加；只做后处理、不提供工具的插件同样允许
+            List<AIFunction> builtTools = [];
+            instance.BuildTools(builtTools);
+
+            _loaded[id] = new LoadedPlugin(context, instance, builtTools);
             context = null; // 所有权移交，禁用时再卸载
 
-            descriptor.ToolNames = [.. instance.Tools.Select(t => t.Name)];
+            descriptor.ToolNames = [.. builtTools.Select(t => t.Name)];
             descriptor.State = PluginState.Enabled;
             Logger.Information("plugin {Plugin} loaded with {Count} tools", id, descriptor.ToolNames.Count);
         }
@@ -576,21 +580,21 @@ public sealed class PluginService : IPluginService
         }
 
         var candidates = assembly.GetTypes()
-            .Where(t => typeof(IPlugin).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false })
+            .Where(t => typeof(PluginBase).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false })
             .ToList();
 
         return candidates.Count switch
         {
             1 => candidates[0],
-            0 => throw new InvalidOperationException("程序集里没有 IPlugin 实现"),
-            _ => throw new InvalidOperationException("程序集里有多个 IPlugin 实现，请在 plugin.json 里指定 entryType"),
+            0 => throw new InvalidOperationException("程序集里没有 PluginBase 子类"),
+            _ => throw new InvalidOperationException("程序集里有多个 PluginBase 子类，请在 plugin.json 里指定 entryType"),
         };
     }
 
     private static Type EnsurePluginType(Type type) =>
-        typeof(IPlugin).IsAssignableFrom(type) && !type.IsAbstract
+        typeof(PluginBase).IsAssignableFrom(type) && !type.IsAbstract
             ? type
-            : throw new InvalidOperationException($"入口类型 {type.FullName} 没有实现 IPlugin");
+            : throw new InvalidOperationException($"入口类型 {type.FullName} 没有继承 PluginBase");
 
     /// <summary>插件工具与已有工具重名时加「插件id__工具名」前缀并做 ASCII 净化。</summary>
     private static string UniqueToolName(string pluginId, string toolName, HashSet<string> usedNames)
@@ -631,58 +635,13 @@ public sealed class PluginService : IPluginService
         exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
 
     /// <summary>已加载插件：保持加载上下文、实例与原始工具列表（包装在每次取工具时生成）。</summary>
-    private sealed class LoadedPlugin(PluginLoadContext context, IPlugin instance, IReadOnlyList<AIFunction> tools)
+    private sealed class LoadedPlugin(PluginLoadContext context, PluginBase instance, IReadOnlyList<AIFunction> tools)
     {
         public PluginLoadContext Context { get; } = context;
 
-        public IPlugin Instance { get; } = instance;
+        public PluginBase Instance { get; } = instance;
 
         public IReadOnlyList<AIFunction> Tools { get; } = tools;
-    }
-}
-
-/// <summary>
-/// 响应过滤器守卫：插件处理正文时抛异常则原样放行，避免单个插件影响本次回复。
-/// </summary>
-internal sealed class ResponseFilterGuard(
-    IResponseFilter inner,
-    PluginService owner,
-    string pluginId) : IResponseFilter
-{
-    private bool _failed;
-
-    public string Process(string text)
-    {
-        if (_failed) return text;
-        try
-        {
-            return inner.Process(text);
-        }
-        catch (Exception ex)
-        {
-            Fail("处理", ex);
-            return text;
-        }
-    }
-
-    public string Flush()
-    {
-        if (_failed) return string.Empty;
-        try
-        {
-            return inner.Flush();
-        }
-        catch (Exception ex)
-        {
-            Fail("收尾", ex);
-            return string.Empty;
-        }
-    }
-
-    private void Fail(string stage, Exception ex)
-    {
-        _failed = true;
-        owner.RecordFailure(pluginId, $"响应过滤{stage}失败：{ex.Message}");
     }
 }
 

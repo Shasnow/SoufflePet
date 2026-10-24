@@ -32,9 +32,9 @@ public sealed class PluginLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // 契约程序集永远用宿主这一份，保证 IPlugin / AIFunction 的类型身份一致
-        if (AssemblyName.ReferenceMatchesDefinition(assemblyName, typeof(IPlugin).Assembly.GetName()))
-            return typeof(IPlugin).Assembly;
+        // 契约程序集永远用宿主这一份，保证 PluginBase / AIFunction 的类型身份一致
+        if (AssemblyName.ReferenceMatchesDefinition(assemblyName, typeof(PluginBase).Assembly.GetName()))
+            return typeof(PluginBase).Assembly;
 
         // 宿主已加载的程序集（M.E.AI、BCL 等）优先共享，避免插件自带同名副本造成类型分裂
         foreach (var loaded in Default.Assemblies)
