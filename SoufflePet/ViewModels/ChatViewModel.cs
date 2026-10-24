@@ -93,7 +93,8 @@ public partial class ChatViewModel : ViewModelBase
         IMcpToolService mcpTools,
         ISkillsWindowService skillsWindow,
         IPluginsWindowService pluginsWindow,
-        UserQuestionService questions)
+        UserQuestionService questions,
+        ChatFileService files)
     {
         _settings = settings;
         _llm = llm;
@@ -106,6 +107,7 @@ public partial class ChatViewModel : ViewModelBase
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
         questions.QuestionAsked += OnQuestionAsked;
+        files.FileShown += OnFileShown;
 
         // 附件区的显隐与发送按钮的可用性都取决于附件数量
         Attachments.CollectionChanged += (_, _) =>
@@ -505,8 +507,9 @@ public partial class ChatViewModel : ViewModelBase
     {
         Dispatcher.UIThread.Post(() =>
         {
+            var action = request.ToolName == "run_shell_command" ? "执行命令" : "发送文件";
             var message = new Models.ChatMessage(
-                $"模型请求执行命令，等待你的确认：\n{request.Arguments}",
+                $"模型请求{action}，等待你的确认：\n{request.Arguments}",
                 isUser: false,
                 isTool: true,
                 approval: request);
@@ -536,6 +539,32 @@ public partial class ChatViewModel : ViewModelBase
             if (request.IsResolved) return;
 
             AskUser = panel;
+        });
+    }
+
+    /// <summary>
+    /// 工具要求在对话窗口展示本地文件：回到 UI 线程插入带附件的气泡，
+    /// 图片在后台解码，解码完成后再挂到气泡上。
+    /// </summary>
+    private void OnFileShown(ChatFileDisplay display)
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            var attachment = new ChatDisplayAttachment(display.FilePath, display.FileName, display.IsImage);
+            var message = new Models.ChatMessage(
+                $"已展示文件：{display.FileName}",
+                isUser: false,
+                displayAttachment: attachment);
+
+            // 和工具记录一样插在回复气泡之前，避免文件卡片排在「正在思考…」之后
+            var index = _reply is { } reply ? Messages.IndexOf(reply) : -1;
+            if (index >= 0) Messages.Insert(index, message);
+            else Messages.Add(message);
+
+            if (!display.IsImage) return;
+
+            var image = await Task.Run(() => ChatDisplayAttachment.LoadImage(display.FilePath));
+            if (image is not null) attachment.Image = image;
         });
     }
 

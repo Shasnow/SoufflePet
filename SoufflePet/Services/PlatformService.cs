@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,6 +22,16 @@ public class PlatformService : IDisposable
 
     /// <summary>用于推送去重的最近消息 id 数量上限。</summary>
     private const int RecentMessageLimit = 200;
+
+    /// <summary>单个附件允许发送的最大字节数。</summary>
+    private const long MaxAttachmentBytes = 50L * 1024 * 1024;
+
+    /// <summary>图片作为消息段发送时的最大字节数（base64 编码会膨胀约 1/3）。</summary>
+    private const long MaxImageBytes = 5L * 1024 * 1024;
+
+    /// <summary>按扩展名识别图片附件。</summary>
+    private static readonly HashSet<string> ImageExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
 
     private readonly List<IMessagePlatform> _platforms = [];
     private readonly Dictionary<IMessagePlatform, EventHandler<PlatformIncomingMessage>> _subscriptions = [];
@@ -56,42 +67,8 @@ public class PlatformService : IDisposable
         lock (_sync) _platforms.RemoveAll(p => ReferenceEquals(p, platform));
     }
 
-    public bool HasPlatform(string platformId)
-    {
-        lock (_sync) return _platforms.Any(p => p.Id == platformId);
-    }
-
-    public async Task<Dictionary<string, string>> GetMessagesAsync()
-    {
-        var messages = new Dictionary<string, string>();
-        foreach (var platform in Platforms)
-        {
-            messages[platform.Id] = await platform.ReceiveMessageAsync();
-        }
-        return messages;
-    }
-
-    public async Task<string> GetMessagesAsync(string platform)
-    {
-        var targetPlatform = Platforms.FirstOrDefault(p => p.Id == platform);
-        if (targetPlatform != null)
-        {
-            return await targetPlatform.ReceiveMessageAsync();
-        }
-        return string.Empty;
-    }
-
-    public async Task SendMessageAsync(string platform, string message)
-    {
-        var targetPlatform = Platforms.FirstOrDefault(p => p.Id == platform);
-        if (targetPlatform != null)
-        {
-            await targetPlatform.SendMessageAsync(message);
-        }
-    }
-
     /// <summary>读取指定平台某个会话的最近消息；返回可直接回传给模型的文本。</summary>
-    public async Task<string> GetConversationMessagesAsync(string platform, string conversationId, int limit = 20)
+    public async Task<string> GetMessagesAsync(string platform, string conversationId, int limit = 20)
     {
         var available = Platforms;
         if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
@@ -101,13 +78,10 @@ public class PlatformService : IDisposable
         if (target is null)
             return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
 
-        if (target is not IMessagePlatformConversation conversations)
-            return $"平台「{target.Id}」不支持按会话读写消息，请改用 get_platform_messages / send_platform_message。";
-
         var conversation = conversationId.Trim();
         if (conversation.Length == 0) return "会话 id 不能为空。";
 
-        var text = await conversations.GetConversationMessagesAsync(conversation, Math.Clamp(limit, 1, 50))
+        var text = await target.GetMessagesAsync(conversation, Math.Clamp(limit, 1, 50))
             .ConfigureAwait(false);
         return string.IsNullOrWhiteSpace(text)
             ? $"平台「{target.Id}」的会话「{conversation}」没有可读取的消息（会话 id 可能不正确，或还没有收到过该会话的消息）。"
@@ -115,7 +89,7 @@ public class PlatformService : IDisposable
     }
 
     /// <summary>向指定平台某个会话发送消息；返回可直接回传给模型的文本。</summary>
-    public async Task<string> SendConversationMessageAsync(string platform, string conversationId, string message)
+    public async Task<string> SendMessageAsync(string platform, string conversationId, string message)
     {
         var available = Platforms;
         if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
@@ -125,16 +99,92 @@ public class PlatformService : IDisposable
         if (target is null)
             return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
 
-        if (target is not IMessagePlatformConversation conversations)
-            return $"平台「{target.Id}」不支持按会话读写消息，请改用 get_platform_messages / send_platform_message。";
-
         var conversation = conversationId.Trim();
         if (conversation.Length == 0) return "会话 id 不能为空。";
         if (string.IsNullOrWhiteSpace(message)) return "消息内容不能为空。";
 
-        await conversations.SendConversationMessageAsync(conversation, message).ConfigureAwait(false);
+        await target.SendMessageAsync(conversation, message).ConfigureAwait(false);
         return $"已向平台「{target.Id}」的会话「{conversation}」发送消息。";
     }
+
+    /// <summary>向指定会话发送图片或文件。</summary>
+    public Task<string> SendAttachmentAsync(
+        string platform,
+        string conversationId,
+        string filePath,
+        string? displayName = null)
+        => SendAttachmentCoreAsync(platform, conversationId, filePath, displayName);
+
+    /// <summary>
+    /// 向指定会话发送图片或文件：先校验平台、会话与文件，再交给平台插件上传。
+    /// 返回可直接回传给模型的文本结果。
+    /// </summary>
+    private async Task<string> SendAttachmentCoreAsync(
+        string platform,
+        string conversationId,
+        string filePath,
+        string? displayName)
+    {
+        var available = Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        var id = platform.Trim();
+        var target = available.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
+            return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+
+        var conversation = conversationId.Trim();
+        if (conversation.Length == 0) return "会话 id 不能为空。";
+
+        var raw = filePath.Trim();
+        if (raw.StartsWith('@')) raw = raw[1..].Trim().Trim('"');
+        if (raw.Length == 0) return "文件路径不能为空。";
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(raw);
+        }
+        catch (Exception ex)
+        {
+            return $"文件路径无效：{ex.Message}";
+        }
+
+        if (Directory.Exists(fullPath)) return $"「{fullPath}」是目录，不能作为附件发送。";
+
+        var info = new FileInfo(fullPath);
+        if (!info.Exists) return $"文件不存在：{fullPath}";
+
+        var kind = ImageExtensions.Contains(info.Extension)
+            ? PlatformAttachmentKind.Image
+            : PlatformAttachmentKind.File;
+        if (kind == PlatformAttachmentKind.Image && info.Length > MaxImageBytes)
+            return $"图片「{info.Name}」大小为 {FormatSize(info.Length)}，超过 {FormatSize(MaxImageBytes)} 的发送上限。";
+        if (info.Length > MaxAttachmentBytes)
+            return $"文件「{info.Name}」大小为 {FormatSize(info.Length)}，超过 {FormatSize(MaxAttachmentBytes)} 的发送上限。";
+
+        var name = string.IsNullOrWhiteSpace(displayName) ? info.Name : displayName.Trim();
+        var attachment = new PlatformAttachment(fullPath, kind, name);
+        var label = kind == PlatformAttachmentKind.Image ? "图片" : "文件";
+
+        try
+        {
+            await target.SendAttachmentAsync(conversation, attachment).ConfigureAwait(false);
+            return $"已通过平台「{target.Id}」向会话「{conversation}」发送{label}「{name}」。";
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "send attachment via {Platform} failed", target.Id);
+            return $"发送{label}「{name}」失败：{ex.Message}";
+        }
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / 1024d / 1024d:0.#} MB",
+        >= 1024 => $"{bytes / 1024d:0.#} KB",
+        _ => $"{bytes} 字节",
+    };
 
     /// <summary>订阅平台的提醒事件。</summary>
     private void Attach(IMessagePlatform platform)

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
+using System.Diagnostics;
+using System.IO;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -10,6 +13,7 @@ namespace SoufflePet.Models;
 /// 一条对话消息：IsUser 决定气泡的左右对齐与配色；IsTool 表示工具调用记录（不进入请求历史）；
 /// IsReasoning 表示模型的思考过程（同样不进入请求历史）；
 /// Text 支持流式追加时刷新；带 Approval 的消息表示等待用户确认的工具调用，气泡上显示允许/拒绝按钮。
+/// DisplayAttachment 非空时，气泡里额外展示图片预览或文件卡片。
 /// </summary>
 public sealed partial class ChatMessage : ObservableObject
 {
@@ -17,7 +21,8 @@ public sealed partial class ChatMessage : ObservableObject
     private readonly string _baseText;
 
     public ChatMessage(string text, bool isUser, bool isTool = false, bool isReasoning = false,
-        ToolApprovalRequest? approval = null, bool isExpanded = true, bool isPlatformNotice = false)
+        ToolApprovalRequest? approval = null, bool isExpanded = true, bool isPlatformNotice = false,
+        ChatDisplayAttachment? displayAttachment = null)
     {
         Text = text;
         _baseText = text;
@@ -27,6 +32,7 @@ public sealed partial class ChatMessage : ObservableObject
         Approval = approval;
         IsExpanded = isExpanded;
         IsPlatformNotice = isPlatformNotice;
+        DisplayAttachment = displayAttachment;
         // 初始就是收起状态的思考气泡（从历史恢复）已经结束，标题直接显示「已完成」
         IsReasoningDone = !isExpanded;
 
@@ -58,6 +64,11 @@ public sealed partial class ChatMessage : ObservableObject
 
     /// <summary>平台推送的提醒（弱化强调样式展示，表示这轮对话由外部消息触发）。</summary>
     public bool IsPlatformNotice { get; }
+
+    /// <summary>随消息展示的本地图片或文件；null 表示普通文本气泡。</summary>
+    public ChatDisplayAttachment? DisplayAttachment { get; }
+
+    public bool HasDisplayAttachment => DisplayAttachment is not null;
 
     /// <summary>折叠面板的展开状态（思考过程与工具调用共用）：思考结束后自动收起，用户可手动切换。</summary>
     [ObservableProperty]
@@ -131,5 +142,66 @@ public sealed partial class ChatMessage : ObservableObject
             _ => "已取消"
         };
         Text = $"{_baseText}\n→ {status}";
+    }
+}
+
+/// <summary>
+/// 对话气泡里展示的本地附件：图片按预览展示，其他文件展示为可点击打开的卡片。
+/// 图片解码在后台完成，避免大图阻塞 UI 线程。
+/// </summary>
+public sealed partial class ChatDisplayAttachment : ObservableObject
+{
+    /// <summary>预览图解码后的最大宽度（像素）；超过时等比缩小，减少内存占用。</summary>
+    private const int PreviewMaxWidth = 720;
+
+    public ChatDisplayAttachment(string filePath, string fileName, bool isImage)
+    {
+        FilePath = filePath;
+        FileName = fileName;
+        IsImage = isImage;
+    }
+
+    public string FilePath { get; }
+
+    public string FileName { get; }
+
+    public bool IsImage { get; }
+
+    /// <summary>图片预览；解码完成前为 null。非图片附件始终为 null。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasImage))]
+    public partial Bitmap? Image { get; set; }
+
+    public bool HasImage => Image is not null;
+
+    /// <summary>非图片附件展示为文件卡片。</summary>
+    public bool IsFileCard => !IsImage;
+
+    /// <summary>按需解码图片；文件缺失或格式不支持时返回 null。</summary>
+    public static Bitmap? LoadImage(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            return Bitmap.DecodeToWidth(stream, PreviewMaxWidth);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>用系统默认程序打开文件；文件已删除等失败情况忽略，避免界面崩溃。</summary>
+    [RelayCommand]
+    private void Open()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(FilePath) { UseShellExecute = true });
+        }
+        catch
+        {
+            // 文件已被移动或没有关联程序：忽略
+        }
     }
 }

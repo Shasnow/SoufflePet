@@ -52,6 +52,13 @@ public sealed class ChatTools
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8000;
 
+    /// <summary>本地展示文件的最大字节数，超出时只回报文件信息、不展示。</summary>
+    private const long ShowFileMaxBytes = 50L * 1024 * 1024;
+
+    /// <summary>按扩展名识别图片，决定平台按图片发送还是在窗口里预览。</summary>
+    private static readonly HashSet<string> ImageExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
+
     /// <summary>一次提问最多展示的问题数，超出的忽略（面板放不下，也避免模型刷屏）。</summary>
     private const int AskUserMaxQuestions = 6;
 
@@ -80,6 +87,7 @@ public sealed class ChatTools
     private readonly IPluginService _plugins;
     private readonly UserQuestionService _questions;
     private readonly PlatformService _platforms;
+    private readonly ChatFileService _files;
 
     public ChatTools(
         SouffleSettings settings,
@@ -91,7 +99,8 @@ public sealed class ChatTools
         ISkillService skills,
         IPluginService plugins,
         UserQuestionService questions,
-        PlatformService platforms)
+        PlatformService platforms,
+        ChatFileService files)
     {
         _settings = settings;
         _httpClientFactory = httpClientFactory;
@@ -103,6 +112,7 @@ public sealed class ChatTools
         _plugins = plugins;
         _questions = questions;
         _platforms = platforms;
+        _files = files;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -164,21 +174,21 @@ public sealed class ChatTools
                 "read_skill",
                 "读取某个技能的完整说明。"),
             AIFunctionFactory.Create(
-                GetPlatformMessages,
-                "get_platform_messages",
-                "获取已连接消息平台的最新消息。"),
-            AIFunctionFactory.Create(
-                SendPlatformMessage,
-                "send_platform_message",
-                "向已连接的某个消息平台发送消息。"),
-            AIFunctionFactory.Create(
-                GetConversationMessages,
-                "get_conversation_messages",
+                GetMessages,
+                "get_messages",
                 "读取消息平台某个会话（私聊或群聊）的最近消息。"),
             AIFunctionFactory.Create(
-                SendConversationMessage,
-                "send_conversation_message",
-                "向消息平台的某个会话（私聊或群聊）发送消息。")
+                SendMessage,
+                "send_message",
+                "向消息平台的某个会话（私聊或群聊）发送消息。"),
+            AIFunctionFactory.Create(
+                SendAttachment,
+                "send_attachment",
+                "向消息平台的某个会话发送本地图片或文件。"),
+            AIFunctionFactory.Create(
+                ShowFile,
+                "show_file",
+                "在本地对话窗口里直接给用户展示一张图片或一个文件卡片。")
         ];
         LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
@@ -348,76 +358,114 @@ public sealed class ChatTools
             : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
     }
 
-    /// <summary>获取插件注册的消息平台的最新消息；不指定平台时逐个读取并汇总。</summary>
-    private async Task<string> GetPlatformMessages(
-        [Description("消息平台 id；留空表示获取所有平台的最新消息")]
-        string? platform = null)
-    {
-        var available = _platforms.Platforms;
-        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
-
-        var target = platform?.Trim();
-        if (string.IsNullOrEmpty(target))
-        {
-            var messages = await _platforms.GetMessagesAsync().ConfigureAwait(false);
-            var builder = new StringBuilder("各平台最新消息：");
-            foreach (var (id, message) in messages)
-            {
-                builder.Append("\n- ").Append(id).Append('：')
-                    .Append(string.IsNullOrWhiteSpace(message) ? "（无新消息）" : message);
-            }
-
-            return builder.ToString();
-        }
-
-        if (!_platforms.HasPlatform(target))
-            return $"没有找到消息平台「{target}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
-
-        var latest = await _platforms.GetMessagesAsync(target).ConfigureAwait(false);
-        return string.IsNullOrWhiteSpace(latest)
-            ? $"平台「{target}」没有新消息。"
-            : $"平台「{target}」的最新消息：\n{latest}";
-    }
-
-    /// <summary>向插件注册的消息平台发送消息。</summary>
-    private async Task<string> SendPlatformMessage(
-        [Description("消息平台 id")]
-        string platform,
-        [Description("要发送的消息内容")]
-        string message)
-    {
-        var target = platform.Trim();
-        var available = _platforms.Platforms;
-        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
-
-        if (string.IsNullOrWhiteSpace(message)) return "消息内容不能为空。";
-
-        if (!_platforms.HasPlatform(target))
-            return $"没有找到消息平台「{target}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
-
-        await _platforms.SendMessageAsync(target, message).ConfigureAwait(false);
-        return $"已通过平台「{target}」发送消息。";
-    }
-
     /// <summary>读取指定会话的最近消息；会话 id 取自平台消息前缀（如 group:12345、private:777）。</summary>
-    private Task<string> GetConversationMessages(
+    private Task<string> GetMessages(
         [Description("消息平台 id，例如 napcat")]
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777，可从平台消息的 [会话 id] 前缀获取")]
         string conversation,
         [Description("最多读取多少条最近消息，默认 20")]
         int limit = 20)
-        => _platforms.GetConversationMessagesAsync(platform, conversation, limit);
+        => _platforms.GetMessagesAsync(platform, conversation, limit);
 
     /// <summary>向指定会话发送消息。</summary>
-    private Task<string> SendConversationMessage(
+    private Task<string> SendMessage(
         [Description("消息平台 id，例如 napcat")]
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777")]
         string conversation,
         [Description("要发送的消息内容")]
         string message)
-        => _platforms.SendConversationMessageAsync(platform, conversation, message);
+        => _platforms.SendMessageAsync(platform, conversation, message);
+
+    /// <summary>向指定会话发送图片或文件；发送前按审批规则向用户确认。</summary>
+    private async Task<string> SendAttachment(
+        [Description("消息平台 id，例如 napcat")]
+        string platform,
+        [Description("会话 id，形如 group:12345 或 private:777")]
+        string conversation,
+        [Description("本地文件的绝对路径，可带 @ 前缀")]
+        string path,
+        [Description("展示文件名；不传时用文件名")]
+        string? displayName = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveLocalFile(path, out var fullPath, out var info, out var error)) return error;
+
+        if (!await _access.RequestApprovalAsync(
+                "send_attachment",
+                $"平台：{platform.Trim()}\n会话：{conversation.Trim()}\n文件：{fullPath}（{FormatSize(info.Length)}）",
+                cancellationToken).ConfigureAwait(false))
+            return cancellationToken.IsCancellationRequested
+                ? "发送已取消。"
+                : "用户没有允许发送文件，文件未发送。";
+
+        return await _platforms
+            .SendAttachmentAsync(platform, conversation, fullPath, displayName)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>在本地对话窗口展示图片或文件卡片。</summary>
+    private string ShowFile(
+        [Description("本地文件的绝对路径，可带 @ 前缀")]
+        string path,
+        [Description("展示文件名；不传时用文件名")]
+        string? displayName = null)
+    {
+        if (!TryResolveLocalFile(path, out var fullPath, out var info, out var error)) return error;
+        if (info.Length > ShowFileMaxBytes)
+            return $"文件「{info.Name}」大小为 {FormatSize(info.Length)}，超过 {FormatSize(ShowFileMaxBytes)} 的展示上限。";
+
+        var name = string.IsNullOrWhiteSpace(displayName) ? info.Name : displayName.Trim();
+        var isImage = ImageExtensions.Contains(info.Extension);
+        _files.Show(new ChatFileDisplay(fullPath, name, isImage));
+
+        return isImage
+            ? $"已在对话窗口展示图片「{name}」。"
+            : $"已在对话窗口展示文件「{name}」。";
+    }
+
+    /// <summary>解析并校验本地文件路径：去掉 @ 前缀，拒绝目录与不存在的文件。</summary>
+    private static bool TryResolveLocalFile(
+        string path,
+        out string fullPath,
+        out FileInfo info,
+        out string error)
+    {
+        fullPath = string.Empty;
+        info = null!;
+        error = string.Empty;
+
+        var raw = path.Trim();
+        if (raw.StartsWith('@')) raw = raw[1..].Trim().Trim('"');
+        if (raw.Length == 0)
+        {
+            error = "文件路径不能为空。";
+            return false;
+        }
+
+        try
+        {
+            fullPath = Path.GetFullPath(raw);
+        }
+        catch (Exception ex)
+        {
+            error = $"文件路径无效：{ex.Message}";
+            return false;
+        }
+
+        if (Directory.Exists(fullPath))
+        {
+            error = $"「{fullPath}」是目录，不能作为文件使用。";
+            return false;
+        }
+
+        info = new FileInfo(fullPath);
+        if (info.Exists) return true;
+
+        error = $"文件不存在：{fullPath}";
+        return false;
+    }
 
     /// <summary>
     /// 向用户提问：交给对话界面展示提问面板，等用户全部回答后把问答结果回传给模型。

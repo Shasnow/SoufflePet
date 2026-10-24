@@ -26,11 +26,8 @@ namespace SoufflePet.Plugins.NapCat;
 /// 群聊里 @ 到桌宠（或按配置关掉 @ 限制后任意群消息）、以及允许用户的私聊会通过
 /// <see cref="OnMentioned" /> 主动唤醒桌宠；支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
 /// </summary>
-public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatformConversation
+public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 {
-    /// <summary>全局未读队列中最多保留的消息条数，超出时丢弃最早的。</summary>
-    private const int MaxUnreadMessages = 30;
-
     /// <summary>每个会话最多保留的历史消息条数，供按会话读取使用。</summary>
     private const int MaxHistoryMessages = 50;
 
@@ -60,6 +57,12 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
     /// <summary>单个附件允许下载的最大字节数。</summary>
     private const long MaxAttachmentBytes = 20 * 1024 * 1024;
+
+    /// <summary>图片作为消息段发送时的最大字节数（base64 编码会膨胀）。</summary>
+    private const long MaxSendImageBytes = 5L * 1024 * 1024;
+
+    /// <summary>文件走 base64 上传的上限；更大的文件传本地绝对路径，避免内存与 WebSocket 压力。</summary>
+    private const long MaxBase64FileBytes = 10L * 1024 * 1024;
 
     /// <summary>单个附件的下载超时。</summary>
     private static readonly TimeSpan AttachmentDownloadTimeout = TimeSpan.FromSeconds(60);
@@ -116,7 +119,6 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new(StringComparer.Ordinal);
-    private readonly List<(string ConversationId, string Line)> _unread = [];
     private readonly Dictionary<string, List<string>> _history = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _conversationNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _lastActive = new(StringComparer.OrdinalIgnoreCase);
@@ -149,10 +151,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
 
-    /// <summary>最近一次可回复的会话：发送消息时按它决定私聊还是群聊，以及目标 id。</summary>
-    private (string Kind, long Id)? _lastConversation;
-
-    /// <summary>平台 id，供 get_platform_messages / send_platform_message 参数使用。</summary>
+    /// <summary>平台 id，供工具的 platform 参数使用。</summary>
     public string Id => "napcat";
 
     /// <summary>收到需要桌宠处理的消息时触发，由宿主订阅后唤醒桌宠。</summary>
@@ -178,23 +177,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         return Task.CompletedTask;
     }
 
-    public Task SendMessageAsync(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message)) return Task.CompletedTask;
-
-        (string Kind, long Id) conversation;
-        lock (_sync)
-        {
-            if (_lastConversation is not { } last)
-                throw new InvalidOperationException("NapCat 还没有收到过可回复的消息，无法确定发送目标。");
-            conversation = last;
-        }
-
-        return SendToConversationAsync(conversation, message);
-    }
-
     /// <summary>向指定会话发送消息；conversationId 形如 group:12345 或 private:777。</summary>
-    public async Task SendConversationMessageAsync(string conversationId, string message)
+    public async Task SendMessageAsync(string conversationId, string message)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
 
@@ -205,6 +189,135 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
         await SendToConversationAsync(conversation, message).ConfigureAwait(false);
     }
+
+    /// <summary>向指定会话发送图片或文件；conversationId 形如 group:12345 或 private:777。</summary>
+    public async Task SendAttachmentAsync(string conversationId, PlatformAttachment attachment)
+    {
+        if (!TryParseConversationId(conversationId, out var conversation))
+            throw new ArgumentException(
+                $"无法识别的会话 id「{conversationId}」，应形如 group:12345 或 private:777。",
+                nameof(conversationId));
+
+        await SendAttachmentToConversationAsync(conversation, attachment).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 发送附件：图片走消息段（base64），文件走 upload_group_file / upload_private_file；
+    /// 小文件用 base64 避免路径权限差异，大文件保留绝对路径减少内存占用。
+    /// </summary>
+    private async Task SendAttachmentToConversationAsync(
+        (string Kind, long Id) conversation,
+        PlatformAttachment attachment)
+    {
+        var path = Path.GetFullPath(attachment.FilePath);
+        if (!File.Exists(path))
+            throw new InvalidOperationException($"文件不存在：{path}");
+
+        var name = string.IsNullOrWhiteSpace(attachment.DisplayName)
+            ? Path.GetFileName(path)
+            : attachment.DisplayName.Trim();
+
+        ClientWebSocket? socket;
+        lock (_sync) socket = _socket;
+
+        if (socket is not { State: WebSocketState.Open })
+            throw new InvalidOperationException("NapCat WebSocket 未连接，附件没有发送。");
+
+        var isGroup = conversation.Kind == "group";
+        if (attachment.Kind == PlatformAttachmentKind.Image)
+        {
+            await SendImageAsync(socket, conversation, path, name).ConfigureAwait(false);
+        }
+        else
+        {
+            await SendFileAsync(socket, conversation, path, name).ConfigureAwait(false);
+        }
+
+        Context.Logger.LogInformation(
+            "已向{Kind} {Id} 发送{Label}「{Name}」",
+            isGroup ? "群" : "用户",
+            conversation.Id,
+            attachment.Kind == PlatformAttachmentKind.Image ? "图片" : "文件",
+            name);
+    }
+
+    /// <summary>图片按 OneBot 消息段发送：数组格式避免 CQ 码转义，base64 不依赖 NapCat 的文件权限。</summary>
+    private async Task SendImageAsync(
+        ClientWebSocket socket,
+        (string Kind, long Id) conversation,
+        string path,
+        string name)
+    {
+        var info = new FileInfo(path);
+        if (info.Length > MaxSendImageBytes)
+            throw new InvalidOperationException(
+                $"图片「{name}」大小为 {info.Length} 字节，超过 {MaxSendImageBytes} 的发送上限。");
+
+        var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+        var parameters = BuildMessageParameters(
+            conversation,
+            new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["type"] = "image",
+                    ["data"] = new Dictionary<string, object?>
+                    {
+                        ["file"] = "base64://" + Convert.ToBase64String(bytes),
+                    },
+                },
+            });
+
+        var response = await SendActionAsync(
+                socket,
+                conversation.Kind == "group" ? "send_group_msg" : "send_private_msg",
+                parameters)
+            .ConfigureAwait(false);
+        RememberSentMessageId(GetSentMessageId(response));
+    }
+
+    /// <summary>文件走平台上传接口；小文件用 base64，大文件传绝对路径。</summary>
+    private async Task SendFileAsync(
+        ClientWebSocket socket,
+        (string Kind, long Id) conversation,
+        string path,
+        string name)
+    {
+        var info = new FileInfo(path);
+        var file = info.Length <= MaxBase64FileBytes
+            ? "base64://" + Convert.ToBase64String(await File.ReadAllBytesAsync(path).ConfigureAwait(false))
+            : path;
+
+        var isGroup = conversation.Kind == "group";
+        var parameters = new Dictionary<string, object?>
+        {
+            [isGroup ? "group_id" : "user_id"] = conversation.Id,
+            ["file"] = file,
+            ["name"] = name,
+        };
+
+        var response = await SendActionAsync(
+                socket,
+                isGroup ? "upload_group_file" : "upload_private_file",
+                parameters)
+            .ConfigureAwait(false);
+        RememberSentMessageId(GetSentMessageId(response));
+    }
+
+    /// <summary>构造附件消息参数：附件用消息段数组，不设置 auto_escape。</summary>
+    private static Dictionary<string, object?> BuildMessageParameters(
+        (string Kind, long Id) conversation,
+        object message) => new()
+    {
+        [conversation.Kind == "group" ? "group_id" : "user_id"] = conversation.Id,
+        ["message"] = message,
+    };
+
+    /// <summary>从发送响应里取 message_id；没有时返回 null。</summary>
+    private static string? GetSentMessageId(JsonElement response) =>
+        response.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+            ? GetString(data, "message_id")
+            : null;
 
     /// <summary>列出本次运行期间收到过消息的会话，按最近活跃排序。</summary>
     public Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync()
@@ -223,9 +336,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
     /// <summary>
     /// 读取指定会话最近的消息：优先向 NapCat 查询历史（含插件启动前的消息），
-    /// 未连接或查询失败时退回本次运行缓存；读取后该会话视为已读。
+    /// 未连接或查询失败时退回本次运行缓存。
     /// </summary>
-    public async Task<string> GetConversationMessagesAsync(string conversationId, int limit = 20)
+    public async Task<string> GetMessagesAsync(string conversationId, int limit = 20)
     {
         var id = NormalizeConversationId(conversationId);
         if (id.Length == 0 || !TryParseConversationId(id, out var conversation)) return string.Empty;
@@ -235,8 +348,6 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
         lock (_sync)
         {
-            _unread.RemoveAll(entry => string.Equals(entry.ConversationId, id, StringComparison.OrdinalIgnoreCase));
-
             if (remote.Count > 0) return string.Join('\n', remote);
             if (!_history.TryGetValue(id, out var history) || history.Count == 0) return string.Empty;
 
@@ -307,18 +418,6 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         {
             Context.Logger.LogDebug(ex, "读取 NapCat 历史消息失败，改用本地缓存");
             return [];
-        }
-    }
-
-    public Task<string> ReceiveMessageAsync()
-    {
-        lock (_sync)
-        {
-            if (_unread.Count == 0) return Task.FromResult(string.Empty);
-
-            var text = string.Join('\n', _unread.Select(entry => entry.Line));
-            _unread.Clear();
-            return Task.FromResult(text);
         }
     }
 
@@ -557,8 +656,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
             var conversationId = $"group:{groupId.ToString(CultureInfo.InvariantCulture)}";
             var line = $"[{conversationId}] {sender}：{text}";
-            QueueMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
-            lock (_sync) _lastConversation = ("group", groupId);
+            RecordMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
 
             // 引用反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
@@ -582,8 +680,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
 
             var conversationId = $"private:{userId.ToString(CultureInfo.InvariantCulture)}";
             var line = $"[{conversationId}] {sender}：{text}";
-            QueueMessage(conversationId, line, sender);
-            lock (_sync) _lastConversation = ("private", userId);
+            RecordMessage(conversationId, line, sender);
 
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
                 _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, _wakeOnPrivateMessage);
@@ -611,7 +708,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                 var hydrated = await HydrateAttachmentsAsync(line, attachments).ConfigureAwait(false);
                 if (!string.Equals(hydrated, line, StringComparison.Ordinal))
                 {
-                    PatchQueuedLine(conversationId, line, hydrated);
+                    PatchRecordedLine(conversationId, line, hydrated);
                     line = hydrated;
                 }
             }
@@ -987,14 +1084,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         return $"{attachment.Prefix}-{hash}{extension.ToLowerInvariant()}";
     }
 
-    /// <summary>把一条消息写入全局未读队列与所属会话的历史记录。</summary>
-    private void QueueMessage(string conversationId, string line, string? displayName)
+    /// <summary>把一条消息写入所属会话的历史记录。</summary>
+    private void RecordMessage(string conversationId, string line, string? displayName)
     {
         lock (_sync)
         {
-            _unread.Add((conversationId, line));
-            while (_unread.Count > MaxUnreadMessages) _unread.RemoveAt(0);
-
             if (!_history.TryGetValue(conversationId, out var history))
             {
                 history = [];
@@ -1010,7 +1104,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         }
     }
 
-    /// <summary>会话数超过上限时，淘汰最久未活跃的会话及其历史、名称与未读记录（调用方需持有锁）。</summary>
+    /// <summary>会话数超过上限时，淘汰最久未活跃的会话及其历史与名称（调用方需持有锁）。</summary>
     private void TrimConversations()
     {
         while (_history.Count > MaxConversations)
@@ -1034,8 +1128,6 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
             _history.Remove(oldest);
             _conversationNames.Remove(oldest);
             _lastActive.Remove(oldest);
-            _unread.RemoveAll(entry =>
-                string.Equals(entry.ConversationId, oldest, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -1099,7 +1191,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                 ? line.Replace(QuotePlaceholder, label, StringComparison.Ordinal)
                 : PrefixQuote(line, label + " ");
             if (!string.Equals(enriched, line, StringComparison.Ordinal))
-                PatchQueuedLine(conversationId, line, enriched);
+                PatchRecordedLine(conversationId, line, enriched);
 
             if (wake || quoted?.IsSelf == true) RaiseMentioned(enriched, sender, messageId);
         }
@@ -1165,18 +1257,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         return single.Length <= QuotedSummaryLength ? single : single[..QuotedSummaryLength] + "…";
     }
 
-    /// <summary>把刚入队的原始行换成补上引用内容的版本：未读队列与会话历史同步更新。</summary>
-    private void PatchQueuedLine(string conversationId, string oldLine, string newLine)
+    /// <summary>把会话历史里的原始行换成补上引用内容的版本。</summary>
+    private void PatchRecordedLine(string conversationId, string oldLine, string newLine)
     {
         lock (_sync)
         {
-            for (var i = _unread.Count - 1; i >= 0; i--)
-            {
-                if (string.Equals(_unread[i].ConversationId, conversationId, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(_unread[i].Line, oldLine, StringComparison.Ordinal))
-                    _unread[i] = (conversationId, newLine);
-            }
-
             if (!_history.TryGetValue(conversationId, out var history)) return;
 
             for (var i = history.Count - 1; i >= 0; i--)

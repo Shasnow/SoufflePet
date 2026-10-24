@@ -225,11 +225,14 @@
                 </Border>
 
                 <!-- 消息区 -->
+                <!-- 关闭 BringIntoViewOnFocusChange：窗口重新激活时会恢复上次聚焦的气泡/按钮，
+                     默认行为会把该控件滚回可视区，导致切回窗口时消息列表意外滚动 -->
                 <ScrollViewer Name="MessageScroll"
                               Grid.Row="2"
                               HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
-                              AllowAutoHide="True">
+                              AllowAutoHide="True"
+                              BringIntoViewOnFocusChange="False">
                     <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -267,6 +270,34 @@
                                         </Expander>
 
                                         <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
+
+                                        <!-- 本地附件：图片直接预览，其他文件显示为可点击打开的卡片 -->
+                                        <StackPanel Spacing="6" IsVisible="{Binding HasDisplayAttachment}">
+                                            <Button Classes="ghost"
+                                                    Padding="0"
+                                                    HorizontalAlignment="Left"
+                                                    IsVisible="{Binding DisplayAttachment.HasImage}"
+                                                    Command="{Binding DisplayAttachment.OpenCommand}"
+                                                    ToolTip.Tip="{Binding DisplayAttachment.FilePath}"
+                                                    ToolTip.Placement="Top">
+                                                <Image Source="{Binding DisplayAttachment.Image}"
+                                                       MaxWidth="260"
+                                                       MaxHeight="240"
+                                                       Stretch="Uniform" />
+                                            </Button>
+                                            <Button Classes="ghost"
+                                                    Padding="8,4"
+                                                    HorizontalAlignment="Left"
+                                                    IsVisible="{Binding DisplayAttachment.IsFileCard}"
+                                                    Command="{Binding DisplayAttachment.OpenCommand}"
+                                                    ToolTip.Tip="{Binding DisplayAttachment.FilePath}"
+                                                    ToolTip.Placement="Top">
+                                                <TextBlock Text="{Binding DisplayAttachment.FileName}"
+                                                           MaxWidth="240"
+                                                           FontSize="11.5"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Button>
+                                        </StackPanel>
 
                                         <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
                                         <TextBlock Text="{Binding UsageText}"

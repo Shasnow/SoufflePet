@@ -29,11 +29,18 @@ public sealed class ChatToolAccess
     public event Action<ToolApprovalRequest>? ApprovalRequested;
 
     /// <summary>为一次命令执行申请许可：完全访问直接放行，手动审批等待用户点击允许。</summary>
-    public async Task<bool> RequestShellApprovalAsync(string command, CancellationToken cancellationToken)
+    public Task<bool> RequestShellApprovalAsync(string command, CancellationToken cancellationToken)
+        => RequestApprovalAsync("run_shell_command", command, cancellationToken);
+
+    /// <summary>为任意有副作用的工具申请许可（例如向平台发送文件）。</summary>
+    public async Task<bool> RequestApprovalAsync(
+        string toolName,
+        string detail,
+        CancellationToken cancellationToken)
     {
         if (ApprovalMode == ToolApprovalMode.FullAccess) return true;
 
-        var request = new ToolApprovalRequest("run_shell_command", command);
+        var request = new ToolApprovalRequest(toolName, detail);
         if (ApprovalRequested is { } handler) handler(request);
         else request.Reject();
 
