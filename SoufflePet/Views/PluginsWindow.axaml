@@ -236,12 +236,14 @@
                                                                      Text="{Binding Text, Mode=TwoWay}"
                                                                      IsVisible="{Binding IsMultiline}"
                                                                      AcceptsReturn="True"
+                                                                     VerticalContentAlignment="Top"
                                                                      Height="64"
                                                                      TextWrapping="Wrap" />
                                                             <TextBox Classes="field"
                                                                      Text="{Binding Text, Mode=TwoWay}"
                                                                      IsVisible="{Binding IsList}"
                                                                      AcceptsReturn="True"
+                                                                     VerticalContentAlignment="Top"
                                                                      Height="64"
                                                                      TextWrapping="Wrap"
                                                                      PlaceholderText="每行一个" />

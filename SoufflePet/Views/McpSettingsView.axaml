@@ -167,6 +167,7 @@
                                             <TextBox Classes="field"
                                                      Text="{Binding EditorArguments, Mode=TwoWay}"
                                                      AcceptsReturn="True"
+                                                     VerticalContentAlignment="Top"
                                                      TextWrapping="NoWrap"
                                                      MinHeight="64"
                                                      PlaceholderText="-y&#x0a;@modelcontextprotocol/server-filesystem&#x0a;D:\" />
@@ -184,6 +185,7 @@
                                             <TextBox Classes="field"
                                                      Text="{Binding EditorEnvironment, Mode=TwoWay}"
                                                      AcceptsReturn="True"
+                                                     VerticalContentAlignment="Top"
                                                      TextWrapping="NoWrap"
                                                      MinHeight="52"
                                                      PlaceholderText="API_KEY=..." />
@@ -204,6 +206,7 @@
                                             <TextBox Classes="field"
                                                      Text="{Binding EditorHeaders, Mode=TwoWay}"
                                                      AcceptsReturn="True"
+                                                     VerticalContentAlignment="Top"
                                                      TextWrapping="NoWrap"
                                                      MinHeight="52"
                                                      PlaceholderText="Authorization=Bearer ..." />

@@ -30,6 +30,8 @@
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="Padding" Value="8,5" />
         <Setter Property="MinHeight" Value="32" />
+        <!-- 单行输入框在 MinHeight 撑高后文本默认贴顶，统一改为垂直居中；多行输入框逐个覆盖回 Top -->
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="TextBox.field /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="#12FFFFFF" />
