@@ -62,7 +62,13 @@ public interface ILlmChatService
 /// 基于 Microsoft.Extensions.AI（OpenAI 兼容实现）的流式聊天客户端：
 /// 负责系统提示词注入、工具调用循环与错误提示，调用方只消费文本增量。
 /// </summary>
-public sealed class LlmChatService : ILlmChatService
+public sealed class LlmChatService(
+    SouffleSettings settings,
+    ChatTools chatTools,
+    ChatMemory memory,
+    ISkillService skills,
+    IPluginService plugins)
+    : ILlmChatService
 {
     private static readonly ILogger Logger = Log.ForContext<LlmChatService>();
 
@@ -91,26 +97,6 @@ public sealed class LlmChatService : ILlmChatService
 
     /// <summary>工作目录下的项目说明文件名：每轮对话完整注入系统提示词。</summary>
     private const string AgentsFileName = "AGENTS.md";
-
-    private readonly SouffleSettings _settings;
-    private readonly ChatMemory _memory;
-    private readonly ChatTools _chatTools;
-    private readonly ISkillService _skills;
-    private readonly IPluginService _plugins;
-
-    public LlmChatService(
-        SouffleSettings settings,
-        ChatTools tools,
-        ChatMemory memory,
-        ISkillService skills,
-        IPluginService plugins)
-    {
-        _settings = settings;
-        _memory = memory;
-        _chatTools = tools;
-        _skills = skills;
-        _plugins = plugins;
-    }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         ChatModelConfig model,
@@ -172,7 +158,7 @@ public sealed class LlmChatService : ILlmChatService
 
         // 系统提示词只作为本次请求的首条消息，不进入界面历史
         var messages = new List<ChatMessage>(history.Count + 3);
-        if (_settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
+        if (settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
 
         // 工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
@@ -192,7 +178,7 @@ public sealed class LlmChatService : ILlmChatService
             .OfType<FunctionCallContent>()
             .Select(c => c.CallId)
             .ToHashSet(StringComparer.Ordinal);
-        var memoryBlock = _memory.BuildMemoryBlock(
+        var memoryBlock = memory.BuildMemoryBlock(
             history.LastOrDefault(m => m.Role == ChatRole.User)?.Text,
             historyTexts,
             historyCallIds);
@@ -200,7 +186,7 @@ public sealed class LlmChatService : ILlmChatService
             messages.Add(new ChatMessage(ChatRole.System, memoryBlock));
 
         // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
-        var skillBlock = _skills.BuildCatalog();
+        var skillBlock = skills.BuildCatalog();
         if (skillBlock.Length > 0)
             messages.Add(new ChatMessage(ChatRole.System, skillBlock));
 
@@ -209,7 +195,7 @@ public sealed class LlmChatService : ILlmChatService
         var historyEnd = messages.Count;
 
         // 本地工具 + MCP 工具：MCP 服务器在首次对话时连接，失败只记日志、不影响本地工具
-        var tools = await _chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
+        var tools = await chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
         var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
         foreach (var function in tools.OfType<AIFunction>()) functions.TryAdd(function.Name, function);
 
@@ -254,7 +240,7 @@ public sealed class LlmChatService : ILlmChatService
 
             // 文本增量即时产出，同时留存完整流以便汇总工具调用。
             // 插件响应钩子每轮重新开始，状态不跨轮；处理失败由管线原样放行。
-            var pipeline = _plugins.CreateResponsePipeline(model.ModelId);
+            var pipeline = plugins.CreateResponsePipeline(model.ModelId);
             var updates = new List<ChatResponseUpdate>();
             // 上游可能把回复拆成大量碎片甚至空分片：这里自行合并成一条助手消息，
             // 正文只保留响应钩子输出的可见文本（DSML 等已在插件里剔除），思考原样保留。
@@ -332,15 +318,15 @@ public sealed class LlmChatService : ILlmChatService
 
             // 达到最大轮次：新调用不再执行，但每次都要作为工具结果回给模型，
             // 由模型自行决定基于已有信息作答还是继续请求（继续请求同样只会拿到这条提示）。
-            if (round >= _settings.MaxToolRounds)
+            if (round >= settings.MaxToolRounds)
             {
-                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, reject further calls", _settings.MaxToolRounds);
+                Logger.Warning("Tool calls exceeded {MaxRounds} rounds, reject further calls", settings.MaxToolRounds);
 
                 messages.Add(assistantMessage);
                 foreach (var call in calls)
                 {
                     var arguments = FormatArguments(call.Arguments);
-                    var limitText = $"未执行：本次对话已达到最大工具调用轮次（{_settings.MaxToolRounds} 轮）。";
+                    var limitText = $"未执行：本次对话已达到最大工具调用轮次（{settings.MaxToolRounds} 轮）。";
 
                     yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
                     messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, limitText)]));
