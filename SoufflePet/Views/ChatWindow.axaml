@@ -233,15 +233,18 @@
                               VerticalScrollBarVisibility="Auto"
                               AllowAutoHide="True"
                               BringIntoViewOnFocusChange="False">
+                    <!-- VirtualizingStackPanel 通过 EffectiveViewportChanged 感知视口，
+                         只创建可见范围内的气泡，消息很长时也不会把全部控件都实例化 -->
                     <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Spacing="10" />
+                                <VirtualizingStackPanel />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ChatMessage">
                                 <Border Classes="bubble"
+                                        Margin="0,0,0,10"
                                         Classes.user="{Binding IsUser}"
                                         Classes.tool="{Binding IsTool}"
                                         Classes.thinking="{Binding IsReasoning}"

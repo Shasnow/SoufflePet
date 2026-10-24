@@ -45,9 +45,6 @@ public partial class ChatWindow : Window
         // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
         InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
-        // 记录用户是否停在底部：只有贴底时才跟随新内容滚动，避免把正在回看的用户刷走
-        MessageScroll.ScrollChanged += OnMessageScrollChanged;
-
         // 工作区浮层是独立顶层：焦点落在浮层内时窗口收不到 Esc，这里用隧道阶段兜住
         WorkspacePopupRoot.AddHandler(KeyDownEvent, OnWorkspacePopupKeyDown, RoutingStrategies.Tunnel);
 
@@ -291,6 +288,8 @@ public partial class ChatWindow : Window
     /// <summary>当前是否跟随到底部：用户主动向上滚后置为 false，滚回底部再恢复。</summary>
     private bool _stickToBottom = true;
 
+    private bool _scrollChangedAttached;
+
     /// <summary>判断消息区是否已贴底（内容不足一屏时也算贴底）。</summary>
     private bool IsAtBottom()
     {
@@ -298,16 +297,39 @@ public partial class ChatWindow : Window
         return remaining <= StickToBottomTolerance;
     }
 
-    /// <summary>用户滚动（滚轮、拖动滚动条）后更新跟随状态；程序滚动到末尾时也会回到 true。</summary>
+    /// <summary>
+    /// 更新跟随状态：只有用户向上滚（偏移变小）才算离开底部。
+    /// 虚拟化下内容高度会分次补算、程序滚到底也会让偏移变大，这些都不应取消跟随。
+    /// </summary>
     private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        _stickToBottom = IsAtBottom();
+        if (IsAtBottom())
+        {
+            _stickToBottom = true;
+            return;
+        }
+
+        if (e.OffsetDelta.Y < 0)
+        {
+            _stickToBottom = false;
+            return;
+        }
+
+        // 内容高度补算后仍贴底意愿不变，补滚一次，避免停在估算高度处
+        if (_stickToBottom && e.ExtentDelta.Y > 0) ScrollToEnd();
     }
 
     /// <summary>首次显示时恢复的历史消息不会触发集合变更事件，需要在布局完成后主动滚到底部。</summary>
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
+
+        if (!_scrollChangedAttached)
+        {
+            MessageScroll.ScrollChanged += OnMessageScrollChanged;
+            _scrollChangedAttached = true;
+        }
+
         _stickToBottom = true;
         ScrollToEnd();
     }
@@ -334,7 +356,7 @@ public partial class ChatWindow : Window
         if (e.PropertyName == nameof(ChatMessage.Text) && _stickToBottom) ScrollToEnd();
     }
 
-    /// <summary>等布局完成后再滚，否则新气泡的高度还没算进去。</summary>
+    /// <summary>等布局完成后再滚，否则新气泡（或虚拟化补算的高度）还没算进去。</summary>
     private void ScrollToEnd()
     {
         Dispatcher.UIThread.Post(() => MessageScroll.ScrollToEnd(), DispatcherPriority.Background);
