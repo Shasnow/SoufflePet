@@ -6,7 +6,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -54,6 +58,58 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
     /// <summary>单条 WebSocket 消息的长度上限，防止异常数据无限占用内存。</summary>
     private const int MaxPayloadBytes = 8 * 1024 * 1024;
 
+    /// <summary>单个附件允许下载的最大字节数。</summary>
+    private const long MaxAttachmentBytes = 20 * 1024 * 1024;
+
+    /// <summary>单个附件的下载超时。</summary>
+    private static readonly TimeSpan AttachmentDownloadTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>下载附件用的 HTTP 客户端（插件内共享）。</summary>
+    private static readonly HttpClient Http = CreateHttpClient();
+
+    /// <summary>创建下载用的 HttpClient：QQ 多媒体 CDN 对没有 UA 的请求会长时间不响应，且本机 IPv6 不通时 .NET 会卡到超时。</summary>
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            ConnectCallback = ConnectIpv4Async,
+        };
+
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) SoufflePet/1.0");
+        return client;
+    }
+
+    /// <summary>只用 IPv4 建连：本机 IPv6 出口不通，.NET 默认优先尝试 IPv6 会把请求卡到超时。</summary>
+    private static async ValueTask<Stream> ConnectIpv4Async(
+        SocketsHttpConnectionContext context,
+        CancellationToken token)
+    {
+        var addresses = await Dns
+            .GetHostAddressesAsync(context.DnsEndPoint.Host, token)
+            .ConfigureAwait(false);
+
+        var address = Array.Find(addresses, item => item.AddressFamily == AddressFamily.InterNetwork)
+                      ?? (addresses.Length > 0
+                          ? addresses[0]
+                          : throw new HttpRequestException($"无法解析主机 {context.DnsEndPoint.Host}"));
+
+        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket
+                .ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), token)
+                .ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>消息字符串里 OneBot 的 CQ 码，用于解析 message_format=string 的平台。</summary>
     private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);
 
@@ -83,6 +139,12 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
     /// <summary>是否过滤机器人自己发出的消息，默认关闭。</summary>
     private bool _filterSelfMessage;
     private int _maxReplyChars = 1500;
+
+    /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
+    private bool _downloadAttachments = true;
+
+    /// <summary>附件缓存目录（绝对路径）。</summary>
+    private string _attachmentCacheDir = string.Empty;
 
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
@@ -479,7 +541,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         if (userId <= 0) return;
         if (_filterSelfMessage && userId == _selfId) return;
 
-        var parsed = ParseMessage(root);
+        var parsed = ParseMessage(root, _downloadAttachments);
         var text = parsed.Text;
         if (string.IsNullOrWhiteSpace(text)) return;
 
@@ -498,14 +560,14 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
             QueueMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
             lock (_sync) _lastConversation = ("group", groupId);
 
-            // 引用了某条消息时，先反查被引用的正文补进这一行，再决定要不要唤醒桌宠
-            if (parsed.QuotedId is { } quotedId)
-                _ = EnrichQuoteAsync(
-                    quotedId,
+            // 引用反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
+            if (parsed.Attachments is not null || parsed.QuotedId is not null)
+                _ = FinalizeMessageAsync(
                     conversationId,
                     line,
                     sender,
                     messageId,
+                    parsed,
                     parsed.MentionsSelf || !_requireAtInGroup);
             // 关掉 @ 限制后，群里每条消息都会唤醒桌宠
             else if (parsed.MentionsSelf || !_requireAtInGroup)
@@ -523,33 +585,86 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
             QueueMessage(conversationId, line, sender);
             lock (_sync) _lastConversation = ("private", userId);
 
-            if (parsed.QuotedId is { } quotedId)
-                _ = EnrichQuoteAsync(quotedId, conversationId, line, sender, messageId, _wakeOnPrivateMessage);
+            if (parsed.Attachments is not null || parsed.QuotedId is not null)
+                _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, _wakeOnPrivateMessage);
             else if (_wakeOnPrivateMessage)
                 RaiseMentioned(line, sender, messageId);
         }
     }
 
-    /// <summary>解析出的消息正文、是否 @/引用桌宠、以及首条被引用消息 id（供事后校验）。</summary>
-    private sealed record ParsedMessage(string Text, bool MentionsSelf, string? QuotedId);
+    /// <summary>
+    /// 补全一条刚入队的消息：先下载附件并把本地路径写回正文，再反查引用内容，
+    /// 最后按需要唤醒桌宠。异步执行，避免下载/网络等待阻塞接收循环。
+    /// </summary>
+    private async Task FinalizeMessageAsync(
+        string conversationId,
+        string line,
+        string sender,
+        string? messageId,
+        ParsedMessage parsed,
+        bool wake)
+    {
+        try
+        {
+            if (parsed.Attachments is { Count: > 0 } attachments)
+            {
+                var hydrated = await HydrateAttachmentsAsync(line, attachments).ConfigureAwait(false);
+                if (!string.Equals(hydrated, line, StringComparison.Ordinal))
+                {
+                    PatchQueuedLine(conversationId, line, hydrated);
+                    line = hydrated;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogDebug(ex, "处理消息附件失败");
+        }
+
+        if (parsed.QuotedId is { } quotedId)
+        {
+            await EnrichQuoteAsync(quotedId, conversationId, line, sender, messageId, wake).ConfigureAwait(false);
+            return;
+        }
+
+        if (wake) RaiseMentioned(line, sender, messageId);
+    }
+
+    /// <summary>解析出的消息正文、是否 @/引用桌宠、首条被引用消息 id，以及待下载的附件。</summary>
+    private sealed record ParsedMessage(
+        string Text,
+        bool MentionsSelf,
+        string? QuotedId,
+        IReadOnlyList<PendingAttachment>? Attachments = null);
+
+    /// <summary>正文里的附件占位符、下载地址，以及下载失败时退回的文本。</summary>
+    private sealed record PendingAttachment(
+        string Placeholder,
+        string Url,
+        string Label,
+        string Prefix,
+        string? FileName,
+        string Fallback);
 
     /// <summary>解析消息正文：支持 OneBot 的数组段格式，也兼容 string + CQ 码格式。</summary>
-    private ParsedMessage ParseMessage(JsonElement root)
+    private ParsedMessage ParseMessage(JsonElement root, bool collectAttachments = false)
     {
         if (root.TryGetProperty("message", out var message))
         {
-            if (message.ValueKind == JsonValueKind.Array) return ParseSegments(message);
-            if (message.ValueKind == JsonValueKind.String) return ParseCqCode(message.GetString() ?? string.Empty);
+            if (message.ValueKind == JsonValueKind.Array) return ParseSegments(message, collectAttachments);
+            if (message.ValueKind == JsonValueKind.String)
+                return ParseCqCode(message.GetString() ?? string.Empty, collectAttachments);
         }
 
-        return ParseCqCode(GetString(root, "raw_message") ?? string.Empty);
+        return ParseCqCode(GetString(root, "raw_message") ?? string.Empty, collectAttachments);
     }
 
-    private ParsedMessage ParseSegments(JsonElement segments)
+    private ParsedMessage ParseSegments(JsonElement segments, bool collectAttachments)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
         string? quotedId = null;
+        List<PendingAttachment>? attachments = collectAttachments ? [] : null;
 
         foreach (var segment in segments.EnumerateArray())
         {
@@ -593,7 +708,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                     break;
 
                 case "image":
-                    builder.Append("[图片]");
+                    AppendAttachment(builder, attachments, "图片", "image",
+                        GetString(data, "url"), GetString(data, "file"), "[图片]");
                     break;
                 case "face":
                     builder.Append("[表情]");
@@ -605,7 +721,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                     builder.Append("[视频]");
                     break;
                 case "file":
-                    builder.Append("[文件]");
+                    // 文件消息会把文件名放在 name/file 里，带上名字才知道对方发了什么
+                    var fileName = GetString(data, "name") ?? GetString(data, "file");
+                    AppendAttachment(builder, attachments, "文件", "file",
+                        GetString(data, "url"), fileName, FormatFileSegment(fileName));
                     break;
                 case "forward":
                     builder.Append("[合并转发]");
@@ -617,15 +736,20 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
             }
         }
 
-        return new ParsedMessage(builder.ToString().Trim(), mentionsSelf, quotedId);
+        return new ParsedMessage(
+            builder.ToString().Trim(),
+            mentionsSelf,
+            quotedId,
+            attachments is { Count: > 0 } ? attachments : null);
     }
 
     /// <summary>解析 CQ 码字符串；非文本段替换成可读占位，@ 自己时记录提醒标记。</summary>
-    private ParsedMessage ParseCqCode(string raw)
+    private ParsedMessage ParseCqCode(string raw, bool collectAttachments)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
         string? quotedId = null;
+        List<PendingAttachment>? attachments = collectAttachments ? [] : null;
         var index = 0;
 
         foreach (Match match in CqCodePattern.Matches(raw))
@@ -666,7 +790,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                     break;
 
                 case "image":
-                    builder.Append("[图片]");
+                    AppendAttachment(builder, attachments, "图片", "image",
+                        FindCqArgument(arguments, "url"),
+                        FindCqArgument(arguments, "file"),
+                        "[图片]");
                     break;
                 case "face":
                     builder.Append("[表情]");
@@ -678,7 +805,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
                     builder.Append("[视频]");
                     break;
                 case "file":
-                    builder.Append("[文件]");
+                    var fileName = FindCqArgument(arguments, "name") ?? FindCqArgument(arguments, "file");
+                    AppendAttachment(builder, attachments, "文件", "file",
+                        FindCqArgument(arguments, "url"), fileName, FormatFileSegment(fileName));
                     break;
                 case "forward":
                     builder.Append("[合并转发]");
@@ -691,7 +820,171 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         }
 
         builder.Append(UnescapeCqText(raw[index..]));
-        return new ParsedMessage(builder.ToString().Trim(), mentionsSelf, quotedId);
+        return new ParsedMessage(
+            builder.ToString().Trim(),
+            mentionsSelf,
+            quotedId,
+            attachments is { Count: > 0 } ? attachments : null);
+    }
+
+    /// <summary>
+    /// 追加一个图片/文件段：可下载时写入占位符并登记下载任务，否则直接写可读占位。
+    /// </summary>
+    private static void AppendAttachment(
+        StringBuilder builder,
+        List<PendingAttachment>? attachments,
+        string label,
+        string prefix,
+        string? url,
+        string? fileName,
+        string fallback)
+    {
+        var downloadUrl = attachments is null ? null : ResolveDownloadUrl(url);
+        if (downloadUrl is null)
+        {
+            builder.Append(fallback);
+            return;
+        }
+
+        var placeholder = $"[{label}#{attachments!.Count + 1}]";
+        attachments.Add(new PendingAttachment(placeholder, downloadUrl, label, prefix, fileName, fallback));
+        builder.Append(placeholder);
+    }
+
+    /// <summary>只接受 http/https 的附件地址；其它情况返回 null。</summary>
+    private static string? ResolveDownloadUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+               && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            ? uri.AbsoluteUri
+            : null;
+    }
+
+    /// <summary>把正文里的附件占位符替换成「[图片 本地路径]」；下载失败时退回「[图片]」。</summary>
+    private async Task<string> HydrateAttachmentsAsync(string line, IReadOnlyList<PendingAttachment> attachments)
+    {
+        foreach (var attachment in attachments)
+        {
+            var path = await DownloadAttachmentAsync(attachment).ConfigureAwait(false);
+            var replacement = path is null
+                ? attachment.Fallback
+                : $"[{attachment.Label} {path}]";
+            line = line.Replace(attachment.Placeholder, replacement, StringComparison.Ordinal);
+        }
+
+        return line;
+    }
+
+    /// <summary>下载单个附件到缓存目录，成功返回本地绝对路径，失败或超限返回 null。</summary>
+    private async Task<string?> DownloadAttachmentAsync(PendingAttachment attachment)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            timeout.CancelAfter(AttachmentDownloadTimeout);
+
+            using var response = await Http
+                .GetAsync(attachment.Url, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Context.Logger.LogWarning(
+                    "下载{Label}失败：{Url} 返回 {Status}",
+                    attachment.Label,
+                    attachment.Url,
+                    (int)response.StatusCode);
+                return null;
+            }
+
+            if (response.Content.Headers.ContentLength is > MaxAttachmentBytes)
+            {
+                Context.Logger.LogWarning(
+                    "跳过{Label}：{Url} 超过 {Limit} 字节",
+                    attachment.Label,
+                    attachment.Url,
+                    MaxAttachmentBytes);
+                return null;
+            }
+
+            var path = Path.Combine(
+                _attachmentCacheDir,
+                BuildAttachmentFileName(attachment, response.Content.Headers.ContentType?.MediaType));
+            Directory.CreateDirectory(_attachmentCacheDir);
+
+            var tooLarge = false;
+            await using (var source = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+            await using (var target = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var buffer = new byte[81920];
+                long total = 0;
+                while (true)
+                {
+                    var read = await source.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                    if (read == 0) break;
+
+                    total += read;
+                    if (total > MaxAttachmentBytes)
+                    {
+                        tooLarge = true;
+                        break;
+                    }
+
+                    await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token).ConfigureAwait(false);
+                }
+            }
+
+            if (tooLarge)
+            {
+                File.Delete(path);
+                Context.Logger.LogWarning(
+                    "跳过{Label}：{Url} 超过 {Limit} 字节",
+                    attachment.Label,
+                    attachment.Url,
+                    MaxAttachmentBytes);
+                return null;
+            }
+
+            Context.Logger.LogInformation("已保存{Label}到 {Path}", attachment.Label, path);
+            return path;
+        }
+        catch (OperationCanceledException) when (!_cts.IsCancellationRequested)
+        {
+            Context.Logger.LogWarning("下载{Label}超时：{Url}", attachment.Label, attachment.Url);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogWarning(ex, "下载{Label}失败：{Url}", attachment.Label, attachment.Url);
+            return null;
+        }
+    }
+
+    /// <summary>按地址哈希生成稳定的缓存文件名，尽量沿用原文件扩展名。</summary>
+    private static string BuildAttachmentFileName(PendingAttachment attachment, string? contentType)
+    {
+        var hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(attachment.Url)))[..12];
+
+        var extension = Path.GetExtension(attachment.FileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(extension) && Uri.TryCreate(attachment.Url, UriKind.Absolute, out var uri))
+            extension = Path.GetExtension(uri.AbsolutePath);
+
+        if (string.IsNullOrWhiteSpace(extension) || extension.Length > 10)
+        {
+            extension = contentType switch
+            {
+                "image/png" => ".png",
+                "image/jpeg" => ".jpg",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                _ => ".bin",
+            };
+        }
+
+        return $"{attachment.Prefix}-{hash}{extension.ToLowerInvariant()}";
     }
 
     /// <summary>把一条消息写入全局未读队列与所属会话的历史记录。</summary>
@@ -1044,6 +1337,12 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
+        _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
+
+        var cacheDir = GetConfigString(config, "attachmentCacheDir", "attachments").Trim();
+        if (cacheDir.Length == 0) cacheDir = "attachments";
+        _attachmentCacheDir = Path.GetFullPath(
+            Path.IsPathRooted(cacheDir) ? cacheDir : Path.Combine(Context.PluginDirectory, cacheDir));
     }
 
     private static string GetConfigString(JsonElement? config, string key, string fallback)
@@ -1140,6 +1439,13 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform, IMessagePlatfor
         }
 
         return userId.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>把文件段渲染成「[文件 名字]」，拿不到文件名时退回「[文件]」。</summary>
+    private static string FormatFileSegment(string? fileName)
+    {
+        var name = fileName?.Trim();
+        return string.IsNullOrEmpty(name) ? "[文件]" : $"[文件 {name}]";
     }
 
     private static string? GetString(JsonElement element, string property)

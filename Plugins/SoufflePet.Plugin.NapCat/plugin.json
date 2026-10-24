@@ -15,7 +15,9 @@
     "requireAtInGroup": true,
     "wakeOnPrivateMessage": true,
     "filterSelfMessage": false,
-    "maxReplyChars": 1500
+    "maxReplyChars": 1500,
+    "downloadAttachments": true,
+    "attachmentCacheDir": "attachments"
   },
   "configSchema": [
     {
@@ -65,6 +67,18 @@
       "label": "单条消息字数上限",
       "type": "number",
       "description": "超长回复会拆成多条发送，范围 200-4000。"
+    },
+    {
+      "key": "downloadAttachments",
+      "label": "附件写入本地文件",
+      "type": "boolean",
+      "description": "收到图片或文件时自动下载到缓存目录，并把本地路径写进消息正文，供桌宠直接读取。单个附件上限 20MB。"
+    },
+    {
+      "key": "attachmentCacheDir",
+      "label": "附件缓存目录",
+      "type": "text",
+      "description": "相对路径以插件目录为基准，也可以填绝对路径；默认 attachments。"
     }
   ]
 }
