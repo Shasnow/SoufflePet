@@ -143,7 +143,7 @@ public class AutoExpressionService : IAutoExpressionService
             {
                 if (entries.Exists(e => string.Equals(e.Process, entry.Process, StringComparison.OrdinalIgnoreCase))) continue;
                 entries.Add(entry);
-                Logger.Debug("nvidia game library: merged {Process}", entry.Process);
+                Logger.Verbose("nvidia game library: merged {Process}", entry.Process);
                 merged++;
             }
             if (merged > 0) Logger.Information("nvidia game library: merged {Count} game entries", merged);
