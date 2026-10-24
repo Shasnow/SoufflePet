@@ -45,6 +45,9 @@ public partial class ChatWindow : Window
         // 所以这里用隧道阶段先拿到按键，才能实现 Enter 发送。
         InputBox.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
+        // 记录用户是否停在底部：只有贴底时才跟随新内容滚动，避免把正在回看的用户刷走
+        MessageScroll.ScrollChanged += OnMessageScrollChanged;
+
         // 工作区浮层是独立顶层：焦点落在浮层内时窗口收不到 Esc，这里用隧道阶段兜住
         WorkspacePopupRoot.AddHandler(KeyDownEvent, OnWorkspacePopupKeyDown, RoutingStrategies.Tunnel);
 
@@ -282,10 +285,30 @@ public partial class ChatWindow : Window
             message.PropertyChanged += OnMessagePropertyChanged;
     }
 
+    /// <summary>距底部多少像素以内仍算「贴底」，容忍滚动百分比取整带来的小数误差。</summary>
+    private const double StickToBottomTolerance = 8;
+
+    /// <summary>当前是否跟随到底部：用户主动向上滚后置为 false，滚回底部再恢复。</summary>
+    private bool _stickToBottom = true;
+
+    /// <summary>判断消息区是否已贴底（内容不足一屏时也算贴底）。</summary>
+    private bool IsAtBottom()
+    {
+        var remaining = MessageScroll.Extent.Height - MessageScroll.Viewport.Height - MessageScroll.Offset.Y;
+        return remaining <= StickToBottomTolerance;
+    }
+
+    /// <summary>用户滚动（滚轮、拖动滚动条）后更新跟随状态；程序滚动到末尾时也会回到 true。</summary>
+    private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        _stickToBottom = IsAtBottom();
+    }
+
     /// <summary>首次显示时恢复的历史消息不会触发集合变更事件，需要在布局完成后主动滚到底部。</summary>
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
+        _stickToBottom = true;
         ScrollToEnd();
     }
 
@@ -299,13 +322,16 @@ public partial class ChatWindow : Window
             foreach (ChatMessage message in e.NewItems)
                 message.PropertyChanged += OnMessagePropertyChanged;
 
-        ScrollToEnd();
+        // 清空或切换会话时重新回到跟随状态
+        if (e.Action == NotifyCollectionChangedAction.Reset) _stickToBottom = true;
+
+        if (_stickToBottom) ScrollToEnd();
     }
 
-    /// <summary>流式追加时跟随滚动到底部，避免新内容跑出可视区。</summary>
+    /// <summary>流式追加时，只有用户停留在底部才跟随滚动，避免正在回看时气泡被刷走。</summary>
     private void OnMessagePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatMessage.Text)) ScrollToEnd();
+        if (e.PropertyName == nameof(ChatMessage.Text) && _stickToBottom) ScrollToEnd();
     }
 
     /// <summary>等布局完成后再滚，否则新气泡的高度还没算进去。</summary>
