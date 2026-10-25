@@ -21,12 +21,14 @@ public interface ITrayService
 }
 
 /// <summary>
-/// 托盘服务：构建托盘图标与菜单。菜单项只负责把用户意图写进 SouffleSettings 属性，
+/// 托盘服务：构建托盘图标与菜单。开关型菜单项只负责把用户意图写进 SouffleSettings 属性，
 /// 持久化与运行时副作用（窗口/服务的应用）统一由 App 组合根的 settings.PropertyChanged
-/// 订阅处理，此处不做任何 Save 或服务调用。
+/// 订阅处理，此处不做任何 Save 或服务调用；瞬时动作项（显示 / 隐藏、重置模型、对话窗口、退出）
+/// 则直接调用对应服务。
 /// </summary>
 public sealed class TrayService(
     IPetWindow petOps,
+    IChatWindowService chat,
     SouffleSettings settings)
     : ITrayService, IDisposable
 {
@@ -45,6 +47,10 @@ public sealed class TrayService(
 
         var resetItem = new NativeMenuItem("重置模型");
         resetItem.Click += (_, _) => petOps.ResetModel();
+
+        // 对话窗口：与 Ctrl+Alt+Space / 右键单击桌宠相同的切换逻辑，打开时停靠在桌宠窗口旁边
+        var chatItem = new NativeMenuItem("对话窗口");
+        chatItem.Click += (_, _) => OpenChatWindow(desktop);
 
         // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 SoufflePet.json）
         var autoExprItem = NewToggle("自动表情", settings.AutoExpressionEnabled,
@@ -87,6 +93,7 @@ public sealed class TrayService(
 
         menu.Items.Add(toggleItem);
         menu.Items.Add(resetItem);
+        menu.Items.Add(chatItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
@@ -109,6 +116,21 @@ public sealed class TrayService(
         _trayIcons = [trayIcon];
         TrayIcon.SetIcons(app, _trayIcons);
         Logger.Information("Tray icon set, initialization completed");
+    }
+
+    /// <summary>
+    /// 呼出对话窗口：以桌宠窗口为停靠锚点（即 Ctrl+Alt+Space 的锚点）。
+    /// 桌宠窗口可能处于隐藏状态，此时位置仍可读，锚点照常可用。
+    /// </summary>
+    private void OpenChatWindow(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        if (desktop.MainWindow is not Window anchor)
+        {
+            Logger.Warning("tray chat item ignored: pet window not available");
+            return;
+        }
+
+        chat.Toggle(anchor);
     }
 
     /// <summary>构造勾选菜单项：初值取自 settings，点击只把新值写回 settings（副作用统一走订阅）。</summary>
