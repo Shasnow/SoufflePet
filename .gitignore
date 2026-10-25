@@ -2,6 +2,7 @@
 .trae
 .workbuddy
 .verifybuild
+.vscode
 obj
 bin
 **/wwwroot/*

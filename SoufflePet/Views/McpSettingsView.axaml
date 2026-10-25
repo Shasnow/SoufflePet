@@ -61,7 +61,7 @@
                 <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
 
                     <!-- 左：服务器列表 -->
-                    <Grid RowDefinitions="Auto,*">
+                    <Grid RowDefinitions="Auto,*,Auto">
                         <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,6">
                             <TextBlock Text="服务器" Classes="section" VerticalAlignment="Center" />
                             <Button Grid.Column="1"
@@ -105,6 +105,22 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+
+                        <!-- 配置文件位置与读写失败提示 -->
+                        <StackPanel Grid.Row="2"
+                                    Margin="4,8,4,0"
+                                    Spacing="2">
+                            <TextBlock Text="{Binding ConfigPath}"
+                                       FontSize="10"
+                                       Foreground="#59FFFFFF"
+                                       TextWrapping="Wrap"
+                                       ToolTip.Tip="{Binding ConfigPath}" />
+                            <TextBlock Text="{Binding ConfigError}"
+                                       IsVisible="{Binding HasConfigError}"
+                                       FontSize="10"
+                                       Foreground="#FF9E9E"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
                     </Grid>
 
                     <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
@@ -234,7 +250,7 @@
                                                     <TextBlock Text="可用工具" Classes="label" VerticalAlignment="Center" />
                                                     <!-- 工具数量/连接状态与标题同一行 -->
                                                     <TextBlock Grid.Column="1"
-                                                               Text="{Binding SelectedServer.ToolStatus}"
+                                                               Text="{Binding SelectedToolStatus}"
                                                                FontSize="10.5"
                                                                Foreground="#66FFFFFF"
                                                                VerticalAlignment="Center"
@@ -250,7 +266,7 @@
                                             </Grid>
 
                                             <!-- 每个工具一个折叠面板（标题为工具名），默认收起 -->
-                                            <ItemsControl ItemsSource="{Binding SelectedServer.Tools}">
+                                            <ItemsControl ItemsSource="{Binding SelectedTools}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate x:DataType="svc:McpToolInfo">
                                                         <Expander Theme="{StaticResource ToolExpander}"

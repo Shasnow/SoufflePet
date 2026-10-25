@@ -60,7 +60,25 @@
 
 ### MCP 服务器
 
-对话窗口「更多操作 → MCP 服务器…」里配置，写入 `McpServers`。支持 Stdio（本地子进程，指定命令与参数）与 Http（远程服务）两种传输方式，启用的服务器在下次对话时连接，其工具以「服务器名\_工具名」暴露给模型。
+对话窗口「更多操作 → MCP 服务器…」里配置，配置单独保存在用户家目录的 `~/.souffle/mcp.json`（不写进 `SoufflePet.json`）。文件用通行的 MCP 配置格式，可直接照抄 VS Code / Claude 等客户端的配置：
+
+```json
+{
+  "mcpServers": {
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:\\"]
+    },
+    "remote": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": { "Authorization": "Bearer ..." }
+    }
+  }
+}
+```
+
+支持 Stdio（本地子进程，指定命令与参数）与 Http（远程服务）两种传输方式；额外支持 `enabled`、`timeout`（秒）、`cwd` 等可选键，本应用不认识的键在设置界面保存时会原样保留。启用的服务器在下次对话时连接，其工具以「服务器名\_工具名」暴露给模型。
 
 ### 技能
 

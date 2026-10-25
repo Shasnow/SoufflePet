@@ -20,7 +20,7 @@ public enum McpTransportType
 }
 
 /// <summary>
-/// 一个 MCP 服务器的配置。列表写在 SoufflePet.json 的 McpServers 中，
+/// 一个 MCP 服务器的配置。配置单独存放在家目录的 <c>.souffle/mcp.json</c>（见 IMcpConfigStore），
 /// 启用的服务器会在首次对话时连接，其工具以「服务器名__工具名」暴露给模型。
 /// </summary>
 public partial class McpServerConfig : ObservableObject

@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -18,20 +19,29 @@ namespace SoufflePet.ViewModels;
 
 /// <summary>
 /// MCP 服务器设置窗口的视图模型：左侧服务器列表 + 右侧编辑表单。
-/// 保存/删除/启用切换只改 <see cref="SouffleSettings.McpServers"/>，持久化由 App 组合根
-/// 统一处理；随后通知 <see cref="IMcpToolService"/> 断开旧连接，下一次对话按新配置重连。
+/// 保存/删除/启用切换把改动写入家目录下的 <c>.souffle/mcp.json</c>（见 <see cref="IMcpConfigStore"/>）；
+/// 随后通知 <see cref="IMcpToolService"/> 断开旧连接，下一次对话按新配置重连。
 /// </summary>
 public partial class McpSettingsViewModel : ViewModelBase
 {
     private static readonly ILogger Logger = Log.ForContext<McpSettingsViewModel>();
 
     private readonly SouffleSettings _settings;
+    private readonly IMcpConfigStore _configStore;
     private readonly IMcpToolService _mcp;
     private readonly McpToolCache _toolCache;
 
-    public McpSettingsViewModel(SouffleSettings settings, IMcpToolService mcp, McpToolCache toolCache)
+    /// <summary>当前订阅了 PropertyChanged 的选中项（换选中时先退订）。</summary>
+    private McpServerItemViewModel? _subscribedServer;
+
+    public McpSettingsViewModel(
+        SouffleSettings settings,
+        IMcpConfigStore configStore,
+        IMcpToolService mcp,
+        McpToolCache toolCache)
     {
         _settings = settings;
+        _configStore = configStore;
         _mcp = mcp;
         _toolCache = toolCache;
         Reload();
@@ -42,12 +52,20 @@ public partial class McpSettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(SelectedTools))]
+    [NotifyPropertyChangedFor(nameof(SelectedToolStatus))]
     public partial McpServerItemViewModel? SelectedServer { get; set; }
 
     public bool HasSelection => SelectedServer is not null;
 
+    /// <summary>选中服务器的工具列表（未选中时为空，避免绑定到 null 子属性报错）。</summary>
+    public IReadOnlyList<McpToolInfo> SelectedTools => SelectedServer?.Tools ?? [];
+
+    /// <summary>选中服务器的工具状态文案（未选中时为空串）。</summary>
+    public string SelectedToolStatus => SelectedServer?.ToolStatus ?? string.Empty;
+
     /// <summary>宠物称呼（设置项）。</summary>
-    public string PetName => _settings.PetName;
+    private string PetName => _settings.PetName;
 
     /// <summary>窗口标题。</summary>
     public string WindowTitle => $"{PetName} · MCP 服务器";
@@ -55,13 +73,25 @@ public partial class McpSettingsViewModel : ViewModelBase
     /// <summary>标题栏下方的说明文案。</summary>
     public string ToolHint => $"配置后，服务器上的工具会交给{PetName}调用";
 
-    /// <summary>按当前设置重建列表（窗口每次显示前调用，保证与设置文件一致）。</summary>
+    /// <summary>配置文件路径（左侧列表下方的提示与错误信息用）。</summary>
+    public string ConfigPath => _configStore.DisplayPath;
+
+    /// <summary>读写配置文件失败时的说明（如文件被占用、格式损坏）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasConfigError))]
+    public partial string? ConfigError { get; set; }
+
+    public bool HasConfigError => !string.IsNullOrEmpty(ConfigError);
+
+    /// <summary>按当前配置文件重建列表（窗口每次显示前调用，保证与文件一致）。</summary>
     public void Reload()
     {
         foreach (var item in Servers) item.EnabledChanged -= OnItemEnabledChanged;
         Servers.Clear();
 
-        foreach (var config in _settings.McpServers)
+        var configs = _configStore.Load();
+        ConfigError = _configStore.LastError;
+        foreach (var config in configs)
         {
             var item = new McpServerItemViewModel(config);
 
@@ -78,6 +108,13 @@ public partial class McpSettingsViewModel : ViewModelBase
 
     partial void OnSelectedServerChanged(McpServerItemViewModel? value)
     {
+        if (_subscribedServer is not null) _subscribedServer.PropertyChanged -= OnSelectedServerPropertyChanged;
+        _subscribedServer = value;
+        if (_subscribedServer is not null) _subscribedServer.PropertyChanged += OnSelectedServerPropertyChanged;
+
+        OnPropertyChanged(nameof(SelectedTools));
+        OnPropertyChanged(nameof(SelectedToolStatus));
+
         EditorError = null;
         if (value is null)
         {
@@ -88,6 +125,13 @@ public partial class McpSettingsViewModel : ViewModelBase
         LoadEditor(value.Config);
     }
 
+    /// <summary>工具状态变化时同步到视图模型上的投影属性。</summary>
+    private void OnSelectedServerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(McpServerItemViewModel.ToolStatus))
+            OnPropertyChanged(nameof(SelectedToolStatus));
+    }
+
     // ===== 编辑表单：字段是配置的副本，点「保存」才写回 =====
 
     [ObservableProperty]
@@ -96,7 +140,7 @@ public partial class McpSettingsViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsStdioTransport))]
     [NotifyPropertyChangedFor(nameof(IsHttpTransport))]
-    public partial McpTransportType EditorTransport { get; set; }
+    private partial McpTransportType EditorTransport { get; set; }
 
     public bool IsStdioTransport => EditorTransport == McpTransportType.Stdio;
 
@@ -294,12 +338,23 @@ public partial class McpSettingsViewModel : ViewModelBase
     private void OnItemEnabledChanged(object? sender, EventArgs e) => Persist();
 
     /// <summary>
-    /// 把列表写回设置（新 List 触发 PropertyChanged，由 App 组合根统一保存），
-    /// 并让 MCP 服务丢弃旧连接，下一次对话按新配置重连。
+    /// 把列表写回 mcp.json，并让 MCP 服务丢弃旧连接，下一次对话按新配置重连。
+    /// 写入失败时把原因显示在窗口里（例如文件被其它程序占用）。
     /// </summary>
     private void Persist()
     {
-        _settings.McpServers = [.. Servers.Select(s => s.Config)];
+        try
+        {
+            _configStore.Save([.. Servers.Select(s => s.Config)]);
+            ConfigError = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "save MCP config failed");
+            ConfigError = $"保存 {_configStore.DisplayPath} 失败：{ex.Message}";
+            return;
+        }
+
         _ = ResetMcpAsync();
     }
 

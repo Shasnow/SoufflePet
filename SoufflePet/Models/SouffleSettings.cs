@@ -123,10 +123,6 @@ public partial class SouffleSettings : ObservableObject
     public int MaxToolRounds { get; init; } = 10;
 
     [ObservableProperty]
-    [Description("MCP 服务器列表（启用的服务器会在下一次对话时连接，其工具交给模型调用；修改后即时生效）")]
-    public partial List<McpServerConfig> McpServers { get; set; } = [];
-
-    [ObservableProperty]
     [Description("已停用的技能名称（未列出的技能默认启用；技能自动从当前工作区与家目录下的 .agents/skills、.souffle/skills 读取）")]
     public partial List<string> DisabledSkills { get; set; } = [];
 

@@ -16,7 +16,7 @@ namespace SoufflePet.ViewModels;
 /// </summary>
 public partial class McpServerItemViewModel(McpServerConfig config) : ObservableObject
 {
-    /// <summary>被包装的配置（与 SoufflePet.json 中的条目是同一对象）。</summary>
+    /// <summary>被包装的配置（与 mcp.json 中的条目是同一对象）。</summary>
     public McpServerConfig Config { get; } = config;
 
     /// <summary>启用状态被用户切换（需要立即持久化并重连）。</summary>

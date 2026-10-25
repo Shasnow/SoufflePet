@@ -48,10 +48,10 @@ public interface IMcpToolService
 }
 
 /// <summary>
-/// MCP 客户端管理：按 <see cref="SouffleSettings.McpServers"/> 懒连接各个服务器，
+/// MCP 客户端管理：按家目录下的 <c>.souffle/mcp.json</c>（见 <see cref="IMcpConfigStore"/>）懒连接各个服务器，
 /// 缓存工具列表，并把工具名统一改成「服务器名__工具名」以避免跨服务器重名。
 /// </summary>
-public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, IDisposable
+public sealed class McpToolService(IMcpConfigStore configStore) : IMcpToolService, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<McpToolService>();
 
@@ -123,12 +123,12 @@ public sealed class McpToolService(SouffleSettings settings) : IMcpToolService, 
         var tools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
 
         Logger.Debug("MCP server {Server} probed tools={Tools}", server.Name, tools.Count);
-        return [.. tools.Select(tool => new McpToolInfo(tool.Name, tool.Description ?? string.Empty))];
+        return [.. tools.Select(tool => new McpToolInfo(tool.Name, tool.Description))];
     }
 
     private async Task<IReadOnlyList<AITool>> ConnectAsync(CancellationToken cancellationToken)
     {
-        var servers = settings.McpServers
+        var servers = configStore.Load()
             .Where(server => server.Enabled && !string.IsNullOrWhiteSpace(server.Name) && IsConfigured(server))
             .ToList();
         if (servers.Count == 0) return [];

@@ -59,6 +59,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ChatMemory _memory;
     private readonly IMcpSettingsWindowService _mcpSettings;
     private readonly IMcpToolService _mcpTools;
+    private readonly IMcpConfigStore _mcpConfig;
     private readonly ISkillsWindowService _skillsWindow;
     private readonly IPluginsWindowService _pluginsWindow;
 
@@ -91,6 +92,7 @@ public partial class ChatViewModel : ViewModelBase
         ChatMemory memory,
         IMcpSettingsWindowService mcpSettings,
         IMcpToolService mcpTools,
+        IMcpConfigStore mcpConfig,
         ISkillsWindowService skillsWindow,
         IPluginsWindowService pluginsWindow,
         UserQuestionService questions,
@@ -102,6 +104,7 @@ public partial class ChatViewModel : ViewModelBase
         _memory = memory;
         _mcpSettings = mcpSettings;
         _mcpTools = mcpTools;
+        _mcpConfig = mcpConfig;
         _skillsWindow = skillsWindow;
         _pluginsWindow = pluginsWindow;
         ApprovalMode = toolAccess.ApprovalMode;
@@ -391,9 +394,8 @@ public partial class ChatViewModel : ViewModelBase
     private void SaveWorkspaces() => _settings.WorkspacePaths = [.. Workspaces.Select(w => w.FullPath)];
 
     /// <summary>是否存在依赖当前工作目录的 MCP server（stdio 且未显式配置工作目录）。</summary>
-    private bool HasCwdDependentMcpServer() => _settings.McpServers.Any(server =>
-        server.Enabled
-        && server.Transport == McpTransportType.Stdio
+    private bool HasCwdDependentMcpServer() => _mcpConfig.Load().Any(server =>
+        server is { Enabled: true, Transport: McpTransportType.Stdio }
         && string.IsNullOrWhiteSpace(server.WorkingDirectory));
 
     /// <summary>重连 MCP server，让它们的默认工作目录跟随新的工作区；失败只记日志，不影响对话。</summary>
