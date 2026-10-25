@@ -14,6 +14,7 @@
     "allowedGroups": [],
     "requireAtInGroup": true,
     "wakeOnPrivateMessage": true,
+    "wakeWords": [],
     "filterSelfMessage": false,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
@@ -56,6 +57,12 @@
       "label": "私聊消息提醒桌宠",
       "type": "boolean",
       "description": "收到允许用户的私聊时主动提醒桌宠；关闭后只记录、不唤醒。"
+    },
+    {
+      "key": "wakeWords",
+      "label": "唤醒词",
+      "type": "list",
+      "description": "每行一个词；消息正文含有任意一个（不区分大小写）就唤醒桌宠，群聊里无需 @、私聊也无需开启上面的开关。留空表示不启用。"
     },
     {
       "key": "filterSelfMessage",

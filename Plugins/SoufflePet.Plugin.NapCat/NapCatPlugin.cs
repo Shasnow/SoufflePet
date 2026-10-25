@@ -138,6 +138,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private bool _requireAtInGroup = true;
     private bool _wakeOnPrivateMessage = true;
 
+    /// <summary>唤醒词：消息正文只要含有其中任意一个（不区分大小写）就唤醒桌宠；为空表示不启用。</summary>
+    private string[] _wakeWords = [];
+
     /// <summary>是否过滤机器人自己发出的消息，默认关闭。</summary>
     private bool _filterSelfMessage;
     private int _maxReplyChars = 1500;
@@ -665,6 +668,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             RecordMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
 
             // 引用反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
+            var wake = parsed.MentionsSelf || ContainsWakeWord(text) || !_requireAtInGroup;
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
                 _ = FinalizeMessageAsync(
                     conversationId,
@@ -672,9 +676,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     sender,
                     messageId,
                     parsed,
-                    parsed.MentionsSelf || !_requireAtInGroup);
-            // 关掉 @ 限制后，群里每条消息都会唤醒桌宠
-            else if (parsed.MentionsSelf || !_requireAtInGroup)
+                    wake);
+            // 命中唤醒词或关掉 @ 限制后，群里不 @ 也会唤醒桌宠
+            else if (wake)
                 RaiseMentioned(line, sender, messageId);
             return;
         }
@@ -688,9 +692,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             var line = $"[{conversationId}] {sender}：{text}";
             RecordMessage(conversationId, line, sender);
 
+            var wake = _wakeOnPrivateMessage || ContainsWakeWord(text);
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
-                _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, _wakeOnPrivateMessage);
-            else if (_wakeOnPrivateMessage)
+                _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, wake);
+            else if (wake)
                 RaiseMentioned(line, sender, messageId);
         }
     }
@@ -1301,6 +1306,17 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// <summary>被引用消息的摘要信息。</summary>
     private sealed record QuotedMessage(bool IsSelf, string Sender, string Summary);
 
+    /// <summary>消息正文是否含有任一唤醒词（不区分大小写）；未配置唤醒词时始终返回 false。</summary>
+    private bool ContainsWakeWord(string text)
+    {
+        foreach (var word in _wakeWords)
+        {
+            if (text.Contains(word, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
     private void RaiseMentioned(string content, string sender, string? messageId)
     {
         var handler = OnMentioned;
@@ -1427,6 +1443,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _requireAtInGroup = GetConfigBool(config, "requireAtInGroup", true);
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
+        _wakeWords = ReadConfigWords(config, "wakeWords");
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
         _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
         _rolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim();
@@ -1517,6 +1534,47 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     {
         if (long.TryParse(raw?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
             ids.Add(id);
+    }
+
+    /// <summary>读取唤醒词列表：支持 config 里的数组，也兼容逗号或空白分隔的字符串；去重且忽略大小写。</summary>
+    private static string[] ReadConfigWords(JsonElement? config, string key)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return [];
+
+        var words = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? raw)
+        {
+            var word = raw?.Trim();
+            if (string.IsNullOrEmpty(word) || !seen.Add(word)) return;
+            words.Add(word);
+        }
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    Add(item.ValueKind == JsonValueKind.String ? item.GetString() : item.GetRawText());
+                break;
+
+            case JsonValueKind.String:
+                foreach (var part in (value.GetString() ?? string.Empty).Split(
+                             [',', '，', ';', '；', ' ', '\n', '\r', '\t'],
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    Add(part);
+                }
+
+                break;
+
+            default:
+                Add(value.GetRawText());
+                break;
+        }
+
+        return [.. words];
     }
 
     private static string GetSenderName(JsonElement root, long userId)
