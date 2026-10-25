@@ -4,9 +4,10 @@
 
 # SoufflePet
 
-基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D 桌面桌宠，内置可调用本地工具的 LLM 对话。
+基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D 桌面桌宠与Agent框架。
 
-> **许可证**：主程序 [GPL-3.0-or-later](LICENSE)，内嵌 Live2DCSharpSDK 子项目 [MIT](Live2DCSharpSDK.Framework/LICENSE)，详见文末[「许可证」](#许可证)章节。
+> **许可证**：本项目使用混合许可证。
+> 主程序 [GPL-3.0-or-later](LICENSE)，内嵌 Live2DCSharpSDK 子项目 [MIT](Live2DCSharpSDK.Framework/LICENSE)，详见文末[「许可证」](#许可证)章节。
 
 ## 功能
 
@@ -17,15 +18,15 @@
   - 中键拖动 → 移动模型
   - 左键单击 → 随机切换表情
   - 滚轮 → 缩放模型
-- **托盘图标**：显示 / 隐藏、退出；关闭窗口默认隐藏到托盘
+- **托盘图标**：显示 / 隐藏、重置模型、对话窗口、退出；关闭窗口默认隐藏到托盘
 - **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
-- **手动模式**：托盘可勾选「游戏模式」「音乐模式」，不等待检测直接进入对应状态（调试/演示用）
 - **口型同步**：在音乐模式（自动检测或手动开启）下，根据当前播放的音乐，自动同步模型的口型
-- **LLM 对话**：`Ctrl+Alt+Space` 或右键单击桌宠呼出对话窗口，支持 OpenAI 兼容接口、流式回复、思考过程展示、工具调用、MCP 集成、技能与长期记忆（详见下节）
+- **Agent**：`Ctrl+Alt+Space`、右键单击桌宠或托盘菜单「对话窗口」呼出对话窗口，支持 OpenAI 兼容接口、流式回复、思考过程展示、工具调用、MCP 集成、技能、长期记忆与插件（详见下节）
+- **插件系统**：独立程序集 + `plugin.json` 清单，可扩展工具、处理模型正文、接入新的消息平台；支持界面启停、配置表单与 zip 导入
 
-## LLM 对话
+## Agent
 
-`Ctrl+Alt+Space` 或右键单击桌宠呼出对话窗口（再次触发收起）。窗口为单例，隐藏后内容保留；停止按钮可中断当前一轮生成。
+`Ctrl+Alt+Space`、右键单击桌宠或托盘菜单「对话窗口」呼出对话窗口（再次触发收起）。窗口为单例，隐藏后内容保留；停止按钮可中断当前一轮生成。
 
 ### 对话模型
 
@@ -79,6 +80,22 @@
 ```
 
 支持 Stdio（本地子进程，指定命令与参数）与 Http（远程服务）两种传输方式；额外支持 `enabled`、`timeout`（秒）、`cwd` 等可选键，本应用不认识的键在设置界面保存时会原样保留。启用的服务器在下次对话时连接，其工具以「服务器名\_工具名」暴露给模型。
+
+### 插件
+
+插件是独立程序集，通过 `plugin.json` 声明，无需修改主程序即可为模型增加工具、对回复做流式后处理，或接入新的消息平台（如 QQ）。对话窗口「更多操作 → 插件…」里可以查看、启用 / 禁用、编辑配置、重新扫描与导入 zip 包。
+
+插件从应用目录的 `plugins/` 与用户家目录的 `.souffle/plugins` 读取；导入的插件装在后者的 `<id>` 子目录下，成功后自动启用。启用状态记录在 `SoufflePet.json` 的 `DisabledPlugins`。
+
+内置插件：
+
+| 插件 id | 作用 |
+| --- | --- |
+| `input-kit` | 鼠标点击 / 拖拽 / 滚轮，键盘按键、组合键与文本输入 |
+| `dsml-cleaner` | 清理模型正文中泄漏的 DSML 工具调用标记 |
+| `napcat` | 通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ，被 @ 时提醒桌宠并按会话回复 |
+
+清单字段、最小示例、生命周期钩子、配置表单、消息平台接入与打包规则见[插件开发指南](docs/plugin-development.md)。
 
 ### 技能
 
@@ -146,6 +163,11 @@ SoufflePet.sln
 │  │  └─ AvaloniaApi.cs          #   Avalonia GlInterface → OpenGLApi 桥接
 │  ├─ wwwroot/                   # 前端页面与 Live2D 模型资源（已 gitignore）
 │  └─ Assets/                    # 应用图标等资源
+├─ SoufflePet.Plugin.Sdk/        # 插件契约（清单、基类、配置表单、消息平台接口）
+├─ Plugins/                      # 随主程序分发的内置插件
+│  ├─ SoufflePet.Plugin.InputKit/      # 键鼠输入工具
+│  ├─ SoufflePet.Plugin.DsmlCleaner/   # DSML 标记清理
+│  └─ SoufflePet.Plugin.NapCat/        # NapCat QQ 消息平台
 ├─ Live2DCSharpSDK.Framework/    # Cubism 框架层（数学、Motion、模型解析）
 ├─ Live2DCSharpSDK.App/          # 应用封装（LAppDelegate、LAppModel、Live2dManager）
 └─ Live2DCSharpSDK.OpenGL/       # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）

@@ -175,7 +175,90 @@ internal sealed class MyFilter
 }
 ```
 
-## 5. 生命周期与线程约定
+## 5. 消息平台插件（可选）
+
+插件除了扩展工具与正文，还可以把外部聊天平台接进来。让入口类同时实现 `IMessagePlatform` 即可：插件启用时宿主自动把实例注册到 `PlatformService`，停用或卸载时自动注销并退订 `OnMentioned`，插件不需要自己向宿主登记。
+
+### 接口
+
+```csharp
+public interface IMessagePlatform
+{
+    string Id { get; }
+    Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync();
+    Task<string> GetMessagesAsync(string conversationId, int limit = 20);
+    Task SendMessageAsync(string conversationId, string message);
+    Task SendAttachmentAsync(string conversationId, PlatformAttachment attachment);
+    event EventHandler<PlatformIncomingMessage>? OnMentioned;
+}
+```
+
+| 成员 | 说明 |
+| --- | --- |
+| `Id` | 平台标识，模型工具里的 `platform` 参数用它；与 `plugin.json` 的 `id` 无关 |
+| `GetConversationsAsync` | 返回已知会话，按最近活跃排序；只返回本次运行期间收到过消息的会话也可以 |
+| `GetMessagesAsync` | 返回该会话最近消息的文本，格式自定，但应带上会话 id 与发送者 |
+| `SendMessageAsync` | 向指定会话发送文本 |
+| `SendAttachmentAsync` | 向指定会话发送本地图片或文件 |
+| `OnMentioned` | 插件认为需要唤醒桌宠时触发，可能在任意后台线程 |
+
+### 数据类型
+
+| 类型 | 字段 | 用途 |
+| --- | --- | --- |
+| `PlatformConversation` | `ConversationId`、`DisplayName` | 会话；id 建议用 `kind:id` 形式，如 `group:12345`、`private:777` |
+| `PlatformIncomingMessage` | `PlatformId`、`Content`、`Sender`、`MessageId` | 唤醒通知；宿主按 `MessageId` 去重，没有 id 时传 null |
+| `PlatformAttachment` | `FilePath`、`Kind`、`DisplayName` | 要发送的附件，只传本地绝对路径 |
+| `PlatformAttachmentKind` | `Image`、`File` | 附件类型 |
+
+### 约定
+
+- 「是否新消息、是否值得提醒、是否是自己发的」都由插件判定，宿主不关心平台细节；只有确实需要桌宠处理时才抛 `OnMentioned`（例如被 @、被引用）。
+- 会话缓存要设上限，否则长时间挂机会持续增长（NapCat 插件按最近活跃淘汰，最多保留 200 个会话）。
+- 附件只传路径，不要自己读成 base64 塞进模型上下文。宿主会先校验文件存在、不是目录、图片不超过 5 MB、其他文件不超过 50 MB，并按扩展名决定 `Kind`。
+- `OnMentioned` 可能在后台线程触发，处理函数里不要长时间同步阻塞；耗时工作放到后台任务。
+
+### 唤醒之后
+
+宿主收到 `OnMentioned` 后，会把消息以「平台提醒」气泡插入对话并生成一轮回复（不会自动弹出窗口）。模型可用下列工具按会话操作：
+
+| 工具 | 参数 | 作用 |
+| --- | --- | --- |
+| `get_messages` | `platform`、`conversation`、`limit` | 读取该会话最近消息 |
+| `send_message` | `platform`、`conversation`、`message` | 向该会话发送文本 |
+| `send_attachment` | `platform`、`conversation`、`path`、`display_name` | 发送本地图片或文件，按 `ToolApproval` 规则向用户确认 |
+
+### 最小结构
+
+```csharp
+public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
+{
+    public string Id => "demo";
+
+    public event EventHandler<PlatformIncomingMessage>? OnMentioned;
+
+    public Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync() =>
+        Task.FromResult<IReadOnlyList<PlatformConversation>>([]);
+
+    public Task<string> GetMessagesAsync(string conversationId, int limit = 20) =>
+        Task.FromResult(string.Empty);
+
+    public Task SendMessageAsync(string conversationId, string message) => Task.CompletedTask;
+
+    public Task SendAttachmentAsync(string conversationId, PlatformAttachment attachment) =>
+        Task.CompletedTask;
+
+    public override Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        // 断开 WebSocket / 停止轮询线程
+        return Task.CompletedTask;
+    }
+}
+```
+
+参考实现见 `Plugins/SoufflePet.Plugin.NapCat`：OneBot 11 正向 WebSocket，含群聊 / 私聊、被 @ 或引用时唤醒、附件下载与发送。
+
+## 6. 生命周期与线程约定
 
 | 阶段 | 时机 | 约定 |
 | --- | --- | --- |
@@ -193,7 +276,7 @@ internal sealed class MyFilter
 - 初始化耗时过长会拖慢当轮对话；确有耗时工作请放到工具调用内部或后台任务。
 - 工具方法不要长时间占用同步阻塞；需要等待的操作使用 `async` + `await`。
 
-## 6. 配置与日志
+## 7. 配置与日志
 
 插件窗口会为 `configSchema` 声明的字段生成可视化表单；保存时写回 `plugin.json` 的 `config` 段，并立即重新加载插件。
 
@@ -234,7 +317,7 @@ context.Logger.LogWarning("配置缺失，使用默认值");
 context.Logger.LogError(exception, "请求失败");
 ```
 
-## 7. 打包与导入
+## 8. 打包与导入
 
 插件目录结构（zip 内可放在根目录或单层子目录）：
 
@@ -269,7 +352,7 @@ dotnet publish Plugins\SoufflePet.Plugin.InputKit -c Release
 
 插件包通过「插件…」→「导入」安装到 `~/.souffle/plugins/<id>`；也可以解压到应用目录的 `plugins/<id>/` 作为内置插件随应用分发。宿主发布不再自动构建或打包插件。
 
-## 8. 隔离与限制
+## 9. 隔离与限制
 
 宿主为每个插件提供独立的 `AssemblyLoadContext`，并做以下兜底：
 
@@ -284,9 +367,9 @@ dotnet publish Plugins\SoufflePet.Plugin.InputKit -c Release
 - 栈溢出、访问违例（如错误的 P/Invoke 指针）、`OutOfMemoryException`。
 - 阻塞宿主 UI 线程的长时间同步操作。
 
-## 9. 兼容性与命名规则
+## 10. 兼容性与命名规则
 
 - 工具名建议使用小写字母、数字与下划线，长度不超过 64 个字符。
 - 插件工具与本地工具或其它插件重名时，宿主自动改为 `{插件id}__{工具名}`；仍冲突则追加 `_2`、`_3` 等后缀。
 - 插件只能依赖宿主已加载的程序集版本；需要额外私有依赖时，把对应 dll 放进插件目录一起分发（`plugin.json` 的 `assembly` 指向入口 dll）。
-- 插件扩展对话工具与模型回复后处理，不参与 UI 或主程序内部逻辑；如需新功能，做成独立工具或响应钩子即可，无需修改主程序。
+- 插件可扩展对话工具、模型回复后处理与消息平台接入，不参与 UI 或主程序内部逻辑；如需新功能，做成独立工具、响应钩子或消息平台实现即可，无需修改主程序。
