@@ -30,7 +30,11 @@ public interface IAppDetector
 }
 
 /// <summary>进程检测方案的标记接口（与前台检测区分注册，避免 IEnumerable&lt;IAppDetector&gt; 语义模糊）。</summary>
-public interface IProcessDetector : IAppDetector;
+public interface IProcessDetector : IAppDetector
+{
+    /// <summary>本轮 Capture() 采集到的运行中进程名快照（不含 .exe、忽略大小写）。</summary>
+    IReadOnlyCollection<string> RunningProcesses { get; }
+}
 
 /// <summary>前台窗口检测方案的标记接口。</summary>
 public interface IForegroundDetector : IAppDetector;
@@ -46,6 +50,9 @@ public sealed class ProcessDetector : IProcessDetector
 
     /// <summary>进程检测天然跨平台，恒为 true。</summary>
     public bool Supported => true;
+
+    /// <summary>本轮采集到的进程名快照（每次 Capture 原地重建，调用方需要保值请自行复制）。</summary>
+    public IReadOnlyCollection<string> RunningProcesses => _running;
 
     public void Capture()
     {

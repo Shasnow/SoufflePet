@@ -51,15 +51,6 @@ public sealed class ChatMemory
     /// <summary>档案条数上限，超出丢弃最久未更新的。</summary>
     private const int MaxProfileEntries = 30;
 
-    /// <summary>注入系统提示词的记忆块长度上限（字符）。</summary>
-    private const int MaxMemoryBlockChars = 1200;
-
-    /// <summary>档案部分的长度上限（字符）。</summary>
-    private const int MaxProfileChars = 480;
-
-    /// <summary>单条回忆的展示长度上限（字符）。</summary>
-    private const int MaxSnippetChars = 160;
-
     /// <summary>一次检索最多注入几条回忆。</summary>
     private const int SearchTopK = 3;
 
@@ -106,7 +97,7 @@ public sealed class ChatMemory
     }
 
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
-    public bool Enabled => _settings.ChatMemoryEnabled;
+    private bool Enabled => _settings.ChatMemoryEnabled;
 
     /// <summary>
     /// 追加一条记录并落盘；role 为 user / assistant / tool。
@@ -174,11 +165,9 @@ public sealed class ChatMemory
             for (var i = _turns.Count - 1; i >= 0; i--)
             {
                 if (!IsUserRole(_turns[i].Role)) continue;
-                if (++userTurns == maxTurns)
-                {
-                    start = i;
-                    break;
-                }
+                if (++userTurns != maxTurns) continue;
+                start = i;
+                break;
             }
 
             var turns = _turns.Skip(start)
@@ -202,7 +191,6 @@ public sealed class ChatMemory
         if (key.Length == 0) return "记忆的键不能为空。";
         if (key.Length > 30) key = key[..30];
         if (value.Length == 0) return Forget(key);
-        if (value.Length > 200) value = value[..200];
 
         lock (_gate)
         {
@@ -264,14 +252,14 @@ public sealed class ChatMemory
                 .Append("] ")
                 .Append(RoleLabel(turn.Role))
                 .Append('：')
-                .AppendLine(Truncate(turn.Text, MaxSnippetChars * 2));
+                .AppendLine(turn.Text);
         }
 
         return builder.ToString().TrimEnd();
     }
 
     /// <summary>
-    /// 生成本轮要注入系统提示词的记忆块：档案全量（限长）+ 与 query 相关的回忆。
+    /// 生成本轮要注入系统提示词的记忆块：档案全量 + 与 query 相关的回忆，均不截断（保证内容完整）。
     /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
     /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
     /// 关闭记忆或没有任何内容时返回空串。
@@ -296,21 +284,14 @@ public sealed class ChatMemory
 
         var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude, excludeCallIds);
 
-        var profileBuilder = new StringBuilder();
-        foreach (var line in profileLines)
-        {
-            if (profileBuilder.Length + line.Length + 1 > MaxProfileChars) break;
-            profileBuilder.AppendLine(line);
-        }
-
-        if (profileBuilder.Length == 0 && snippets.Count == 0) return string.Empty;
+        if (profileLines.Count == 0 && snippets.Count == 0) return string.Empty;
 
         var builder = new StringBuilder();
         builder.AppendLine("【长期记忆】以下是之前对话里保存下来的信息，回答时可以自然使用，不要生硬复述。");
-        if (profileBuilder.Length > 0)
+        if (profileLines.Count > 0)
         {
             builder.AppendLine("用户档案：");
-            builder.Append(profileBuilder);
+            foreach (var line in profileLines) builder.AppendLine(line);
         }
 
         if (snippets.Count > 0)
@@ -323,12 +304,11 @@ public sealed class ChatMemory
                     .Append("] ")
                     .Append(RoleLabel(turn.Role))
                     .Append('：')
-                    .AppendLine(Truncate(turn.Text, MaxSnippetChars));
+                    .AppendLine(turn.Text);
             }
         }
 
-        var block = builder.ToString().TrimEnd();
-        return block.Length <= MaxMemoryBlockChars ? block : block[..MaxMemoryBlockChars];
+        return builder.ToString().TrimEnd();
     }
 
     private List<MemoryTurn> Search(
@@ -493,9 +473,6 @@ public sealed class ChatMemory
 
     private static string RoleLabel(string role) =>
         IsUserRole(role) ? "用户" : IsToolRole(role) ? "工具" : "你";
-
-    private static string Truncate(string text, int max) =>
-        text.Length <= max ? text : text[..max] + "…";
 
     /// <summary>中文按 2-gram 切分，英文/数字按连续词切分；零依赖，够用且召回稳定。</summary>
     private static List<string> Tokenize(string text)

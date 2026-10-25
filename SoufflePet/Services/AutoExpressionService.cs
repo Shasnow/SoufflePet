@@ -17,6 +17,13 @@ public interface IAutoExpressionService : IDisposable
     event Action<string?>? ExpressionChanged;
 
     /// <summary>
+    /// 新进程启动事件：每轮轮询与上一轮进程快照对比，本轮新出现的进程名逐个回调。
+    /// 首次轮询只建立基线不回调（避免把启动瞬间已在运行的进程当成新启动）；
+    /// 仅在轮询运行（自动表情开启）期间有效，关闭开关会丢弃基线，重新开启后的首轮同样不回调。
+    /// </summary>
+    event Action<string>? OnProcessStart;
+
+    /// <summary>
     /// 当前命中的自动表情名（null = 无命中）。手动模式接管期间组合根结算会忽略它——
     /// 它始终反映"原始检测结果"，不代表界面上实际显示的表情。
     /// </summary>
@@ -26,6 +33,10 @@ public interface IAutoExpressionService : IDisposable
     /// 当前生效的表情名（null = 无表情）。组合根结算时根据手动模式开关决定是用 CurrentExpression 还是手动模式的表情。
     /// </summary>
     string? EffectiveExpression { get; set; }
+    
+    void Start();
+    
+    void Stop();
 }
 
 /// <summary>
@@ -74,28 +85,32 @@ public class AutoExpressionService : IAutoExpressionService
 
     private AppState _lastState = AppState.None;
 
-    /// <summary>
-    /// 响应 AutoExpressionEnabled 属性变化（构造时订阅 SouffleSettings.PropertyChanged）：
-    /// 开启时启动轮询并立即检测一次；关闭时停止轮询并立即清除自动表情（无论之前处于什么状态）。
-    /// 持久化由 App 组合根统一处理，这里只管运行时行为。
-    /// </summary>
-    private void OnEnabledChanged()
+    public void Start()
     {
-        if (_settings.AutoExpressionEnabled)
-        {
-            _timer.Start();
-            PollOnce();
-        }
-        else
-        {
-            _timer.Stop();
-            _lastState = AppState.None;
-            ExpressionChanged?.Invoke(null);
-        }
+        _timer.Start();
+        PollOnce();
+        Logger.Information("auto expression started, poll every {Seconds} seconds", _settings.AutoExpressionPollSeconds);
+    }
+    
+    public void Stop()
+    {
+        _timer.Stop();
+        _lastState = AppState.None;
+        _processCache = null;
+        ExpressionChanged?.Invoke(null);
+        Logger.Information("auto expression stopped");
     }
 
     /// <inheritdoc />
     public event Action<string?>? ExpressionChanged;
+
+    /// <inheritdoc />
+    public event Action<string>? OnProcessStart;
+
+    /// <summary>
+    /// 上一轮采集的进程名快照，用于识别新启动进程；null = 尚未建立基线（首轮只建基线不回调）。
+    /// </summary>
+    private HashSet<string>? _processCache;
 
     /// <inheritdoc />
     public string? CurrentExpression => _lastState switch
@@ -121,12 +136,6 @@ public class AutoExpressionService : IAutoExpressionService
         _hasForegroundEntries = _entries.Exists(e => e.Method == "foreground");
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(1f, settings.AutoExpressionPollSeconds)) };
         _timer.Tick += (_, _) => PollOnce();
-        // 总开关属性变化（托盘/设置界面等任何写入方）→ 启停轮询与清除表情
-        settings.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(SouffleSettings.AutoExpressionEnabled)) OnEnabledChanged();
-        };
-        if (settings.AutoExpressionEnabled) _timer.Start();
     }
 
     /// <summary>
@@ -160,6 +169,7 @@ public class AutoExpressionService : IAutoExpressionService
     {
         // 每轮各采集一次快照，条目只查表（低资源消耗）
         _procDetector.Capture();
+        DetectStartedProcesses();
         if (_hasForegroundEntries && _fgDetector.Supported) _fgDetector.Capture();
 
         var gameHit = false;
@@ -184,6 +194,22 @@ public class AutoExpressionService : IAutoExpressionService
         };
         Logger.Information("auto expression: {Prev} -> {Next} ({Expression})", prev, state, expression ?? "default");
         ExpressionChanged?.Invoke(expression);
+    }
+
+    /// <summary>
+    /// 与上一轮进程快照对比，本轮才出现的进程名视为新启动进程，逐个触发 OnProcessStart。
+    /// 首次轮询（无基线）只记录快照不触发；无订阅者时只更新基线，不做多余比较。
+    /// </summary>
+    private void DetectStartedProcesses()
+    {
+        var previous = _processCache;
+        _processCache = new HashSet<string>(_procDetector.RunningProcesses, StringComparer.OrdinalIgnoreCase);
+        if (previous is null) return;
+
+        foreach (var name in _processCache)
+        {
+            if (!previous.Contains(name)) OnProcessStart?.Invoke(name);
+        }
     }
 
     /// <summary>

@@ -95,6 +95,7 @@ public partial class ChatViewModel : ViewModelBase
         IMcpConfigStore mcpConfig,
         ISkillsWindowService skillsWindow,
         IPluginsWindowService pluginsWindow,
+        PlatformService platforms,
         UserQuestionService questions,
         ChatFileService files)
     {
@@ -111,6 +112,7 @@ public partial class ChatViewModel : ViewModelBase
         toolAccess.ApprovalRequested += OnApprovalRequested;
         questions.QuestionAsked += OnQuestionAsked;
         files.FileShown += OnFileShown;
+        platforms.Notified += NotifyPlatformMessage;
 
         // 附件区的显隐与发送按钮的可用性都取决于附件数量
         Attachments.CollectionChanged += (_, _) =>
@@ -545,28 +547,35 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 工具要求在对话窗口展示本地文件：回到 UI 线程插入带附件的气泡，
+    /// 工具线程要求在对话窗口展示本地文件：回到 UI 线程插入带附件的气泡，
     /// 图片在后台解码，解码完成后再挂到气泡上。
     /// </summary>
     private void OnFileShown(ChatFileDisplay display)
     {
-        Dispatcher.UIThread.Post(async () =>
+        Dispatcher.UIThread.Post(async void () =>
         {
-            var attachment = new ChatDisplayAttachment(display.FilePath, display.FileName, display.IsImage);
-            var message = new Models.ChatMessage(
-                $"已展示文件：{display.FileName}",
-                isUser: false,
-                displayAttachment: attachment);
+            try
+            {
+                var attachment = new ChatDisplayAttachment(display.FilePath, display.FileName, display.IsImage);
+                var message = new Models.ChatMessage(
+                    $"已展示文件：{display.FileName}",
+                    isUser: false,
+                    displayAttachment: attachment);
 
-            // 和工具记录一样插在回复气泡之前，避免文件卡片排在「正在思考…」之后
-            var index = _reply is { } reply ? Messages.IndexOf(reply) : -1;
-            if (index >= 0) Messages.Insert(index, message);
-            else Messages.Add(message);
+                // 和工具记录一样插在回复气泡之前，避免文件卡片排在「正在思考…」之后
+                var index = _reply is { } reply ? Messages.IndexOf(reply) : -1;
+                if (index >= 0) Messages.Insert(index, message);
+                else Messages.Add(message);
 
-            if (!display.IsImage) return;
+                if (!display.IsImage) return;
 
-            var image = await Task.Run(() => ChatDisplayAttachment.LoadImage(display.FilePath));
-            if (image is not null) attachment.Image = image;
+                var image = await Task.Run(() => ChatDisplayAttachment.LoadImage(display.FilePath));
+                if (image is not null) attachment.Image = image;
+            }
+            catch (Exception e)
+            {
+                Logger.Warning(e, "load local file {Path} for display failed", display.FilePath);
+            }
         });
     }
 
@@ -695,7 +704,7 @@ public partial class ChatViewModel : ViewModelBase
     /// 插件推送了一条需要桌宠处理的消息（如被 @）：自动发起一轮对话；正在生成时先排队。
     /// 可从任意线程调用，内部切回 UI 线程；窗口不会自动弹出，等用户自己打开查看。
     /// </summary>
-    public void NotifyPlatformMessage(PlatformNotification notification)
+    private void NotifyPlatformMessage(object? _, PlatformNotification notification)
     {
         if (Dispatcher.UIThread.CheckAccess()) EnqueuePlatformNotification(notification);
         else Dispatcher.UIThread.Post(() => EnqueuePlatformNotification(notification));
@@ -809,6 +818,8 @@ public partial class ChatViewModel : ViewModelBase
     /// 发起一轮对话：写入历史与长期记忆、插入占位气泡并流式接收回复。
     /// 手输发送（先插用户气泡）与平台提醒（先插提醒气泡）共用这一条链路。
     /// </summary>
+    /// <param name="model">本轮使用的模型配置。</param>
+    /// <param name="messageText">发给模型的消息正文。</param>
     /// <param name="displayText">气泡展示文本；只影响界面，发给模型的仍是 messageText。</param>
     /// <param name="isPlatformNotice">
     /// 该轮是否为平台提醒。与 <paramref name="displayText" /> 无关：任何消息都可以有展示文本，

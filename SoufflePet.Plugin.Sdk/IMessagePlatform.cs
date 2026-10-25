@@ -59,6 +59,13 @@ public interface IMessagePlatform
     string Id { get; }
 
     /// <summary>
+    /// 平台角色说明：告诉模型这个平台在它眼里的身份，例如「这是你自己的 QQ」或「你正在托管主人的 QQ」。
+    /// 宿主会把它注入系统提示词，模型据此理解平台消息里的身份与语气；
+    /// 返回 null 或空白时，该平台不注入角色说明。
+    /// </summary>
+    string? RolePrompt { get; }
+
+    /// <summary>
     /// 列出当前已知的会话（按最近活跃排序）。插件可以只返回本次运行期间收到过消息的会话。
     /// </summary>
     Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync();

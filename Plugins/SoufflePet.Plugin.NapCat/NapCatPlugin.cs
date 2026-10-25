@@ -151,8 +151,14 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
 
+    /// <summary>平台角色说明（例如「你正在托管主人的 QQ」），注入系统提示词；为空则不注入。</summary>
+    private string _rolePrompt = string.Empty;
+
     /// <summary>平台 id，供工具的 platform 参数使用。</summary>
     public string Id => "napcat";
+
+    /// <summary>平台角色说明，交给宿主注入系统提示词；未配置时返回 null（不注入）。</summary>
+    public string? RolePrompt => _rolePrompt.Length == 0 ? null : _rolePrompt;
 
     /// <summary>收到需要桌宠处理的消息时触发，由宿主订阅后唤醒桌宠。</summary>
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;
@@ -1423,6 +1429,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
         _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
+        _rolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim();
 
         var cacheDir = GetConfigString(config, "attachmentCacheDir", "attachments").Trim();
         if (cacheDir.Length == 0) cacheDir = "attachments";

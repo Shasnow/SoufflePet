@@ -17,7 +17,8 @@
     "filterSelfMessage": false,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
-    "attachmentCacheDir": "attachments"
+    "attachmentCacheDir": "attachments",
+    "rolePrompt": ""
   },
   "configSchema": [
     {
@@ -79,6 +80,12 @@
       "label": "附件缓存目录",
       "type": "text",
       "description": "相对路径以插件目录为基准，也可以填绝对路径；默认 attachments。"
+    },
+    {
+      "key": "rolePrompt",
+      "label": "平台角色说明",
+      "type": "text",
+      "description": "注入系统提示词，告诉桌宠这个 QQ 在它眼里的身份，例如「这是你自己的 QQ」或「你正在托管主人的 QQ」；留空则不注入。"
     }
   ]
 }

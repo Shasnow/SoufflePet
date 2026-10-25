@@ -142,8 +142,16 @@ public class App : Application
                     case nameof(SouffleSettings.StartWithWindows):
                         ApplyAutoStart();
                         break;
+                    case nameof(SouffleSettings.AutoExpressionEnabled):
+                        ApplyAutoExpression();
+                        break;
                 }
             };
+            
+            void ApplyAutoExpression(){
+                if (settings.AutoExpressionEnabled) autoExpression.Start();
+                else autoExpression.Stop();
+            }
 
             // 开机自启：把设置写进/移出 HKCU Run 注册表项（失败只记警告，不影响应用运行）
             void ApplyAutoStart()
@@ -193,6 +201,7 @@ public class App : Application
             // 此时模型尚未加载，表情由窗口侧缓存、模型就绪后补设（两类窗口都有该机制）。
             ApplyExpression();
             ApplyAutoStart(); // 开机自启：启动时按设置重写一次注册表项（exe 移动后自动刷新路径）
+            ApplyAutoExpression(); // 自动表情检测：启动时按设置决定是否启动
 
             try
             {
@@ -214,11 +223,6 @@ public class App : Application
 
             // 对话窗口热键（Ctrl+Alt+Space）：同样复用桌宠窗口句柄，须在 Show() 之后注册
             _provider.GetRequiredService<IChatWindowService>().Start(window);
-
-            // 插件推送的平台消息（如被 @）直接进入对话层：生成中排队，窗口不自动弹出，等用户自己打开查看
-            var chatViewModel = _provider.GetRequiredService<ChatViewModel>();
-            _provider.GetRequiredService<PlatformService>().Notified +=
-                (_, notification) => chatViewModel.NotifyPlatformMessage(notification);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
 
