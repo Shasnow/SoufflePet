@@ -71,6 +71,7 @@ public class App : Application
             services.AddSingleton<IPluginService, PluginService>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
+            services.AddSingleton<IScheduledTaskService, ScheduledTaskService>(); // 定时任务调度：随设置持久化，启动时恢复
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
             services.AddSingleton<IChatWindowService, ChatWindowService>();
             services.AddSingleton<McpSettingsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的服务器上
@@ -79,6 +80,8 @@ public class App : Application
             services.AddSingleton<ISkillsWindowService, SkillsWindowService>();
             services.AddSingleton<PluginsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的插件上
             services.AddSingleton<IPluginsWindowService, PluginsWindowService>();
+            services.AddSingleton<ScheduledTasksViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的任务上
+            services.AddSingleton<IScheduledTasksWindowService, ScheduledTasksWindowService>();
             services.AddTransient<WebViewPetWindow>();
             services.AddTransient<NativePetWindow>();
             // 按启动参数二选一，确保窗口与 petOps 是同一实例
@@ -201,7 +204,6 @@ public class App : Application
             // 此时模型尚未加载，表情由窗口侧缓存、模型就绪后补设（两类窗口都有该机制）。
             ApplyExpression();
             ApplyAutoStart(); // 开机自启：启动时按设置重写一次注册表项（exe 移动后自动刷新路径）
-            ApplyAutoExpression(); // 自动表情检测：启动时按设置决定是否启动
 
             try
             {
@@ -220,11 +222,15 @@ public class App : Application
             var power = _provider.GetRequiredService<IPowerNotificationService>();
             power.DisplayPowerChanged += petOps.SetDisplayPower;
             power.Start(window);
+            ApplyAutoExpression(); // 自动表情检测：启动时按设置决定是否启动
 
             // 对话窗口热键（Ctrl+Alt+Space）：同样复用桌宠窗口句柄，须在 Show() 之后注册
             _provider.GetRequiredService<IChatWindowService>().Start(window);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
+
+            // 定时任务调度：对话层已就绪并订阅了 Triggered，此时启动可避免漏掉启动瞬间到点的任务
+            _provider.GetRequiredService<IScheduledTaskService>().Start();
 
             // 退出时统一 Dispose 容器（收集 AutoExpressionService/LocalFileServer/TrayService 等 IDisposable）
             desktop.Exit += (_, _) =>

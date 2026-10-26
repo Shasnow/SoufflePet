@@ -1,0 +1,358 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             xmlns:models="using:SoufflePet.Models"
+             xmlns:services="using:SoufflePet.Services"
+             x:Class="SoufflePet.Views.ScheduledTasksView"
+             x:DataType="vm:ScheduledTasksViewModel"
+             x:CompileBindings="True">
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="时"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="定时任务" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：任务列表 -->
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,2">
+                            <TextBlock Text="任务" Classes="section" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="新建一条定时任务"
+                                        Command="{Binding AddTaskCommand}">
+                                    <TextBlock Text="新增" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        IsEnabled="{Binding HasSelection}"
+                                        ToolTip.Tip="删除选中的任务"
+                                        Command="{Binding DeleteTaskCommand}">
+                                    <TextBlock Text="删除" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        IsEnabled="{Binding HasSelection}"
+                                        ToolTip.Tip="立即执行选中的任务（不影响原有计划）"
+                                        Command="{Binding RunNowCommand}">
+                                    <TextBlock Text="执行" Classes="muted" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding Status}"
+                                   Classes="label"
+                                   Margin="4,0,4,6"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <ListBox Grid.Row="2"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Tasks}"
+                                 SelectedItem="{Binding SelectedTask, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:ScheduledTask">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                        <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                  VerticalAlignment="Center"
+                                                  ToolTip.Tip="停用后不再触发" />
+                                        <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="12.5"
+                                                       Foreground="#F2FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding ScheduleText}"
+                                                       FontSize="10.5"
+                                                       Foreground="#66FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding NextRunText, StringFormat='下次 {0}'}"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding ContentPreview}"
+                                                       IsVisible="{Binding HasContent}"
+                                                       FontSize="10.5"
+                                                       Foreground="#40FFFFFF"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Grid.Row="2"
+                                   Text="点「新增」创建第一条定时任务"
+                                   Classes="muted"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   IsVisible="{Binding !HasTasks}" />
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：任务编辑 + 保存 + 执行日志 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0" RowDefinitions="*,Auto,Auto">
+
+                        <Grid Grid.Row="0">
+                            <StackPanel VerticalAlignment="Center"
+                                        Spacing="4"
+                                        IsVisible="{Binding !HasSelection}">
+                                <TextBlock Text="还没有选中任务"
+                                           Classes="muted"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Text="在左侧点「新增」，或点击一条任务进行编辑"
+                                           FontSize="10.5"
+                                           Foreground="#66FFFFFF"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <!-- 编辑区通过 ContentControl + DataTemplate 绑定：未选中时内容为 null，不会产生空引用绑定错误 -->
+                            <ContentControl Content="{Binding SelectedTask}"
+                                            HorizontalContentAlignment="Stretch"
+                                            VerticalContentAlignment="Stretch">
+                                <ContentControl.ContentTemplate>
+                                    <DataTemplate x:DataType="models:ScheduledTask">
+                                        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <StackPanel Spacing="7" Margin="0,0,8,0">
+
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Text="名称" Classes="label" />
+                                                    <TextBox Classes="field" Text="{Binding Name, Mode=TwoWay}" />
+                                                </StackPanel>
+
+                                                <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                          Content="启用该任务" />
+
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="触发方式" Classes="label" />
+                                                    <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
+                                                        <Button Classes="tab"
+                                                                Classes.selected="{Binding IsOnce}"
+                                                                Padding="4,7"
+                                                                Tag="Once"
+                                                                Click="OnKindClick">
+                                                            <TextBlock Text="单次" HorizontalAlignment="Center" />
+                                                        </Button>
+                                                        <Button Grid.Column="1"
+                                                                Classes="tab"
+                                                                Classes.selected="{Binding IsDaily}"
+                                                                Padding="4,7"
+                                                                Tag="Daily"
+                                                                Click="OnKindClick">
+                                                            <TextBlock Text="每日" HorizontalAlignment="Center" />
+                                                        </Button>
+                                                        <Button Grid.Column="2"
+                                                                Classes="tab"
+                                                                Classes.selected="{Binding IsWeekly}"
+                                                                Padding="4,7"
+                                                                Tag="Weekly"
+                                                                Click="OnKindClick">
+                                                            <TextBlock Text="每周" HorizontalAlignment="Center" />
+                                                        </Button>
+                                                        <Button Grid.Column="3"
+                                                                Classes="tab"
+                                                                Classes.selected="{Binding IsInterval}"
+                                                                Padding="4,7"
+                                                                Tag="Interval"
+                                                                Click="OnKindClick">
+                                                            <TextBlock Text="间隔" HorizontalAlignment="Center" />
+                                                        </Button>
+                                                    </Grid>
+                                                </StackPanel>
+
+                                                <!-- 单次：日期 + 时刻 -->
+                                                <StackPanel Spacing="3" IsVisible="{Binding IsOnce}">
+                                                    <TextBlock Text="触发时间" Classes="label" />
+                                                    <DatePicker SelectedDate="{Binding OnceDate, Mode=TwoWay}" />
+                                                    <TimePicker SelectedTime="{Binding OnceTime, Mode=TwoWay}"
+                                                                Margin="0,4,0,0" />
+                                                </StackPanel>
+
+                                                <!-- 每日：时刻 -->
+                                                <StackPanel Spacing="3" IsVisible="{Binding IsDaily}">
+                                                    <TextBlock Text="触发时刻" Classes="label" />
+                                                    <TimePicker SelectedTime="{Binding TimeOfDay, Mode=TwoWay}" />
+                                                </StackPanel>
+
+                                                <!-- 每周：时刻 + 星期 -->
+                                                <StackPanel Spacing="4" IsVisible="{Binding IsWeekly}">
+                                                    <TextBlock Text="触发时刻" Classes="label" />
+                                                    <TimePicker SelectedTime="{Binding TimeOfDay, Mode=TwoWay}" />
+                                                    <TextBlock Text="星期" Classes="label" Margin="0,2,0,0" />
+                                                    <ItemsControl ItemsSource="{Binding WeekdayOptions}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="models:WeekdayOption">
+                                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                          Content="{Binding Label}"
+                                                                          Margin="0,0,10,0" />
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+
+                                                <!-- 间隔：分钟数 -->
+                                                <StackPanel Spacing="3" IsVisible="{Binding IsInterval}">
+                                                    <TextBlock Text="间隔（分钟）" Classes="label" />
+                                                    <NumericUpDown Value="{Binding IntervalMinutes, Mode=TwoWay}"
+                                                                   Minimum="1"
+                                                                   Maximum="10080"
+                                                                   Increment="5"
+                                                                   HorizontalAlignment="Left"
+                                                                   Width="150" />
+                                                </StackPanel>
+
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Text="任务内容" Classes="label" />
+                                                    <TextBox Classes="field"
+                                                             Text="{Binding Content, Mode=TwoWay}"
+                                                             AcceptsReturn="True"
+                                                             VerticalContentAlignment="Top"
+                                                             Height="78"
+                                                             TextWrapping="Wrap"
+                                                             PlaceholderText="例如：看看现在有没有新邮件，有的话提醒我" />
+                                                    <TextBlock Text="触发时把这段内容作为提示词交给桌宠，发起一轮对话。"
+                                                               FontSize="10.5"
+                                                               Foreground="#59FFFFFF"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+
+                                                <TextBlock Text="{Binding NextRunText, StringFormat='下次触发：{0}'}"
+                                                           FontSize="11"
+                                                           Foreground="#8CFFFFFF" />
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </DataTemplate>
+                                </ContentControl.ContentTemplate>
+                            </ContentControl>
+                        </Grid>
+
+                        <!-- 手动保存：改动即时生效，但只有点这里才写入 SoufflePet.json -->
+                        <Grid Grid.Row="1" Margin="0,8,0,0" ColumnDefinitions="*,Auto">
+                            <TextBlock Text="改动即时生效，点「保存」写入配置文件"
+                                       FontSize="10.5"
+                                       Foreground="#59FFFFFF"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Classes="primary"
+                                    Margin="10,0,0,0"
+                                    Command="{Binding SaveCommand}"
+                                    Content="保存" />
+                        </Grid>
+
+                        <!-- 执行日志：便于排查任务未正常触发的问题 -->
+                        <Border Grid.Row="2"
+                                Height="150"
+                                Margin="0,10,0,0"
+                                Background="#0FFFFFFF"
+                                BorderBrush="#1AFFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="10,8">
+                            <Grid RowDefinitions="Auto,*">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="执行日志" Classes="section" />
+                                    <Button Grid.Column="1"
+                                            Classes="ghost"
+                                            Padding="7,3"
+                                            ToolTip.Tip="清空执行日志（含日志文件）"
+                                            Command="{Binding ClearLogsCommand}">
+                                        <TextBlock Text="清空" Classes="muted" />
+                                    </Button>
+                                </Grid>
+
+                                <ScrollViewer Grid.Row="1"
+                                              Margin="0,4,0,0"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Logs}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="services:ScheduledTaskLogEntry">
+                                                <Grid>
+                                                    <TextBlock Text="{Binding Text}"
+                                                               IsVisible="{Binding !IsError}"
+                                                               FontSize="10.5"
+                                                               Foreground="#B3FFFFFF"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Text}"
+                                                               IsVisible="{Binding IsError}"
+                                                               FontSize="10.5"
+                                                               Foreground="#E5B96F"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="暂无执行记录"
+                                           Classes="muted"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           IsVisible="{Binding !HasLogs}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Panel>
+</UserControl>

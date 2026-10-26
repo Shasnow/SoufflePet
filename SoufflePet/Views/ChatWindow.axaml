@@ -581,6 +581,15 @@
                                                            Foreground="#66FFFFFF" />
                                             </StackPanel>
                                         </Button>
+
+                                        <Button Classes="modeItem" Command="{Binding OpenScheduledTasksCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="定时任务…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="按时间自动让桌宠发起一轮对话"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
                                     </StackPanel>
                                 </Border>
                             </Popup>

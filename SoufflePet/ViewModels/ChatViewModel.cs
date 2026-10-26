@@ -47,8 +47,8 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>平台提醒合成消息的前缀：恢复历史时据此还原提醒气泡，而不是当作普通用户发言。</summary>
     private const string PlatformNoticePrefix = "[平台提醒]";
 
-    /// <summary>生成中最多排队的平台提醒数，超出时与最旧一条合并。</summary>
-    private const int MaxPendingPlatformNotifications = 3;
+    /// <summary>生成中最多排队的一轮待执行对话数，超出时与最旧一条合并。</summary>
+    private const int MaxPendingTurns = 3;
 
     /// <summary>平台提醒气泡里展示的正文上限（完整内容仍交给模型）。</summary>
     private const int PlatformNoticePreviewLength = 80;
@@ -62,6 +62,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IMcpConfigStore _mcpConfig;
     private readonly ISkillsWindowService _skillsWindow;
     private readonly IPluginsWindowService _pluginsWindow;
+    private readonly IScheduledTasksWindowService _scheduledTasksWindow;
 
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
@@ -72,11 +73,11 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>本轮回复的占位气泡：审批气泡与工具记录都要插在它之前。</summary>
     private Models.ChatMessage? _reply;
 
-    /// <summary>生成中收到的平台提醒，等本轮结束后逐条处理。</summary>
-    private readonly Queue<PlatformNotification> _pendingPlatformNotifications = new();
+    /// <summary>生成中收到的一轮待执行对话（平台提醒 / 定时任务），等本轮结束后逐条处理。</summary>
+    private readonly Queue<PendingTurn> _pendingTurns = new();
 
-    /// <summary>是否正在处理平台提醒，避免重入导致并发发起多轮对话。</summary>
-    private bool _handlingPlatformNotification;
+    /// <summary>是否正在处理待执行对话，避免重入导致并发发起多轮对话。</summary>
+    private bool _handlingPendingTurn;
 
     /// <summary>
     /// 对话历史：统一用 Microsoft.Extensions.AI.ChatMessage 记录，只包含真实对话与工具调用记录。
@@ -95,7 +96,9 @@ public partial class ChatViewModel : ViewModelBase
         IMcpConfigStore mcpConfig,
         ISkillsWindowService skillsWindow,
         IPluginsWindowService pluginsWindow,
+        IScheduledTasksWindowService scheduledTasksWindow,
         PlatformService platforms,
+        IScheduledTaskService scheduledTasks,
         UserQuestionService questions,
         ChatFileService files)
     {
@@ -108,11 +111,13 @@ public partial class ChatViewModel : ViewModelBase
         _mcpConfig = mcpConfig;
         _skillsWindow = skillsWindow;
         _pluginsWindow = pluginsWindow;
+        _scheduledTasksWindow = scheduledTasksWindow;
         ApprovalMode = toolAccess.ApprovalMode;
         toolAccess.ApprovalRequested += OnApprovalRequested;
         questions.QuestionAsked += OnQuestionAsked;
         files.FileShown += OnFileShown;
         platforms.Notified += NotifyPlatformMessage;
+        scheduledTasks.Triggered += OnScheduledTaskTriggered;
 
         // 附件区的显隐与发送按钮的可用性都取决于附件数量
         Attachments.CollectionChanged += (_, _) =>
@@ -653,6 +658,14 @@ public partial class ChatViewModel : ViewModelBase
         _pluginsWindow.Show();
     }
 
+    /// <summary>打开定时任务管理窗口（显示前重排触发计划并刷新下次触发时间）。</summary>
+    [RelayCommand]
+    private void OpenScheduledTasks()
+    {
+        IsMoreOpen = false;
+        _scheduledTasksWindow.Show();
+    }
+
     [RelayCommand]
     private void OpenAddModel()
     {
@@ -706,68 +719,86 @@ public partial class ChatViewModel : ViewModelBase
     /// </summary>
     private void NotifyPlatformMessage(object? _, PlatformNotification notification)
     {
-        if (Dispatcher.UIThread.CheckAccess()) EnqueuePlatformNotification(notification);
-        else Dispatcher.UIThread.Post(() => EnqueuePlatformNotification(notification));
+        var sender = notification.Sender is { Length: > 0 } name ? name : "未知发送者";
+        var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {sender}：{PreviewNotice(notification.Content)}";
+        var prompt = new StringBuilder()
+            .Append(PlatformNoticePrefix).Append(" 你在消息平台「").Append(notification.PlatformId)
+            .Append("」收到一条需要处理的消息（发送者：").Append(sender).Append("）：\n")
+            .Append("<<<\n").Append(notification.Content).Append("\n>>>").ToString();
+        EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
 
-    private void EnqueuePlatformNotification(PlatformNotification notification)
+    /// <summary>定时任务到点：排进与平台提醒同一条串行通道，避免多条任务同时执行导致桌宠异常。</summary>
+    private void OnScheduledTaskTriggered(object? _, ScheduledTaskTrigger trigger)
     {
-        if (_pendingPlatformNotifications.Count >= MaxPendingPlatformNotifications)
+        var display = $"⏰ 定时任务「{trigger.Name}」：{PreviewNotice(trigger.Content)}";
+        var prompt = new StringBuilder()
+            .Append("你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
+            .Append("<<<\n").Append(trigger.Content).Append("\n>>>").ToString();
+        EnqueuePendingTurn(new PendingTurn(prompt, display));
+    }
+
+    /// <summary>把一轮待执行对话排进队列；可从任意线程调用。</summary>
+    private void EnqueuePendingTurn(PendingTurn turn)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) EnqueueTurnCore(turn);
+        else Dispatcher.UIThread.Post(() => EnqueueTurnCore(turn));
+    }
+
+    private void EnqueueTurnCore(PendingTurn turn)
+    {
+        if (_pendingTurns.Count >= MaxPendingTurns)
         {
-            // 连续被 @ 时与最旧一条合并：既不无限排队，也不丢内容
-            var oldest = _pendingPlatformNotifications.Dequeue();
-            notification = notification with { Content = $"{oldest.Content}\n{notification.Content}" };
+            // 连续到点时与最旧一条合并：既不无限排队，也不丢内容
+            var oldest = _pendingTurns.Dequeue();
+            turn = new PendingTurn($"{oldest.Prompt}\n{turn.Prompt}", $"{oldest.Display}\n{turn.Display}");
         }
 
-        _pendingPlatformNotifications.Enqueue(notification);
-        StartPendingPlatformNotifications();
+        _pendingTurns.Enqueue(turn);
+        StartPendingTurns();
     }
 
-    private void StartPendingPlatformNotifications()
+    private void StartPendingTurns()
     {
-        if (_handlingPlatformNotification || IsGenerating || _pendingPlatformNotifications.Count == 0) return;
-        _ = ProcessPendingPlatformNotificationsAsync();
+        if (_handlingPendingTurn || IsGenerating || _pendingTurns.Count == 0) return;
+        _ = ProcessPendingTurnsAsync();
     }
 
-    private async Task ProcessPendingPlatformNotificationsAsync()
+    private async Task ProcessPendingTurnsAsync()
     {
-        _handlingPlatformNotification = true;
+        _handlingPendingTurn = true;
         try
         {
-            while (!IsGenerating && _pendingPlatformNotifications.TryDequeue(out var notification))
-                await RunPlatformNotificationAsync(notification);
+            while (!IsGenerating && _pendingTurns.TryDequeue(out var turn))
+                await RunPendingTurnAsync(turn);
         }
         finally
         {
-            _handlingPlatformNotification = false;
-            // 处理期间又来了新提醒：继续消费
-            StartPendingPlatformNotifications();
+            _handlingPendingTurn = false;
+            // 处理期间又来了新的待执行对话：继续消费
+            StartPendingTurns();
         }
     }
 
-    /// <summary>为一条平台提醒发起一轮对话：界面先插提醒气泡，再按普通轮次生成回复。</summary>
-    private async Task RunPlatformNotificationAsync(PlatformNotification notification)
+    /// <summary>为一条待执行对话（平台提醒 / 定时任务）发起一轮对话：界面先插提醒气泡，再按普通轮次生成回复。</summary>
+    private async Task RunPendingTurnAsync(PendingTurn turn)
     {
-        var sender = notification.Sender is { Length: > 0 } name ? name : "未知发送者";
-        var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {sender}：{PreviewNotice(notification.Content)}";
-        Messages.Add(new Models.ChatMessage(display, isUser: false, isPlatformNotice: true));
+        Messages.Add(new Models.ChatMessage(turn.Display, isUser: false, isPlatformNotice: true));
 
         if (SelectedModel is not { } model
             || string.IsNullOrWhiteSpace(model.ModelId)
             || string.IsNullOrWhiteSpace(model.BaseUrl))
         {
-            Messages.Add(new Models.ChatMessage("当前没有可用的对话模型，无法处理这条平台提醒。", isUser: false));
+            Messages.Add(new Models.ChatMessage("当前没有可用的对话模型，无法执行这条提醒。", isUser: false));
             return;
         }
 
-        var prompt = new StringBuilder()
-            .Append(PlatformNoticePrefix).Append(" 你在消息平台「").Append(notification.PlatformId)
-            .Append("」收到一条需要处理的消息（发送者：").Append(sender).Append("）：\n")
-            .Append("<<<\n").Append(notification.Content).Append("\n>>>");
-
-        // 落库时同时保存气泡文本与「平台提醒」标记：完整提示给模型，恢复历史时展示同一份摘要
-        await RunTurnAsync(model, prompt.ToString(), display, isPlatformNotice: true);
+        // 落库时同时保存气泡文本与「提醒」标记：完整提示给模型，恢复历史时展示同一份摘要
+        await RunTurnAsync(model, turn.Prompt, turn.Display, isPlatformNotice: true);
     }
+
+    /// <summary>排队等待执行的一轮对话：<see cref="Prompt" /> 发给模型，<see cref="Display" /> 作为气泡文案。</summary>
+    private sealed record PendingTurn(string Prompt, string Display);
 
     /// <summary>提醒气泡里的单行摘要：折叠换行并截断，完整内容仍放在给模型的提示里。</summary>
     private static string PreviewNotice(string content)
@@ -1029,8 +1060,8 @@ public partial class ChatViewModel : ViewModelBase
             _reply = null;
             IsGenerating = false;
 
-            // 本轮生成期间排队进来的平台提醒，等回复结束后继续处理
-            StartPendingPlatformNotifications();
+            // 本轮生成期间排队进来的待执行对话（平台提醒 / 定时任务），等回复结束后继续处理
+            StartPendingTurns();
         }
     }
 

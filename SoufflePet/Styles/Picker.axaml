@@ -1,0 +1,47 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        日期 / 时间选择器：Fluent 默认外观是方角浅色块，且最小宽度很大（DatePicker 296 / TimePicker 242），
+        放在深色玻璃面板里既违和又会被挤到溢出裁切。这里统一成与 TextBox.field 一致的深色圆角输入框，
+        并放开最小宽度、默认撑满一行（与同一面板里的输入框对齐）。
+        Fluent 模板把背景 / 描边 / 圆角 / 前景通过 TemplateBinding 透传给内部按钮，因此直接设控件属性即可生效。
+    -->
+    <Style Selector="DatePicker, TimePicker">
+        <Setter Property="Background" Value="#12FFFFFF" />
+        <Setter Property="BorderBrush" Value="#22FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Foreground" Value="#F2FFFFFF" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MaxWidth" Value="720" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="DatePicker:pointerover, TimePicker:pointerover">
+        <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    </Style>
+    <Style Selector="DatePicker:focus-within, TimePicker:focus-within">
+        <Setter Property="BorderBrush" Value="#E8879B" />
+    </Style>
+
+    <!--
+        段文字默认贴顶：模板里用 {TemplateBinding VerticalContentAlignment} 居中，但 DatePicker / TimePicker
+        （TemplatedControl）上并没有这个属性，绑定落空后退回 Stretch，于是文字贴顶。这里显式居中。
+    -->
+    <Style Selector="DatePicker /template/ Button#PART_FlyoutButton TextBlock">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TimePicker /template/ Button#PART_FlyoutButton TextBlock">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 折叠态里分隔各段（日｜月｜年、时｜分｜秒）的竖线默认取主题资源，在深色玻璃上偏亮，压暗一档 -->
+    <Style Selector="DatePicker /template/ Rectangle#PART_FirstSpacer, DatePicker /template/ Rectangle#PART_SecondSpacer">
+        <Setter Property="Fill" Value="#26FFFFFF" />
+    </Style>
+    <Style Selector="TimePicker /template/ Rectangle">
+        <Setter Property="Fill" Value="#26FFFFFF" />
+    </Style>
+</Styles>

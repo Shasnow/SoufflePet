@@ -141,6 +141,9 @@ public partial class SouffleSettings : ObservableObject
     [Description("有史以来的对话 token 累计用量（每轮结束后累加，用于界面底部的用量统计）")]
     public ChatUsageTotals ChatUsage { get; set; } = new();
 
+    [Description("定时任务列表（触发时把任务内容作为提示词交给桌宠发起一轮对话）")]
+    public ObservableCollection<ScheduledTask> ScheduledTasks { get; set; } = [];
+
     public static SouffleSettings Load()
     {
         if (!File.Exists(SettingsFilePath)) return FallBackLoad();

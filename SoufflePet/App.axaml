@@ -19,5 +19,6 @@
         <StyleInclude Source="avares://SoufflePet/Styles/ListBox.axaml" />
         <StyleInclude Source="avares://SoufflePet/Styles/Border.axaml" />
         <StyleInclude Source="avares://SoufflePet/Styles/Expander.axaml" />
+        <StyleInclude Source="avares://SoufflePet/Styles/Picker.axaml" />
     </Application.Styles>
 </Application>
