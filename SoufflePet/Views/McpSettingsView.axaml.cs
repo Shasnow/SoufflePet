@@ -22,7 +22,7 @@ public partial class McpSettingsView : UserControl
         (TopLevel.GetTopLevel(this) as Window)?.BeginMoveDrag(e);
     }
 
-    /// <summary>关闭按钮只是隐藏窗口，真正关闭由 McpSettingsWindow.CloseForShutdown 负责。</summary>
+    /// <summary>关闭按钮只是隐藏窗口，真正关闭由 SettingsWindow.CloseForShutdown 负责。</summary>
     private void OnCloseClick(object? sender, RoutedEventArgs e)
     {
         (TopLevel.GetTopLevel(this) as Window)?.Hide();

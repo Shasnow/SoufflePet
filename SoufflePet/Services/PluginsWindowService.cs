@@ -13,14 +13,14 @@ public interface IPluginsWindowService
     void Show();
 }
 
-/// <summary>懒创建插件窗口并复用同一实例；每次显示前重新扫描插件目录。</summary>
+/// <summary>懒创建插件面板并复用同一实例（共用外壳 SettingsWindow）；每次显示前重新扫描插件目录。</summary>
 public sealed class PluginsWindowService(PluginsViewModel viewModel) : IPluginsWindowService, IDisposable
 {
-    private PluginsWindow? _window;
+    private SettingsWindow? _window;
 
     public void Show()
     {
-        var window = _window ??= new PluginsWindow { DataContext = viewModel };
+        var window = _window ??= new SettingsWindow { DataContext = viewModel };
         viewModel.Reload();
         if (window.IsVisible)
         {

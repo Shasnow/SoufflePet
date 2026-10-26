@@ -1,8 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:SoufflePet.ViewModels"
-        x:Class="SoufflePet.Views.McpSettingsWindow"
-        x:DataType="vm:McpSettingsViewModel"
+        x:Class="SoufflePet.Views.SettingsWindow"
+        x:CompileBindings="False"
         Title="{Binding WindowTitle}"
         Width="744"
         Height="588"
@@ -14,6 +13,10 @@
         Topmost="True"
         ShowInTaskbar="False"
         RequestedThemeVariant="Dark">
-    <!-- 内容交给 ViewLocator：DataContext 是 McpSettingsViewModel 时自动实例化 McpSettingsView -->
+    <!--
+        各设置面板（MCP 服务器 / 技能 / 插件 / 定时任务）共用的窗口外壳。
+        DataContext 是任一 ViewModelBase 面板时，ViewLocator 会自动实例化对应的 XxxView 填进来。
+        外壳不面向某个具体视图模型，因此这里的 Title / Content 两处绑定刻意用反射绑定（关闭编译绑定）。
+    -->
     <ContentControl Content="{Binding}" />
 </Window>

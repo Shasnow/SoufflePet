@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
-using Avalonia.Controls;
 using SoufflePet.ViewModels;
 using SoufflePet.Views;
 
@@ -15,14 +14,14 @@ public interface IMcpSettingsWindowService
     void Show();
 }
 
-/// <summary>MCP 设置窗口服务：单例视图模型 + 懒建窗口，关闭只隐藏。</summary>
+/// <summary>MCP 设置窗口服务：单例视图模型 + 懒建共用外壳（SettingsWindow），关闭只隐藏。</summary>
 public sealed class McpSettingsWindowService(McpSettingsViewModel viewModel) : IMcpSettingsWindowService, IDisposable
 {
-    private McpSettingsWindow? _window;
+    private SettingsWindow? _window;
 
     public void Show()
     {
-        var window = _window ??= new McpSettingsWindow { DataContext = viewModel };
+        var window = _window ??= new SettingsWindow { DataContext = viewModel };
         viewModel.Reload(); // 窗口隐藏期间设置文件可能被手改，显示前以文件为准
 
         if (window.IsVisible)

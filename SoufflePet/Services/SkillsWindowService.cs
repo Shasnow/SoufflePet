@@ -13,14 +13,14 @@ public interface ISkillsWindowService
     void Show();
 }
 
-/// <summary>懒创建技能窗口并复用同一实例；每次显示前重新扫描技能目录。</summary>
+/// <summary>懒创建技能面板并复用同一实例（共用外壳 SettingsWindow）；每次显示前重新扫描技能目录。</summary>
 public sealed class SkillsWindowService(SkillsViewModel viewModel) : ISkillsWindowService, IDisposable
 {
-    private SkillsWindow? _window;
+    private SettingsWindow? _window;
 
     public void Show()
     {
-        var window = _window ??= new SkillsWindow { DataContext = viewModel };
+        var window = _window ??= new SettingsWindow { DataContext = viewModel };
         viewModel.Reload();
         if (window.IsVisible)
         {

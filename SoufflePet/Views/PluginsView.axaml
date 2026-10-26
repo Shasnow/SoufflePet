@@ -1,19 +1,9 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:SoufflePet.ViewModels"
-        x:Class="SoufflePet.Views.PluginsWindow"
-        x:DataType="vm:PluginsViewModel"
-        x:CompileBindings="True"
-        Title="{Binding WindowTitle}"
-        Width="744"
-        Height="588"
-        CanResize="False"
-        WindowDecorations="None"
-        WindowStartupLocation="CenterScreen"
-        TransparencyLevelHint="Transparent"
-        Background="Transparent"
-        ShowInTaskbar="False"
-        RequestedThemeVariant="Dark">
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             x:Class="SoufflePet.Views.PluginsView"
+             x:DataType="vm:PluginsViewModel"
+             x:CompileBindings="True">
 
     <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
 
@@ -287,4 +277,4 @@
             </Grid>
         </Border>
     </Panel>
-</Window>
+</UserControl>
