@@ -146,8 +146,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private bool _filterSelfMessage;
     private int _maxReplyChars = 1500;
 
-    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按此百分比概率随机唤醒桌宠；0 表示关闭。</summary>
-    private int _replyProbabilityPercent;
+    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠；0 表示关闭。</summary>
+    private double _replyProbability;
 
     /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
     private bool _downloadAttachments = true;
@@ -1322,9 +1322,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         return false;
     }
 
-    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按配置的百分比概率随机命中一次唤醒；0 表示关闭。</summary>
+    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按配置的概率（0-1）随机命中一次唤醒；0 表示关闭。</summary>
     private bool RollReplyChance()
-        => _replyProbabilityPercent > 0 && Random.Shared.Next(100) < _replyProbabilityPercent;
+        => _replyProbability > 0 && Random.Shared.NextDouble() < _replyProbability;
 
     private void RaiseMentioned(string content, string sender, string? messageId)
     {
@@ -1453,7 +1453,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
         _wakeWords = ReadConfigWords(config, "wakeWords");
-        _replyProbabilityPercent = Math.Clamp(GetConfigInt(config, "replyProbability", 0), 0, 100);
+        _replyProbability = Math.Clamp(GetConfigDouble(config, "replyProbability", 0), 0, 1);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
         _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
         _rolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim();
@@ -1500,6 +1500,20 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         {
             JsonValueKind.Number when value.TryGetInt32(out var number) => number,
             JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => fallback,
+        };
+    }
+
+    private static double GetConfigDouble(JsonElement? config, string key, double fallback)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetDouble(out var number) => number,
+            JsonValueKind.String when double.TryParse(
+                value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => fallback,
         };
     }
