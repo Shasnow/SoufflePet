@@ -46,7 +46,7 @@ public interface IScheduledTaskService : IDisposable
     /// <summary>启动调度，并按持久化配置恢复已启用任务的触发计划。</summary>
     void Start();
 
-    /// <summary>任务被增删改后重新计算各任务的触发时间并重新布置定时器。</summary>
+    /// <summary>任务被增删改后重新布置定时器；间隔任务沿用既有倒计时，不被重置。</summary>
     void Refresh();
 
     /// <summary>立即执行一条任务（手动「立即执行」）；不影响其原有计划。</summary>
@@ -137,7 +137,20 @@ public sealed class ScheduledTaskService : IScheduledTaskService
 
         var now = DateTime.Now;
         foreach (var task in _settings.ScheduledTasks)
-            task.NextRunAt = task.Enabled ? ComputeNext(task, now) : null;
+        {
+            if (!task.Enabled)
+            {
+                task.NextRunAt = null;
+                continue;
+            }
+
+            // 间隔任务沿用既有的下次触发时间：Refresh 会被列出任务、打开窗口、任意增删改反复调用，
+            // 而间隔任务的 ComputeNext 是「now + 间隔」，每次重算都会把倒计时归零导致永不触发。
+            // 新建 / 重新启用 / 改间隔时该字段已由模型清空，会走到下面的重新计算。
+            if (task.Kind == ScheduledTaskKind.Interval && task.NextRunAt is not null) continue;
+
+            task.NextRunAt = ComputeNext(task, now);
+        }
 
         ArmTimer();
     }

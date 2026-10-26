@@ -76,6 +76,9 @@ public partial class ScheduledTask : ObservableObject
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public partial ScheduledTaskKind Kind { get; set; } = ScheduledTaskKind.Daily;
 
+    /// <summary>调度方式变化时清空下次触发时间，让调度器按新方式重新计时；间隔任务尤其需要重新锚定。</summary>
+    partial void OnKindChanged(ScheduledTaskKind value) => NextRunAt = null;
+
     /// <summary>单次定时的触发日期。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleText))]
@@ -100,6 +103,9 @@ public partial class ScheduledTask : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleText))]
     public partial int IntervalMinutes { get; set; } = 60;
+
+    /// <summary>间隔分钟数变化时清空下次触发时间，好让调度器按新间隔重新计时（否则旧倒计时会被一直沿用）。</summary>
+    partial void OnIntervalMinutesChanged(int value) => NextRunAt = null;
 
     /// <summary>触发时交给桌宠的任务内容（作为提示词发起一轮对话）。</summary>
     [ObservableProperty]

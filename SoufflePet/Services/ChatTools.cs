@@ -409,7 +409,7 @@ public sealed class ChatTools
     private async Task<string> CreateScheduledTask(
         [Description("任务名称，例如「喝水提醒」")] string name,
         [Description("任务内容，例如「提醒我该喝水了」")] string content,
-        [Description("调度方式：once=单次、daily=每日、weekly=每周、interval=固定间隔；默认 daily")] string kind = "daily",
+        [Description("调度方式：once=单次、daily=每日、weekly=每周、interval=固定间隔；不传按单次处理")] string? kind = null,
         [Description("触发时刻，24 小时制 HH:mm，例如 09:30；interval 方式不需要")] string? time = null,
         [Description("once 方式的触发日期 yyyy-MM-dd，例如 2026-10-27；不传表示今天")] string? date = null,
         [Description("weekly 方式选中的星期，逗号分隔，1=周一 … 7=周日，例如 \"1,3,5\"；留空表示每天")] string? weekdays = null,
@@ -547,12 +547,15 @@ public sealed class ChatTools
         return true;
     }
 
-    /// <summary>解析调度方式（中英文别名）。</summary>
+    /// <summary>解析调度方式（中英文别名）；未提供（null / 空）时按默认的单次任务处理。</summary>
     private static bool TryParseKind(string? kind, out ScheduledTaskKind result)
     {
-        result = ScheduledTaskKind.Daily;
+        result = ScheduledTaskKind.Once;
         switch (kind?.Trim().ToLowerInvariant())
         {
+            case null:
+            case "":
+            case "default":
             case "once":
             case "single":
             case "单次":
