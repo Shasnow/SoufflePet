@@ -18,7 +18,6 @@ using OpenAI;
 using OpenAI.Chat;
 using Serilog;
 using SoufflePet.Models;
-using SoufflePet.Plugin.Sdk;
 using SoufflePet.Services.Plugins;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
@@ -162,10 +161,10 @@ public sealed class LlmChatService(
         if (settings.ChatSystemPrompt.Trim() is { Length: > 0 } systemPrompt)
             messages.Add(new ChatMessage(ChatRole.System, systemPrompt));
 
-        // 工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
-        var agentsBlock = ReadAgentsDocument();
-        if (agentsBlock.Length > 0)
-            messages.Add(new ChatMessage(ChatRole.System, agentsBlock));
+        // 工作区信息：工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
+        var workspaceBlock = ReadWorkspaceBlock();
+        if (workspaceBlock.Length > 0)
+            messages.Add(new ChatMessage(ChatRole.System, workspaceBlock));
 
         // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）。
         // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入；
@@ -915,24 +914,23 @@ public sealed class LlmChatService(
     /// 读取工作目录下 AGENTS.md 的完整内容，包成系统提示块；不缓存，每次对话重新读盘，
     /// 文件不存在、内容为空或读取失败时返回空串（失败只记日志，不影响本次对话）。
     /// </summary>
-    private static string ReadAgentsDocument()
+    private static string ReadWorkspaceBlock()
     {
         var path = Path.Combine(Environment.CurrentDirectory, AgentsFileName);
-
+        var workspaceBlock = $"当前工作区：'{Environment.CurrentDirectory}'\n";
         try
         {
             if (!File.Exists(path)) return string.Empty;
 
             var content = File.ReadAllText(path);
-            return content.Trim().Length == 0
-                ? string.Empty
-                : $"以下是工作目录下 {AgentsFileName} 的内容，是本项目的约定与补充说明，请照此执行：\n\n{content}";
+            if (content.Trim().Length != 0)
+                workspaceBlock += $"以下是工作区内 {AgentsFileName} 的内容，是本项目的约定与补充说明，请照此执行：\n\n{content}";
         }
         catch (Exception ex)
         {
             Logger.Warning(ex, "read {File} {Path} failed", AgentsFileName, path);
-            return string.Empty;
         }
+        return workspaceBlock;
     }
 
     /// <summary>BaseUrl 视为 base 地址；如果用户填了完整接口路径，去掉 /chat/completions 再交给 SDK。</summary>
