@@ -15,6 +15,7 @@ using Avalonia.OpenGL.Controls;
 using Live2DCSharpSDK.App;
 using Live2DCSharpSDK.Framework;
 using Live2DCSharpSDK.Framework.Model;
+using Live2DCSharpSDK.Framework.Motion;
 using Live2DCSharpSDK.Framework.Rendering;
 using Live2DCSharpSDK.OpenGL;
 using Serilog;
@@ -177,7 +178,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
 
     /// <summary>
     /// 当前正在显示的表情名（null = 默认状态）。模型尚未加载时返回缓存的待设表情，
-    /// 单击轮换、自动联动与工具切换都会经过模型，因此这里始终是实际生效的那个。
+    /// 自动联动、工具切换与"戳一戳"都会经过模型，因此这里始终是实际生效的那个。
     /// </summary>
     public string? CurrentExpression =>
         _model?.CurrentExpression ?? (_hasPendingExpression ? _pendingExpression : null);
@@ -401,12 +402,15 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         _lapp?.View.ResetView();
     }
 
-    /// <summary>左键单击：随机切换一个表情。手柄显示中（自动表情命中游戏或常显手柄）不轮换，
-    /// 否则点击会把手柄表情替换掉且没有任何机制切回来（手动模式下自动联动不再触发）。</summary>
-    public void TapRandomExpression()
+    /// <summary>戳一戳：播放 TapBody（被戳）反应动作并随机切换表情。
+    /// 手柄显示中（自动表情命中游戏或常显手柄）不改表情，避免把手柄表情替换掉；
+    /// 模型未定义 TapBody 动作组时 SDK 静默忽略，只保留表情变化。</summary>
+    public void PlayPokeReaction()
     {
-        if (_gamepadEnabled) return;
-        _model?.SetRandomExpression();
+        var model = _model;
+        if (model == null) return;
+        if (!_gamepadEnabled) model.SetRandomExpression();
+        model.StartRandomMotion(LAppDefine.MotionGroupTapBody, MotionPriority.PriorityNormal);
     }
 
     /// <summary>

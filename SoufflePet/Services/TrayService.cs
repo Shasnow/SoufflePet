@@ -48,7 +48,7 @@ public sealed class TrayService(
         var resetItem = new NativeMenuItem("重置模型");
         resetItem.Click += (_, _) => petOps.ResetModel();
 
-        // 对话窗口：与 Ctrl+Alt+Space / 右键单击桌宠相同的切换逻辑，打开时停靠在桌宠窗口旁边
+        // 对话窗口：与 Ctrl+Alt+Space / 左键单击桌宠相同的切换逻辑，打开时停靠在桌宠窗口旁边
         var chatItem = new NativeMenuItem("对话窗口");
         chatItem.Click += (_, _) => OpenChatWindow(desktop);
 

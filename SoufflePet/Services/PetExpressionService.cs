@@ -69,7 +69,7 @@ public sealed class PetExpressionService
 
     /// <summary>
     /// 当前窗口实际显示的表情名（null = 默认状态，或窗口还没准备好）。
-    /// 由窗口侧跟踪，自动联动、工具切换与单击轮换的结果都能反映出来。
+    /// 由窗口侧跟踪，自动联动、工具切换与"戳一戳"的结果都能反映出来。
     /// </summary>
     public string? GetCurrentExpression() => _petWindow?.CurrentExpression;
 

@@ -25,6 +25,9 @@ public class NativePetWindow : Window, IPetWindow
     private readonly DispatcherTimer _renderTimer;
     private readonly IChatWindowService _chat;
 
+    /// <summary>右键交互菜单：在光标处弹出（目前仅"戳一戳"）。</summary>
+    private readonly MenuFlyout _petMenu;
+
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
     private int _fpsAccum;
@@ -120,10 +123,19 @@ public class NativePetWindow : Window, IPetWindow
             if (e.Property == IsVisibleProperty) ControlRenderLoop();
         };
 
+        // 右键交互菜单：戳一戳 = 先播 TapBody 反应动作/表情，再发起一轮对话唤醒桌宠
+        var pokeItem = new MenuItem { Header = "戳一戳" };
+        pokeItem.Click += (_, _) =>
+        {
+            _control.PlayPokeReaction();
+            _chat.WakeByPoke(this);
+        };
+        _petMenu = new MenuFlyout { Items = { pokeItem } };
+
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
-        // - 左键单击 → 随机切换表情
-        // - 右键 → 呼出 / 收起 LLM 对话窗口
+        // - 左键单击 → 呼出 / 收起 LLM 对话窗口
+        // - 右键 → 在光标处弹出交互菜单（戳一戳）
         // - 滚轮 → 缩放模型
         // - 中键按住拖动 → 移动模型在窗口内的位置（不移动窗口）
         Point? pressPoint = null;
@@ -134,10 +146,6 @@ public class NativePetWindow : Window, IPetWindow
             if (props.IsLeftButtonPressed)
             {
                 pressPoint = e.GetPosition(this);
-            }
-            else if (props.IsRightButtonPressed)
-            {
-                _chat.Toggle(this);
             }
             else if (props.IsMiddleButtonPressed)
             {
@@ -173,17 +181,22 @@ public class NativePetWindow : Window, IPetWindow
         };
         PointerReleased += (_, e) =>
         {
-            if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.MiddleButtonReleased)
+            var kind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
+            if (kind == PointerUpdateKind.MiddleButtonReleased)
             {
                 modelDragPoint = null;
                 e.Pointer.Capture(null);
                 return;
             }
-            // 右键在按下时已呼出对话窗口，释放这里不再触发其他动作
-            if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonReleased) return;
+            // 右键在释放时弹出菜单：light-dismiss 监听的是"按下"，若在按下时弹出会被随后的释放立即收起
+            if (kind == PointerUpdateKind.RightButtonReleased)
+            {
+                _petMenu.ShowAt(this, showAtPointer: true);
+                return;
+            }
             if (pressPoint is null) return;
             pressPoint = null;
-            _control.TapRandomExpression();
+            _chat.Toggle(this);
         };
         PointerWheelChanged += (_, e) =>
         {
@@ -299,7 +312,7 @@ public class NativePetWindow : Window, IPetWindow
         _control.SetExpression(name);
     }
 
-    /// <summary>当前表情：取自模型层，包含单击轮换与自动联动切换的结果。</summary>
+    /// <summary>当前表情：取自模型层，包含"戳一戳"与自动联动切换的结果。</summary>
     public string? CurrentExpression => _control.CurrentExpression;
 
     /// <summary>托盘菜单：目光跟随开关（关闭时视线回正并停止跟随光标）。</summary>

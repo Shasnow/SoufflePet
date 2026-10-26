@@ -22,6 +22,12 @@ public interface IChatWindowService
 
     /// <summary>切换对话窗口显隐；打开时停靠在 anchor（桌宠窗口）旁边。</summary>
     void Toggle(Window anchor);
+
+    /// <summary>
+    /// 戳一戳唤醒：让桌宠发起一轮自主对话（先由窗口侧播放反应动作），
+    /// 并确保对话窗口可见，以便用户看到桌宠的回应。
+    /// </summary>
+    void WakeByPoke(Window anchor);
 }
 
 /// <summary>
@@ -88,6 +94,29 @@ public sealed class ChatWindowService : IChatWindowService, IDisposable
             return;
         }
 
+        ShowWindow(window, anchor);
+    }
+
+    /// <summary>戳一戳：发起一轮自主对话，并保证对话窗口显示在桌宠旁边（已显示则仅激活）。</summary>
+    public void WakeByPoke(Window anchor)
+    {
+        if (_disposed) return;
+        _viewModel.WakeByPoke();
+
+        var window = _window ??= new ChatWindow { DataContext = _viewModel };
+        if (window.IsVisible)
+        {
+            window.Activate();
+            window.FocusInput();
+            return;
+        }
+
+        ShowWindow(window, anchor);
+    }
+
+    /// <summary>停靠到 anchor 旁边并显示对话窗口。</summary>
+    private static void ShowWindow(ChatWindow window, Window anchor)
+    {
         PositionNear(window, anchor);
         window.Show();
         window.Activate();

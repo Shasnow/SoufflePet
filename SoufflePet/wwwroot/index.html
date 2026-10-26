@@ -21,12 +21,26 @@
     background: rgba(0, 0, 0, 0.43); border-radius: 4px; padding: 2px 6px;
     color: #fff; font-size: 12px; pointer-events: none;
   }
+
+  /* 右键交互菜单：渲染在页面内的 HTML 菜单（配色对齐对话窗口的深色玻璃面板）。
+     不用宿主 Avalonia 菜单：WebView2 用子 HWND 承载页面，同一窗口内的 Avalonia
+     弹出层会被它遮挡（airspace），页面内菜单不受影响。 */
+  #menu {
+    display: none; position: fixed; z-index: 20; min-width: 96px;
+    background: rgba(23, 24, 29, 0.92); border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 8px; padding: 4px; color: rgba(255, 255, 255, 0.95);
+    font-size: 13px; user-select: none;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+  #menu .item { padding: 6px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  #menu .item:hover { background: rgba(255, 255, 255, 0.16); }
 </style>
 </head>
 <body>
   <div id="stage"></div>
   <div id="fps"></div>
   <div id="err"></div>
+  <div id="menu"></div>
 
   <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
@@ -285,11 +299,50 @@ async function main() {
   document.addEventListener('pointerup', endModelDrag);
   document.addEventListener('pointercancel', endModelDrag);
 
+  // 右键交互菜单：页面内 HTML 菜单，与原生版的 MenuFlyout 对齐。
+  // 只有压在模型上时窗口才可交互（其余位置点击穿透到下层应用），
+  // 因此菜单也只在模型上右键时弹出。
+  let menuOpen = false;
+  const menuEl = document.getElementById('menu');
+  function hideMenu() {
+    if (!menuOpen) return;
+    menuOpen = false;
+    menuEl.style.display = 'none';
+    lastHit = null;                 // 置空让下一次命中检测重新上报，恢复按模型命中判穿透
+  }
+  function showMenu(x, y) {
+    menuEl.style.display = 'block';
+    // 贴边时夹回窗口内，避免菜单被裁掉
+    const w = menuEl.offsetWidth, h = menuEl.offsetHeight;
+    menuEl.style.left = Math.max(0, Math.min(x, window.innerWidth - w - 4)) + 'px';
+    menuEl.style.top = Math.max(0, Math.min(y, window.innerHeight - h - 4)) + 'px';
+    menuOpen = true;
+    tellHost({ type: 'hit', value: true }); // 菜单打开期间保持窗口可交互（否则光标移到菜单上会被判穿透）
+  }
+  // 菜单项：戳一戳 = 先播被戳反应动作/表情，再通知宿主发起一轮对话唤醒桌宠（先做反应再对话）
+  (function buildMenu() {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.textContent = '戳一戳';
+    // 阻止冒泡：菜单项上的按下/抬起不参与左键拖窗与单击判定
+    d.addEventListener('pointerdown', (e) => e.stopPropagation());
+    d.addEventListener('click', (e) => { e.stopPropagation(); hideMenu(); pokePet(); });
+    menuEl.appendChild(d);
+  })();
+
+  // 右键：弹出交互菜单（抑制默认菜单）
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showMenu(e.clientX, e.clientY);
+  });
+  window.addEventListener('blur', hideMenu);   // 失焦（点了别的窗口）自动收起
+
   // 左键：按住移动 >6px → 通知宿主进入系统级拖窗（拖拽全程交给 Windows）；
-  // 未产生位移的单击 → 轮换表情（与原生版 pressPoint 位移阈值判定一致）
+  // 未产生位移的单击 → 呼出 / 收起对话窗口（与原生版左键单击一致）
   let leftPress = null;
   document.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    if (menuOpen) { hideMenu(); return; }   // 菜单打开时先收起菜单，本次点击不再触发拖窗/单击
     leftPress = { x: e.clientX, y: e.clientY, dragged: false };
   });
   document.addEventListener('pointermove', (e) => {
@@ -303,7 +356,7 @@ async function main() {
     if (e.button !== 0 || !leftPress) return;
     const click = !leftPress.dragged;
     leftPress = null;
-    if (click) cycleExpression();           // 单击 = 轮换表情
+    if (click) tellHost({ type: 'chat' });  // 单击 = 呼出 / 收起对话窗口
     // 鼠标抬起后补发一次当前命中状态：按住期间宿主保持非穿透，
     // 松开后需要按最新命中结果重新应用穿透
     if (lastHit !== null) tellHost({ type: 'hit', value: lastHit });
@@ -338,6 +391,9 @@ async function main() {
       gl.readPixels(rx, h - ry - 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, hitPixel);
       hit = hitPixel[3] >= 32;
     }
+    // 菜单打开期间强制判为命中：菜单是 HTML 层（不在 WebGL 帧缓冲里），
+    // 否则光标移到菜单上会读到模型像素为透明而误判穿透，菜单点不动
+    if (menuOpen) hit = true;
     if (hit !== lastHit) {
       lastHit = hit;
       tellHost({ type: 'hit', value: hit });
@@ -352,10 +408,10 @@ async function main() {
     model.scale.set(fitScale * zoom);
   }, { passive: false });
 
-  // 表情：单击模型轮换（与原生版 TapRandomExpression 一致）。
-  // 手柄显示中（padOn：游戏联动命中或托盘"常显手柄"）单击不轮换——
+  // 表情：由自动联动或"戳一戳"菜单设置（左键单击已改为呼出对话窗口）。
+  // 手柄显示中（padOn：游戏联动命中或托盘"常显手柄"）不改表情——
   // 表情是替换制，点走手柄表情后没有任何机制切回来。
-  let curExpr = null;                 // 当前单击轮换的任意表情名
+  let curExpr = null;                 // 当前手动设置的表情名
   let autoExpr = null;                // 自动表情联动设置的表情名（null = 无）
 
   async function setExpr(name) {
@@ -370,13 +426,19 @@ async function main() {
     tellHost({ type: 'expression', name: curExpr });   // 回报实际表情，供宿主查询当前表情
   }
 
-  // 左键单击模型 -> 轮换表情（按 EXPRESSIONS 顺序循环）
-  function cycleExpression() {
-    if (padOn) return;              // 手柄显示中不轮换（与原生版一致）
-    // 手动接管：清掉自动锁定；宿主只在检测状态变化时才重新推送自动表情
-    autoExpr = null;
-    const i = curExpr == null ? -1 : EXPRESSIONS.indexOf(curExpr);
-    setExpr(EXPRESSIONS[(i + 1) % EXPRESSIONS.length]);
+  // 戳一戳的表情：随机取一个（与原生版 SetRandomExpression 一致），经 setExpr 保证上报宿主
+  function randomExpression() {
+    if (padOn) return;              // 手柄显示中不改表情（与原生版一致）
+    autoExpr = null;                // 手动接管：清掉自动锁定
+    setExpr(EXPRESSIONS[Math.floor(Math.random() * EXPRESSIONS.length)]);
+  }
+
+  // 戳一戳：先播被戳反应动作/表情，再通知宿主发起一轮对话唤醒桌宠。
+  // TapBody 动作组由模型定义（本模型 group 名即 "TapBody"）；不存在时静默忽略。
+  function pokePet() {
+    randomExpression();
+    try { model.motion('TapBody'); } catch (_) { /* 无该动作组时忽略 */ }
+    tellHost({ type: 'poke' });
   }
 
   // 手柄联动：宿主把手柄（或 WASD + 鼠标）输入推给页面，写入模型 ParamGroup3「手柄」的
@@ -458,7 +520,7 @@ async function main() {
   }
 
   // 自动表情联动（宿主检测到游戏/音乐应用后通过 InvokeScript 调用）：
-  // 设置时切换，传 null 清除后由单击轮换接管
+  // 设置时切换对应表情，传 null 清除并恢复默认（无表情）
   window.onHostSetExpression = (name) => {
     autoExpr = name;
     setExpr(name);

@@ -28,6 +28,9 @@ public class WebViewPetWindow : Window, IPetWindow
     private readonly NativeWebView _webView;
     private bool _exiting;
 
+    /// <summary>对话窗口服务：左键单击呼出 / 收起对话窗口、戳一戳后发起一轮对话。</summary>
+    private readonly IChatWindowService _chat;
+
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     private const uint WmNcLButtonDown = 0x00A1; // WM_NCLBUTTONDOWN
@@ -69,11 +72,13 @@ public class WebViewPetWindow : Window, IPetWindow
     private float _lastPadLx, _lastPadLy, _lastPadRx, _lastPadRy, _lastPadLt, _lastPadRt;
     private int _lastPadDx, _lastPadDy, _lastPadMask = -1;
 
-    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务、设置。</summary>
-    public WebViewPetWindow(SouffleSettings settings, ILocalFileServer? server, ILipSyncService? lipSync, IGamepadService? gamepad)
+    /// <summary>DI 构造：注入本地静态服务器（ILocalFileServer）、口型律动与手柄输入服务、对话窗口服务、设置。</summary>
+    public WebViewPetWindow(SouffleSettings settings, ILocalFileServer? server, ILipSyncService? lipSync,
+        IGamepadService? gamepad, IChatWindowService chat)
     {
         _lipSync = lipSync;
         _gamepad = gamepad;
+        _chat = chat;
 
         Title = "SoufflePet（WebView）";
         Width = 480;
@@ -160,10 +165,10 @@ public class WebViewPetWindow : Window, IPetWindow
     /// <summary>当前自动表情状态（页面模型异步加载完成前缓存，ready 后重放）。</summary>
     private string? _autoExpression;
 
-    /// <summary>页面回报的当前实际表情名（含单击轮换的结果，null = 默认状态）。</summary>
+    /// <summary>页面回报的当前实际表情名（含"戳一戳"随机表情的结果，null = 默认状态）。</summary>
     private volatile string? _currentExpression;
 
-    /// <summary>当前实际表情：以页面回报为准，宿主缓存的自动表情状态可能已被单击轮换覆盖。</summary>
+    /// <summary>当前实际表情：以页面回报为准，宿主缓存的自动表情状态可能已被"戳一戳"随机表情覆盖。</summary>
     public string? CurrentExpression => _currentExpression;
 
     /// <summary>把自动表情状态推给页面（页面未加载完成时 InvokeScript 会抛异常，忽略即可）。</summary>
@@ -437,7 +442,7 @@ public class WebViewPetWindow : Window, IPetWindow
             }
             if (kind == "expression")
             {
-                // 页面回报当前实际表情（自动联动、清除与单击轮换都会上报）
+                // 页面回报当前实际表情（自动联动、清除与"戳一戳"随机表情都会上报）
                 _currentExpression = doc.RootElement.TryGetProperty("name", out var name)
                                      && name.ValueKind == JsonValueKind.String
                     ? name.GetString()
@@ -451,6 +456,18 @@ public class WebViewPetWindow : Window, IPetWindow
                 if (!doc.RootElement.TryGetProperty("value", out var value)) return;
                 var overModel = value.ValueKind == JsonValueKind.True;
                 Dispatcher.Post(() => ApplyClickThrough(overModel));
+                return;
+            }
+            if (kind == "chat")
+            {
+                // 左键单击桌宠：呼出 / 收起对话窗口（与原生版一致）
+                Dispatcher.Post(() => _chat.Toggle(this));
+                return;
+            }
+            if (kind == "poke")
+            {
+                // 戳一戳：页面已先播放反应动作/表情，这里发起一轮对话唤醒桌宠（先做反应再对话）
+                Dispatcher.Post(() => _chat.WakeByPoke(this));
                 return;
             }
             if (kind != "drag") return;

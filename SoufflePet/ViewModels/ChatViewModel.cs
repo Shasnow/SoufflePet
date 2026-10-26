@@ -728,6 +728,19 @@ public partial class ChatViewModel : ViewModelBase
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
 
+    /// <summary>
+    /// 戳一戳：用户从桌宠交互菜单戳了一下桌宠，发起一轮由桌宠自主发起的对话。
+    /// 与平台提醒 / 定时任务共用同一条串行通道；可从任意线程调用，内部切回 UI 线程。
+    /// </summary>
+    public void WakeByPoke()
+    {
+        var display = "👉 你被戳了一下，回应一下吧。";
+        var prompt = new StringBuilder()
+            .Append("用户戳了你一下。")
+            .Append("请以自然地向用户回应，可以带一点被戳到的俏皮反应。").ToString();
+        EnqueuePendingTurn(new PendingTurn(prompt, display));
+    }
+
     /// <summary>定时任务到点：排进与平台提醒同一条串行通道，避免多条任务同时执行导致桌宠异常。</summary>
     private void OnScheduledTaskTriggered(object? _, ScheduledTaskTrigger trigger)
     {
