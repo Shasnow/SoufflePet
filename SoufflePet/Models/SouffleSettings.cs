@@ -138,9 +138,6 @@ public partial class SouffleSettings : ObservableObject
     [Description("当前激活的工作区路径；为空表示应用所在目录（工具相对路径、命令执行与 AGENTS.md 均以此为准）")]
     public partial string ActiveWorkspacePath { get; set; } = string.Empty;
 
-    [Description("有史以来的对话 token 累计用量（每轮结束后累加，用于界面底部的用量统计）")]
-    public ChatUsageTotals ChatUsage { get; set; } = new();
-
     [Description("定时任务列表（触发时把任务内容作为提示词交给桌宠发起一轮对话）")]
     public ObservableCollection<ScheduledTask> ScheduledTasks { get; set; } = [];
 
@@ -181,17 +178,4 @@ public partial class SouffleSettings : ObservableObject
         defaultSettings.Save();
         return defaultSettings;
     }
-}
-
-/// <summary>对话 token 用量的历史累计值，随设置文件一起持久化。</summary>
-public sealed class ChatUsageTotals
-{
-    /// <summary>输入 token 总数（包含命中缓存的部分）。</summary>
-    public long InputTokens { get; set; }
-
-    /// <summary>输出 token 总数。</summary>
-    public long OutputTokens { get; set; }
-
-    /// <summary>输入 token 中命中缓存的部分，用于计算缓存命中率。</summary>
-    public long CachedInputTokens { get; set; }
 }

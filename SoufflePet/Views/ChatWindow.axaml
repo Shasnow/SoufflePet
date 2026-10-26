@@ -653,7 +653,7 @@
                     </Grid>
                 </Border>
 
-                <!-- 底部信息栏：左侧切换工作区，右侧有史以来的 token 用量与缓存命中率 -->
+                <!-- 底部信息栏：左侧切换工作区，右侧有史以来的陪伴时长、token 用量与缓存命中率 -->
                 <Grid Grid.Row="5"
                       Margin="16,0,16,10"
                       ColumnDefinitions="*,Auto">
@@ -677,12 +677,20 @@
                         </StackPanel>
                     </Button>
 
-                    <TextBlock Grid.Column="1"
-                               HorizontalAlignment="Right"
-                               VerticalAlignment="Center"
-                               Text="{Binding UsageSummaryText}"
-                               FontSize="10.5"
-                               Foreground="#59FFFFFF" />
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                Spacing="10"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{Binding CompanionTimeText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="10.5"
+                                   Foreground="#59FFFFFF" />
+                        <TextBlock Text="{Binding UsageSummaryText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="10.5"
+                                   Foreground="#59FFFFFF" />
+                    </StackPanel>
 
                     <!-- 工作区选择浮层：历史工作区列表 + 固定在底部的「选择工作区」入口 -->
                     <Popup Grid.Column="0" IsOpen="{Binding IsWorkspacePickerOpen, Mode=TwoWay}"

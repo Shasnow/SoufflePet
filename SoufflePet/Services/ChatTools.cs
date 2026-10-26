@@ -98,6 +98,7 @@ public sealed class ChatTools
     private readonly PlatformService _platforms;
     private readonly ChatFileService _files;
     private readonly IScheduledTaskService _scheduledTasks;
+    private readonly IStatisticsService _statistics;
 
     public ChatTools(
         SouffleSettings settings,
@@ -111,7 +112,8 @@ public sealed class ChatTools
         UserQuestionService questions,
         PlatformService platforms,
         ChatFileService files,
-        IScheduledTaskService scheduledTasks)
+        IScheduledTaskService scheduledTasks,
+        IStatisticsService statistics)
     {
         _settings = settings;
         _httpClientFactory = httpClientFactory;
@@ -125,6 +127,7 @@ public sealed class ChatTools
         _platforms = platforms;
         _files = files;
         _scheduledTasks = scheduledTasks;
+        _statistics = statistics;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -216,7 +219,11 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 DeleteScheduledTask,
                 "delete_scheduled_task",
-                "删除一条定时任务")
+                "删除一条定时任务"),
+            AIFunctionFactory.Create(
+                GetStatistics,
+                "get_statistics",
+                "查询统计信息（陪伴时长、对话 token 用量等）。不传 item 返回全部统计项，传统计项名称返回单项。")
         ];
         LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
@@ -251,6 +258,21 @@ public sealed class ChatTools
         var now = DateTimeOffset.Now;
         var culture = CultureInfo.GetCultureInfo("zh-CN");
         return $"{now.ToString("yyyy-MM-dd HH:mm:ss dddd", culture)}，UTC{now:zzz}，时区 {TimeZoneInfo.Local.Id}";
+    }
+
+    /// <summary>统计查询：不传 item 返回全部统计项，传名称/标识返回匹配的单项。</summary>
+    private string GetStatistics(string? item = null)
+    {
+        var items = _statistics.Snapshot();
+        if (string.IsNullOrWhiteSpace(item))
+            return "桌宠统计信息：\n" + string.Join("\n", items.Select(x => $"- {x.Label}：{x.Value}"));
+
+        var hit = items.FirstOrDefault(x =>
+            x.Key.Contains(item, StringComparison.OrdinalIgnoreCase) ||
+            x.Label.Contains(item, StringComparison.OrdinalIgnoreCase));
+        return hit is null
+            ? $"没有名为「{item}」的统计项，可查询：{string.Join("、", items.Select(x => x.Label))}。"
+            : $"{hit.Label}：{hit.Value}";
     }
 
     /// <summary>

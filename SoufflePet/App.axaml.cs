@@ -63,6 +63,7 @@ public class App : Application
             services.AddSingleton<UserQuestionService>();
             services.AddSingleton<ChatFileService>();
             services.AddSingleton<ChatMemory>();
+            services.AddSingleton<IStatisticsService, StatisticsService>(); // 运行统计（陪伴时长、token 用量），退出时落盘
             services.AddSingleton<IMcpConfigStore, McpConfigStore>(); // MCP 连接配置：家目录 .souffle/mcp.json
             services.AddSingleton<IMcpToolService, McpToolService>();
             services.AddSingleton(McpToolCache.Load()); // 工具信息缓存：重启后直接展示上次获取的工具
