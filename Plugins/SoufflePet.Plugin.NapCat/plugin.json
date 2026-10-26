@@ -15,6 +15,7 @@
     "requireAtInGroup": true,
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
+    "replyProbability": 0,
     "filterSelfMessage": false,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
@@ -62,7 +63,13 @@
       "key": "wakeWords",
       "label": "唤醒词",
       "type": "list",
-      "description": "每行一个词；消息正文含有任意一个（不区分大小写）就唤醒桌宠，群聊里无需 @、私聊也无需开启上面的开关。留空表示不启用。"
+      "description": "每行一个词；仅对群聊生效，消息正文含有任意一个（不区分大小写）就唤醒桌宠（无需 @）。留空表示不启用。"
+    },
+    {
+      "key": "replyProbability",
+      "label": "概率回复（%）",
+      "type": "number",
+      "description": "仅对群聊生效：非 @ 桌宠、非引用桌宠、也未命中唤醒词的消息，按此概率（0-100）随机唤醒桌宠搭话；0 表示关闭。"
     },
     {
       "key": "filterSelfMessage",

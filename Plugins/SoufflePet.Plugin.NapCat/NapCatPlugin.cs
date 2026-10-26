@@ -23,8 +23,9 @@ namespace SoufflePet.Plugins.NapCat;
 
 /// <summary>
 /// NapCat（OneBot 11）消息平台：以正向 WebSocket 客户端连接 NapCat，接收消息事件并用同一连接发送 action。
-/// 群聊里 @ 到桌宠（或按配置关掉 @ 限制后任意群消息）、以及允许用户的私聊会通过
-/// <see cref="OnMentioned" /> 主动唤醒桌宠；支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
+/// 群聊里 @ 到桌宠（或按配置关掉 @ 限制后任意群消息）、群聊里命中唤醒词（无需 @）、以及允许用户的私聊会通过
+/// <see cref="OnMentioned" /> 主动唤醒桌宠；还可为群聊配置概率回复，让非 @、非引用、未命中唤醒词的消息也按概率随机唤醒。
+/// 支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
 /// </summary>
 public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 {
@@ -138,12 +139,15 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private bool _requireAtInGroup = true;
     private bool _wakeOnPrivateMessage = true;
 
-    /// <summary>唤醒词：消息正文只要含有其中任意一个（不区分大小写）就唤醒桌宠；为空表示不启用。</summary>
+    /// <summary>唤醒词（仅群聊生效）：消息正文只要含有其中任意一个（不区分大小写）就唤醒桌宠（无需 @）；为空表示不启用。</summary>
     private string[] _wakeWords = [];
 
     /// <summary>是否过滤机器人自己发出的消息，默认关闭。</summary>
     private bool _filterSelfMessage;
     private int _maxReplyChars = 1500;
+
+    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按此百分比概率随机唤醒桌宠；0 表示关闭。</summary>
+    private int _replyProbabilityPercent;
 
     /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
     private bool _downloadAttachments = true;
@@ -668,7 +672,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             RecordMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
 
             // 引用反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
-            var wake = parsed.MentionsSelf || ContainsWakeWord(text) || !_requireAtInGroup;
+            var wake = parsed.MentionsSelf || ContainsWakeWord(text) || !_requireAtInGroup || RollReplyChance();
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
                 _ = FinalizeMessageAsync(
                     conversationId,
@@ -677,7 +681,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     messageId,
                     parsed,
                     wake);
-            // 命中唤醒词或关掉 @ 限制后，群里不 @ 也会唤醒桌宠
+            // 命中唤醒词、关掉 @ 限制或命中概率回复后，群里不 @ 也会唤醒桌宠
             else if (wake)
                 RaiseMentioned(line, sender, messageId);
             return;
@@ -692,7 +696,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             var line = $"[{conversationId}] {sender}：{text}";
             RecordMessage(conversationId, line, sender);
 
-            var wake = _wakeOnPrivateMessage || ContainsWakeWord(text);
+            // 唤醒词与概率回复只对群聊生效；私聊是否唤醒只取决于 wakeOnPrivateMessage
+            var wake = _wakeOnPrivateMessage;
             if (parsed.Attachments is not null || parsed.QuotedId is not null)
                 _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, wake);
             else if (wake)
@@ -1317,6 +1322,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         return false;
     }
 
+    /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按配置的百分比概率随机命中一次唤醒；0 表示关闭。</summary>
+    private bool RollReplyChance()
+        => _replyProbabilityPercent > 0 && Random.Shared.Next(100) < _replyProbabilityPercent;
+
     private void RaiseMentioned(string content, string sender, string? messageId)
     {
         var handler = OnMentioned;
@@ -1444,6 +1453,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _filterSelfMessage = GetConfigBool(config, "filterSelfMessage", false);
         _wakeWords = ReadConfigWords(config, "wakeWords");
+        _replyProbabilityPercent = Math.Clamp(GetConfigInt(config, "replyProbability", 0), 0, 100);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
         _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
         _rolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim();
