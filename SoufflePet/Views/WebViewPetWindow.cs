@@ -93,6 +93,7 @@ public class WebViewPetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _webView = new NativeWebView { Background = Brushes.Transparent };
+        _webView.EnvironmentRequested += (_, e) => WebViewProfile.Apply(e);
         Content = _webView;
 
         if (server != null)
