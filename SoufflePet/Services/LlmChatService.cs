@@ -87,15 +87,6 @@ public sealed class LlmChatService(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    /// <summary>
-    /// 单次请求的提示词预算（按字符粗估）：中文约 1 字≈1 token，留出余量避免撞上上游硬上限。
-    /// 图片等 DataContent 不计入；超出时依次丢弃最旧轮次、截断超长工具结果。
-    /// </summary>
-    private const int PromptCharBudget = 600_000;
-
-    /// <summary>预算仍超限时，单条工具结果保留的最大字符数。</summary>
-    private const int ToolResultCharCap = 8_000;
-
     /// <summary>工作目录下的项目说明文件名：每轮对话完整注入系统提示词。</summary>
     private const string AgentsFileName = "AGENTS.md";
 
@@ -198,7 +189,6 @@ public sealed class LlmChatService(
 
         var historyStart = messages.Count;
         messages.AddRange(history);
-        var historyEnd = messages.Count;
 
         // 时间感知（设置里可关）：当前时间随本轮用户消息一起下发，模型不必再调用工具查询
         if (settings.TimeAwarenessEnabled) InjectCurrentTime(messages, historyStart);
@@ -208,9 +198,9 @@ public sealed class LlmChatService(
         var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
         foreach (var function in tools.OfType<AIFunction>()) functions.TryAdd(function.Name, function);
 
-        // 工具声明本身也占提示词预算，先扣掉再按剩余额度裁剪对话历史
-        var messageBudget = Math.Max(200_000, PromptCharBudget - EstimateToolChars(tools));
-        TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
+        // 不按字符预算裁剪提示词：图片等媒体走 DataContent 多模态通道、不占字符预算，
+        // 单条工具输出也已由各工具自己限长。此前的 TrimToBudget 是图片曾被误塞进正文
+        // （而不是多模态内容）时的遗留兜底——那时 base64 进正文会把字符数直接撑爆。
 
         // 发送前把请求摘要写入运行日志，便于排查提示词/记忆/技能/历史是否符合预期；
         // 完整内容另存 JSON（固定文件，每次对话覆盖，只保留最新一次）。
@@ -236,9 +226,6 @@ public sealed class LlmChatService(
 
         for (var round = 0;; round++)
         {
-            // 工具结果会不断追加，每轮请求前重新检查预算，防止长工具链把提示词撑爆
-            TrimToBudget(messages, historyStart, ref historyEnd, messageBudget);
-
             // OpenAI 适配器不会序列化 TextReasoningContent，这里把思考内容补成 reasoning_content
             AttachReasoning(messages);
 
@@ -408,111 +395,6 @@ public sealed class LlmChatService(
             };
             return;
         }
-    }
-
-    /// <summary>
-    /// 按字符预算裁剪本次请求：先整轮丢弃最旧对话（系统消息与当前提问始终保留），
-    /// 再截断超长工具结果；图片等 DataContent 不参与预算计算，始终保留。
-    /// </summary>
-    private static void TrimToBudget(List<ChatMessage> messages, int historyStart, ref int historyEnd, int budget)
-    {
-        var total = messages.Sum(EstimateChars);
-        if (total <= budget) return;
-
-        var before = total;
-
-        // 1. 从最旧的一轮开始整轮删除；最后一轮（当前提问）及其后的工具记录不动
-        while (total > budget)
-        {
-            var firstUser = FindUser(messages, historyStart, historyEnd);
-            if (firstUser < 0) break;
-            var nextUser = FindUser(messages, firstUser + 1, historyEnd);
-            if (nextUser < 0) break;
-
-            for (var i = firstUser; i < nextUser; i++) total -= EstimateChars(messages[i]);
-            messages.RemoveRange(firstUser, nextUser - firstUser);
-            historyEnd -= nextUser - firstUser;
-        }
-
-        // 2. 单条工具结果过大时截断，尽量保留对话结构
-        if (total > budget) total = CapToolResults(messages, total, budget);
-
-        if (total > budget)
-            Logger.Warning("prompt over budget after trim chars={Chars} budget={Budget}", total, budget);
-        else
-            Logger.Debug("prompt trimmed chars {Before} -> {After} budget={Budget}", before, total, budget);
-    }
-
-    /// <summary>在 [start, end) 内找用户发言；找不到返回 -1。</summary>
-    private static int FindUser(List<ChatMessage> messages, int start, int end)
-    {
-        for (var i = start; i < end; i++)
-            if (messages[i].Role == ChatRole.User) return i;
-        return -1;
-    }
-
-    /// <summary>逐条截断过长的工具结果，直到回到预算内。</summary>
-    private static int CapToolResults(List<ChatMessage> messages, int total, int budget)
-    {
-        for (var i = 0; i < messages.Count && total > budget; i++)
-        {
-            var message = messages[i];
-            if (message.Contents.OfType<FunctionResultContent>().FirstOrDefault() is not { Result: string text } result)
-                continue;
-            if (text.Length <= ToolResultCharCap) continue;
-
-            var trimmed = text[..ToolResultCharCap] + "\n…（已截断：超出上下文预算）";
-            total -= text.Length - trimmed.Length;
-            messages[i] = new ChatMessage(message.Role, [new FunctionResultContent(result.CallId, trimmed)]);
-        }
-
-        return total;
-    }
-
-    /// <summary>估算单条消息的字符数：正文 + 工具参数/结果；图片等 DataContent 不计入预算。</summary>
-    private static int EstimateChars(ChatMessage message)
-    {
-        var chars = message.Text.Length;
-        foreach (var content in message.Contents)
-        {
-            switch (content)
-            {
-                case FunctionCallContent call:
-                    chars += FormatArguments(call.Arguments).Length;
-                    break;
-                case FunctionResultContent result:
-                    chars += ResultChars(result.Result);
-                    break;
-                case TextReasoningContent reasoning:
-                    chars += reasoning.Text.Length;
-                    break;
-            }
-        }
-
-        return chars;
-    }
-
-    private static int ResultChars(object? result) => result switch
-    {
-        null => 0,
-        string text => text.Length,
-        JsonElement element => element.ValueKind == JsonValueKind.String
-            ? element.GetString()?.Length ?? 0
-            : element.GetRawText().Length,
-        _ => result.ToString()?.Length ?? 0
-    };
-
-    /// <summary>估算工具声明（名称 + JSON Schema）占用的字符数。</summary>
-    private static int EstimateToolChars(IReadOnlyList<AITool> tools)
-    {
-        var chars = 0;
-        foreach (var tool in tools)
-        {
-            chars += tool.Name.Length;
-            chars += tool is AIFunction function ? function.JsonSchema.GetRawText().Length : 200;
-        }
-
-        return chars;
     }
 
     private async Task<object?> InvokeToolAsync(
