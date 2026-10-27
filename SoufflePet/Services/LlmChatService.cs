@@ -757,9 +757,9 @@ public sealed class LlmChatService(
     /// <summary>存档路径固定为 logs/llm/latest.json：每次对话覆盖写入，目录不会无限增长。</summary>
     private static string BuildTracePath()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "logs", "llm");
+        var directory = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(directory);
-        return Path.Combine(directory, "latest.json");
+        return Path.Combine(directory, "latest_request.json");
     }
 
     /// <summary>整份存档覆盖写入：每轮追加后重写，失败只记日志，不影响对话。</summary>

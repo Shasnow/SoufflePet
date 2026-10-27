@@ -717,8 +717,9 @@ public partial class ChatViewModel : ViewModelBase
         var sender = notification.Sender is { Length: > 0 } name ? name : "未知发送者";
         var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {sender}：{PreviewNotice(notification.Content)}";
         var prompt = new StringBuilder()
-            .Append(PlatformNoticePrefix).Append(" 你在消息平台「").Append(notification.PlatformId)
-            .Append("」收到一条需要处理的消息（发送者：").Append(sender).Append("）：\n")
+            .Append(PlatformNoticePrefix)
+            .Append($"「{notification.PlatformId}」收到一条新消息（发送者：")
+            .Append(sender).Append("）：\n")
             .Append("<<<\n").Append(notification.Content).Append("\n>>>").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
@@ -732,7 +733,7 @@ public partial class ChatViewModel : ViewModelBase
         var display = "👉 你被戳了一下，回应一下吧。";
         var prompt = new StringBuilder()
             .Append(SystemPrefix)
-            .Append(" 用户戳了你一下。")
+            .Append("用户戳了你一下。")
             .Append("请以自然地向用户回应，可以带一点被戳到的俏皮反应。").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
@@ -743,7 +744,7 @@ public partial class ChatViewModel : ViewModelBase
         var display = $"⏰ 定时任务「{trigger.Name}」：{PreviewNotice(trigger.Content)}";
         var prompt = new StringBuilder()
             .Append(SystemPrefix)
-            .Append(" 你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
+            .Append("你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
             .Append("<<<\n").Append(trigger.Content).Append("\n>>>").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
