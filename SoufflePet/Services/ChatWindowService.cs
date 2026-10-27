@@ -43,7 +43,17 @@ public sealed class ChatWindowService : IChatWindowService, IDisposable
     /// <summary>对话视图模型（DI 单例）：窗口隐藏后再次呼出仍保留对话内容。</summary>
     private readonly ChatViewModel _viewModel;
 
-    public ChatWindowService(ChatViewModel viewModel) => _viewModel = viewModel;
+    /// <summary>
+    /// 运行统计：戳一戳次数在这里累计——桌宠两个渲染版本（原生 / WebView）的戳一戳都会调到本服务，
+    /// 是「用户戳了桌宠一下」的唯一入口，统计项不会因版本不同而漏记。
+    /// </summary>
+    private readonly IStatisticsService _statistics;
+
+    public ChatWindowService(ChatViewModel viewModel, IStatisticsService statistics)
+    {
+        _viewModel = viewModel;
+        _statistics = statistics;
+    }
 
     /// <summary>热键 ID（窗口内唯一即可，取值避开系统保留范围）。</summary>
     private const int HotkeyId = 0x5C41;
@@ -101,6 +111,7 @@ public sealed class ChatWindowService : IChatWindowService, IDisposable
     public void WakeByPoke(Window anchor)
     {
         if (_disposed) return;
+        _statistics.AddPoke();
         _viewModel.WakeByPoke();
 
         var window = _window ??= new ChatWindow { DataContext = _viewModel };

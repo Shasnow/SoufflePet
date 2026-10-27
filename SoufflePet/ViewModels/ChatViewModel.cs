@@ -44,8 +44,11 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>发给模型的对话窗口：保留最近多少轮用户提问（含其后的回复与工具调用记录）。</summary>
     private const int HistoryWindowTurns = 10;
 
-    /// <summary>平台提醒合成消息的前缀：恢复历史时据此还原提醒气泡，而不是当作普通用户发言。</summary>
+    /// <summary>平台提醒合成消息的前缀。</summary>
     private const string PlatformNoticePrefix = "[平台提醒]";
+
+    /// <summary>系统消息的前缀。</summary>
+    private const string SystemPrefix = "[系统消息]";
 
     /// <summary>生成中最多排队的一轮待执行对话数，超出时与最旧一条合并。</summary>
     private const int MaxPendingTurns = 3;
@@ -728,7 +731,8 @@ public partial class ChatViewModel : ViewModelBase
     {
         var display = "👉 你被戳了一下，回应一下吧。";
         var prompt = new StringBuilder()
-            .Append("用户戳了你一下。")
+            .Append(SystemPrefix)
+            .Append(" 用户戳了你一下。")
             .Append("请以自然地向用户回应，可以带一点被戳到的俏皮反应。").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
@@ -738,7 +742,8 @@ public partial class ChatViewModel : ViewModelBase
     {
         var display = $"⏰ 定时任务「{trigger.Name}」：{PreviewNotice(trigger.Content)}";
         var prompt = new StringBuilder()
-            .Append("你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
+            .Append(SystemPrefix)
+            .Append(" 你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
             .Append("<<<\n").Append(trigger.Content).Append("\n>>>").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
@@ -847,6 +852,9 @@ public partial class ChatViewModel : ViewModelBase
         var pathReferences = attachments.Select(a => $"@{a.FullPath}");
         var messageText = string.Join("\n", new[] { text }.Concat(pathReferences).Where(line => line.Length > 0));
 
+        // 计入对话次数：口径与统计项的迁移保持一致——只有用户手输发送算一次对话，
+        // 平台提醒 / 戳一戳 / 定时任务唤醒走的是带提醒标记的排队通道，不计入
+        _statistics.AddConversation();
         await RunTurnAsync(model, messageText);
     }
 

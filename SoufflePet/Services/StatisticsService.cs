@@ -29,16 +29,22 @@ public interface IStatisticsService
     /// <summary>累加一轮对话的 token 用量，并立即落盘。</summary>
     void AddUsage(long inputTokens, long outputTokens, long cachedInputTokens);
 
+    /// <summary>累加一次「戳一戳」（用户戳了桌宠一下），并立即落盘。</summary>
+    void AddPoke();
+
+    /// <summary>累加一次对话次数（用户在对话窗口手输发送的轮次），并立即落盘。</summary>
+    void AddConversation();
+
     /// <summary>全部统计项的当前快照，供统一工具与界面遍历展示。</summary>
     IReadOnlyList<StatisticItem> Snapshot();
 }
 
 /// <summary>
-/// 桌宠运行统计服务：目前包含陪伴时长（跨重启累计的程序运行时间）与对话 token 用量，
+/// 桌宠运行统计服务：目前包含陪伴时长（跨重启累计的程序运行时间）、对话 token 用量、戳一戳次数与对话次数，
 /// 统一落盘到 %AppData%\SoufflePet\statistics.json（与长期记忆同目录）。
 /// 陪伴时长只累计程序运行期间的时间，用 <see cref="Stopwatch" /> 计算以免定时器漂移，
 /// 每 60 秒与退出时各落一次盘，落盘值恒为「启动前累计 + 本次会话已运行」，重复落盘不会重复计数；
-/// token 用量在每轮结束时即时落盘。
+/// token 用量在每轮结束时即时落盘，戳一戳次数每被戳一次即时落盘，对话次数每次手输发送即时落盘。
 /// </summary>
 public sealed class StatisticsService : IStatisticsService, IDisposable
 {
@@ -68,7 +74,8 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
 
         _state = Load();
         _flushTimer = new Timer(_ => { if (!_disposed) Save(); }, null, FlushInterval, FlushInterval);
-        Logger.Information("statistics loaded runSeconds={Seconds} usage={Usage}", _state.TotalRunSeconds, UsageText);
+        Logger.Information("statistics loaded runSeconds={Seconds} usage={Usage} pokes={Pokes} conversations={Conversations}",
+            _state.TotalRunSeconds, UsageText, _state.PokeCount, _state.ConversationCount);
     }
 
     public long TotalRunSeconds => _state.TotalRunSeconds + (long)_session.Elapsed.TotalSeconds;
@@ -96,6 +103,18 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
         }
     }
 
+    /// <summary>戳一戳次数的可读文案；被戳在 UI 线程写、快照可能在工具线程读，所以同样走锁。</summary>
+    private string PokeText
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return $"{_state.PokeCount} 次";
+            }
+        }
+    }
+
     public void AddUsage(long inputTokens, long outputTokens, long cachedInputTokens)
     {
         lock (_gate)
@@ -103,6 +122,36 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
             _state.InputTokens += inputTokens;
             _state.OutputTokens += outputTokens;
             _state.CachedInputTokens += cachedInputTokens;
+            Save();
+        }
+    }
+
+    public void AddPoke()
+    {
+        lock (_gate)
+        {
+            _state.PokeCount++;
+            Save();
+        }
+    }
+
+    /// <summary>对话次数的可读文案；手输发送在 UI 线程写、快照可能在工具线程读，所以同样走锁。</summary>
+    private string ConversationText
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return $"{_state.ConversationCount} 次";
+            }
+        }
+    }
+
+    public void AddConversation()
+    {
+        lock (_gate)
+        {
+            _state.ConversationCount++;
             Save();
         }
     }
@@ -118,6 +167,8 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
         [
             new StatisticItem("run_time", "陪伴时长", runTime),
             new StatisticItem("usage", "token 用量", UsageText),
+            new StatisticItem("poke_count", "戳一戳", PokeText),
+            new StatisticItem("conversation_count", "对话次数", ConversationText),
         ];
     }
 
@@ -146,6 +197,8 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
                 InputTokens = _state.InputTokens,
                 OutputTokens = _state.OutputTokens,
                 CachedInputTokens = _state.CachedInputTokens,
+                PokeCount = _state.PokeCount,
+                ConversationCount = _state.ConversationCount,
             });
         }
     }
@@ -181,5 +234,11 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
         public long OutputTokens { get; set; }
 
         public long CachedInputTokens { get; set; }
+
+        /// <summary>累计被戳次数（跨重启累计）。</summary>
+        public long PokeCount { get; set; }
+
+        /// <summary>累计对话次数（用户手输发送的轮次，跨重启累计）。</summary>
+        public long ConversationCount { get; set; }
     }
 }
