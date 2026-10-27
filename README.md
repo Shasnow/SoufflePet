@@ -50,7 +50,6 @@
 
 | 工具 | 作用 |
 | --- | --- |
-| `get_current_time` | 当前日期、时间、星期与时区 |
 | `get_expressions` / `set_expression` | 列出与切换 Live2D 表情 |
 | `run_shell_command` | 执行 PowerShell 命令（超时与输出长度有上限） |
 | `list_windows` | 列出当前可见窗口 |
@@ -61,6 +60,8 @@
 | `get_statistics` | 查询运行统计（陪伴时长、token 用量等），不传参返回全部、传名称返回单项 |
 
 每轮最多 `MaxToolRounds` 次工具调用（默认 10）。命令执行受 `ToolApproval` 控制：`Manual` 每次在消息区弹出审批气泡等用户点「允许」，`FullAccess` 直接执行。工具调用与思考过程在消息里以折叠面板展示，展开可看参数与结果。
+
+当前时间不由工具提供，而是随消息下发：`TimeAwarenessEnabled` 打开时（默认），每轮把当前本地时间（含星期、UTC 偏移与时区）附加到本轮用户消息末尾，模型无需调用工具即可感知时间；关闭后模型看不到任何时间信息。时间戳只存在于当轮请求，不写入界面历史与 `conversations.jsonl`。
 
 ### MCP 服务器
 

@@ -134,10 +134,6 @@ public sealed class ChatTools
         Tools =
         [
             AIFunctionFactory.Create(
-                GetCurrentTime,
-                "get_current_time",
-                "获取当前本地日期、时间、星期和时区。"),
-            AIFunctionFactory.Create(
                 WebSearch,
                 "web_search",
                 "联网搜索实时信息，返回网页标题、链接和摘要。"),

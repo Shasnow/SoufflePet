@@ -124,7 +124,7 @@ public sealed class TrayService(
     /// </summary>
     private void OpenChatWindow(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        if (desktop.MainWindow is not Window anchor)
+        if (desktop.MainWindow is not { } anchor)
         {
             Logger.Warning("tray chat item ignored: pet window not available");
             return;

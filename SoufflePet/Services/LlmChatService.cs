@@ -4,6 +4,7 @@
 using System;
 using System.ClientModel;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -199,6 +200,9 @@ public sealed class LlmChatService(
         messages.AddRange(history);
         var historyEnd = messages.Count;
 
+        // 时间感知（设置里可关）：当前时间随本轮用户消息一起下发，模型不必再调用工具查询
+        if (settings.TimeAwarenessEnabled) InjectCurrentTime(messages, historyStart);
+
         // 本地工具 + MCP 工具：MCP 服务器在首次对话时连接，失败只记日志、不影响本地工具
         var tools = await chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
         var functions = new Dictionary<string, AIFunction>(StringComparer.Ordinal);
@@ -380,6 +384,30 @@ public sealed class LlmChatService(
         // 用量整体产出一个事件：界面据此在助手气泡下方与底部统计里展示
         if (inputTokens > 0 || outputTokens > 0)
             yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
+    }
+
+    /// <summary>
+    /// 时间感知：把当前本地时间追加到本轮用户消息末尾（含星期、UTC 偏移与时区）。
+    /// 只替换本次请求列表里的这一个元素（新建实例），界面历史与长期记忆里的原文保持干净：
+    /// 若就地改写，恢复历史时气泡会带时间戳，且同一实例每轮都会再叠一次时间。
+    /// </summary>
+    private static void InjectCurrentTime(List<ChatMessage> messages, int historyStart)
+    {
+        for (var i = messages.Count - 1; i >= historyStart; i--)
+        {
+            if (messages[i].Role != ChatRole.User) continue;
+
+            var original = messages[i];
+            var now = DateTimeOffset.Now;
+            var stamp = $"[系统消息] 当前时间 {now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN"))}"
+                + $" UTC{now:zzz} {TimeZoneInfo.Local.Id}";
+            messages[i] = new ChatMessage(ChatRole.User, original.Text is { Length: > 0 } text ? $"{text}\n\n{stamp}" : stamp)
+            {
+                AuthorName = original.AuthorName,
+                MessageId = original.MessageId,
+            };
+            return;
+        }
     }
 
     /// <summary>

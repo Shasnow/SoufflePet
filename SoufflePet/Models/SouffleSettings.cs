@@ -115,6 +115,10 @@ public partial class SouffleSettings : ObservableObject
     public partial bool ChatMemoryEnabled { get; set; } = true;
 
     [ObservableProperty]
+    [Description("是否启用时间感知（每轮把当前本地时间附加到用户消息末尾；关闭后模型看不到任何时间信息）")]
+    public partial bool TimeAwarenessEnabled { get; set; } = true;
+
+    [ObservableProperty]
     [Description("命令执行审批规则（Manual 每次询问，FullAccess 直接执行）")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public partial ToolApprovalMode ToolApproval { get; set; } = ToolApprovalMode.Manual;
