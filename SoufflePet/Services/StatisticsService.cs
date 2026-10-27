@@ -23,15 +23,6 @@ public sealed record StatisticItem(string Key, string Label, string Value);
 /// </summary>
 public interface IStatisticsService
 {
-    /// <summary>有史以来累计运行秒数。</summary>
-    long TotalRunSeconds { get; }
-
-    /// <summary>有史以来累计运行时长。</summary>
-    TimeSpan TotalRunTime { get; }
-
-    /// <summary>时长的人类可读描述，例如「3 天 4 小时」。</summary>
-    string RunTimeText { get; }
-
     /// <summary>累计 token 用量的简洁文案（界面底部信息栏）。</summary>
     string UsageText { get; }
 
@@ -57,7 +48,7 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
     private static readonly ILogger Logger = Log.ForContext<StatisticsService>();
 
     /// <summary>保护 <see cref="_state" /> 与落盘：陪伴时长在定时器线程、token 用量在 UI 线程写入。</summary>
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>启动前已落盘的统计值；本次会话的陪伴时长不写回这里，而是计算时叠加。</summary>
     private readonly State _state;
@@ -82,18 +73,13 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
 
     public long TotalRunSeconds => _state.TotalRunSeconds + (long)_session.Elapsed.TotalSeconds;
 
-    public TimeSpan TotalRunTime => TimeSpan.FromSeconds(TotalRunSeconds);
-
-    public string RunTimeText
+    private static string FormatRunTimeSeconds(long seconds)
     {
-        get
-        {
-            var total = TotalRunTime;
-            if (total.TotalMinutes < 1) return $"{Math.Max(0, (int)total.TotalSeconds)} 秒";
-            if (total.TotalHours < 1) return $"{(int)total.TotalMinutes} 分钟";
-            if (total.TotalDays < 1) return $"{(int)total.TotalHours} 小时 {total.Minutes} 分钟";
-            return $"{(int)total.TotalDays} 天 {total.Hours} 小时";
-        }
+        var total = TimeSpan.FromSeconds(seconds);
+        if (total.TotalMinutes < 1) return $"{Math.Max(0, (int)total.TotalSeconds)} 秒";
+        if (total.TotalHours < 1) return $"{(int)total.TotalMinutes} 分钟";
+        if (total.TotalDays < 1) return $"{(int)total.TotalHours} 小时 {total.Minutes} 分钟";
+        return $"{(int)total.TotalDays} 天 {total.Hours} 小时";
     }
 
     public string UsageText
@@ -126,12 +112,12 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
         var seconds = TotalRunSeconds;
 
         // 不足一分钟时 RunTimeText 本身就是秒数，不再重复标注「程序运行总计 N 秒」
-        var runTime = seconds < 60 ? RunTimeText : $"{RunTimeText}（程序运行总计 {seconds:N0} 秒）";
+        var runTime = FormatRunTimeSeconds(seconds);
 
         return
         [
-            new("run_time", "陪伴时长", runTime),
-            new("usage", "token 用量", UsageText),
+            new StatisticItem("run_time", "陪伴时长", runTime),
+            new StatisticItem("usage", "token 用量", UsageText),
         ];
     }
 
@@ -154,7 +140,7 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
     {
         lock (_gate)
         {
-            Write(_path, new State
+            WriteStare(_path, new State
             {
                 TotalRunSeconds = TotalRunSeconds,
                 InputTokens = _state.InputTokens,
@@ -164,7 +150,7 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
         }
     }
 
-    private static void Write(string path, State state)
+    private static void WriteStare(string path, State state)
     {
         try
         {

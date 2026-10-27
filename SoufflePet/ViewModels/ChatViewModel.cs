@@ -65,9 +65,6 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IScheduledTasksWindowService _scheduledTasksWindow;
     private readonly IStatisticsService _statistics;
 
-    /// <summary>陪伴时长的显示刷新（秒级；文本未变化时 ObservableProperty 不触发通知）。</summary>
-    private readonly DispatcherTimer _companionTimer;
-
     /// <summary>构造期间同步初始选中项时不触发持久化。</summary>
     private bool _initialized;
 
@@ -140,12 +137,6 @@ public partial class ChatViewModel : ViewModelBase
 
         InitializeWorkspaces();
         LoadRecentHistory();
-
-        // 陪伴时长：常驻底部信息栏，随程序运行持续增长（跨重启累计）
-        RefreshCompanionTime();
-        _companionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _companionTimer.Tick += (_, _) => RefreshCompanionTime();
-        _companionTimer.Start();
     }
 
     /// <summary>消息列表（首次打开即包含一条助手问候）。</summary>
@@ -172,13 +163,6 @@ public partial class ChatViewModel : ViewModelBase
 
     /// <summary>输入区下方的常驻统计：有史以来的 token 总量与缓存命中率。</summary>
     public string UsageSummaryText => _statistics.UsageText;
-
-    /// <summary>底部信息栏的陪伴时长：程序运行过的时间累计（跨重启累计，运行期间实时增长）。</summary>
-    [ObservableProperty]
-    public partial string CompanionTimeText { get; set; } = string.Empty;
-
-    /// <summary>刷新陪伴时长文本；值未变化时由 ObservableProperty 的相等判断拦住，不触发通知。</summary>
-    private void RefreshCompanionTime() => CompanionTimeText = $"陪伴 {_statistics.RunTimeText}";
 
     /// <summary>输入框内容（与 TextBox 双向绑定）。</summary>
     [ObservableProperty]

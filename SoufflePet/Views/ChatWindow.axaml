@@ -682,10 +682,6 @@
                                 Spacing="10"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center">
-                        <TextBlock Text="{Binding CompanionTimeText}"
-                                   VerticalAlignment="Center"
-                                   FontSize="10.5"
-                                   Foreground="#59FFFFFF" />
                         <TextBlock Text="{Binding UsageSummaryText}"
                                    VerticalAlignment="Center"
                                    FontSize="10.5"
