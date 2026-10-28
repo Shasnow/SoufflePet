@@ -185,7 +185,7 @@ public partial class ChatViewModel : ViewModelBase
     public bool HasAttachments => Attachments.Count > 0;
 
     /// <summary>
-    /// 添加附件：统一只记录本地绝对路径（不限类型、不读取内容），
+    /// 添加附件：统一只记录本地绝对路径（不限类型、不读取内容；文件与文件夹均可，文件夹取其目录路径），
     /// 发送时以「@路径」写进消息，模型之后可随时用命令或工具读取。
     /// </summary>
     public void AddAttachments(IEnumerable<string> paths)
@@ -205,17 +205,19 @@ public partial class ChatViewModel : ViewModelBase
                 continue;
             }
 
-            var info = new FileInfo(full);
-            if (!info.Exists)
+            // FileInfo.Exists 对目录恒为 false，文件夹要单独用 Directory.Exists 判断、用 DirectoryInfo 取名
+            var isDirectory = Directory.Exists(full);
+            if (!isDirectory && !File.Exists(full))
             {
-                failed.Add(info.Name);
+                failed.Add(Path.GetFileName(full));
                 continue;
             }
 
-            // 同一个文件重复选择时只保留一份
+            // 同一个路径重复选择时只保留一份
             if (Attachments.Any(a => string.Equals(a.FullPath, full, StringComparison.OrdinalIgnoreCase))) continue;
 
-            Attachments.Add(new ChatAttachment(info.Name, full));
+            var name = isDirectory ? new DirectoryInfo(full).Name : Path.GetFileName(full);
+            Attachments.Add(new ChatAttachment(name, full));
         }
 
         AttachmentHint = failed.Count == 0 ? null : $"未能添加：{string.Join("、", failed)}";
