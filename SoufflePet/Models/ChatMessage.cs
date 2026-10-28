@@ -116,6 +116,15 @@ public sealed partial class ChatMessage : ObservableObject
     /// <summary>普通文本气泡：既不是思考过程，也不是工具记录（待审批的气泡按普通消息展示）。</summary>
     public bool IsPlain => !IsReasoning && !IsToolPanel;
 
+    /// <summary>
+    /// 思考气泡折叠面板的内容载体（即本条消息自身）：非思考消息为 null。
+    /// ContentControl 在 Content 为 null 时不实例化模板，普通气泡就不会白白创建一份折叠面板。
+    /// </summary>
+    public ChatMessage? ReasoningPanel => IsReasoning ? this : null;
+
+    /// <summary>工具气泡折叠面板的内容载体（即本条消息自身）：非工具记录为 null，理由同上。</summary>
+    public ChatMessage? ToolPanel => IsToolPanel ? this : null;
+
     /// <summary>需要用户审批的工具调用；为 null 表示普通消息。</summary>
     public ToolApprovalRequest? Approval { get; }
 

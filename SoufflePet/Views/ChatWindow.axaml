@@ -254,26 +254,40 @@
                                         Classes.approval="{Binding IsApproval}"
                                         Classes.notice="{Binding IsPlatformNotice}">
                                     <StackPanel Spacing="7">
-                                        <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看 -->
-                                        <Expander Theme="{StaticResource ToolExpander}"
-                                                  IsVisible="{Binding IsReasoning}"
-                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
-                                                  Header="{Binding ReasoningHeader}">
-                                            <SelectableTextBlock Text="{Binding Text}"
-                                                                 TextWrapping="Wrap" />
-                                        </Expander>
+                                        <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看。
+                                             用 ContentControl 承载：Content 为 null（非思考消息）时不实例化模板，
+                                             避免每条普通气泡都创建一个用不到的折叠面板 -->
+                                        <ContentControl Content="{Binding ReasoningPanel}"
+                                                        IsVisible="{Binding IsReasoning}">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="models:ChatMessage">
+                                                    <Expander Theme="{StaticResource ToolExpander}"
+                                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                              Header="{Binding ReasoningHeader}">
+                                                        <SelectableTextBlock Text="{Binding Text}"
+                                                                             TextWrapping="Wrap" />
+                                                    </Expander>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
 
-                                        <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果 -->
-                                        <Expander Theme="{StaticResource ToolExpander}"
-                                                  IsVisible="{Binding IsToolPanel}"
-                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
-                                            <Expander.Header>
-                                                <TextBlock Text="{Binding ToolHeader}"
-                                                           TextTrimming="CharacterEllipsis" />
-                                            </Expander.Header>
-                                            <SelectableTextBlock Text="{Binding ToolBody}"
-                                                                 TextWrapping="Wrap" />
-                                        </Expander>
+                                        <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果（同样按需实例化） -->
+                                        <ContentControl Content="{Binding ToolPanel}"
+                                                        IsVisible="{Binding IsToolPanel}">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="models:ChatMessage">
+                                                    <Expander Theme="{StaticResource ToolExpander}"
+                                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                                        <Expander.Header>
+                                                            <TextBlock Text="{Binding ToolHeader}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </Expander.Header>
+                                                        <SelectableTextBlock Text="{Binding ToolBody}"
+                                                                             TextWrapping="Wrap" />
+                                                    </Expander>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
 
                                         <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
 
