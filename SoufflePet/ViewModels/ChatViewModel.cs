@@ -42,7 +42,7 @@ public partial class ChatViewModel : ViewModelBase
     private const int ToolResultMaxLength = 300;
 
     /// <summary>发给模型的对话窗口：保留最近多少轮用户提问（含其后的回复与工具调用记录）。</summary>
-    private const int HistoryWindowTurns = 10;
+    private const int HistoryWindowTurns = 50;
 
     /// <summary>平台提醒合成消息的前缀。</summary>
     private const string PlatformNoticePrefix = "[平台提醒]";
