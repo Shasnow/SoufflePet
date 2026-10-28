@@ -1193,8 +1193,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
             var label = quoted is { } value
                 ? value.IsSelf
-                    ? $"（引用你：{value.Summary}）"
-                    : $"（引用 {value.Sender}：{value.Summary}）"
+                    ? $"[引用你：{value.Summary}]"
+                    : $"[引用消息({value.Sender}：{value.Summary})]"
                 : IsSentBySelf(quotedId)
                     ? "[引用你的消息]"
                     : QuotePlaceholder;
