@@ -30,6 +30,7 @@ public static class LAppDefine
     // 外部定義ファイル(json)と合わせる
     public const string MotionGroupIdle = "Idle"; // アイドリング
     public const string MotionGroupTapBody = "TapBody"; // 体をタップしたとき
+    public const string MotionGroupTapHead = "TapHead"; // 摸头动作组名：Live2D 模型约定的组名; 大大方方改
 
     // 外部定義ファイル(json)と合わせる
     public const string HitAreaNameHead = "Head";

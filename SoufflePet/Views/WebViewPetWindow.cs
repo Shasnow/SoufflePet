@@ -471,6 +471,12 @@ public class WebViewPetWindow : Window, IPetWindow
                 Dispatcher.Post(() => _chat.WakeByPoke(this));
                 return;
             }
+            if (kind == "pat")
+            {
+                // 摸摸头：页面已先播放反应动作/表情，这里发起一轮对话唤醒桌宠（与戳一戳同流程）
+                Dispatcher.Post(() => _chat.WakeByHeadPat(this));
+                return;
+            }
             if (kind != "drag") return;
             Dispatcher.Post(() =>
             {

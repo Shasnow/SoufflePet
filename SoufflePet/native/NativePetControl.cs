@@ -402,15 +402,21 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         _lapp?.View.ResetView();
     }
 
+    /// <summary>摸摸头：播放 TapHead（摸头）反应动作并随机切换表情。
+    /// 与戳一戳同理：手柄显示中不改表情；模型未定义 TapHead 动作组时 SDK 静默忽略，只保留表情变化。</summary>
+    public void PlayHeadPatReaction()
+    {
+        var model = _model;
+        model?.StartRandomMotion(LAppDefine.MotionGroupTapHead, MotionPriority.PriorityNormal);
+    }
+
     /// <summary>戳一戳：播放 TapBody（被戳）反应动作并随机切换表情。
     /// 手柄显示中（自动表情命中游戏或常显手柄）不改表情，避免把手柄表情替换掉；
     /// 模型未定义 TapBody 动作组时 SDK 静默忽略，只保留表情变化。</summary>
     public void PlayPokeReaction()
     {
         var model = _model;
-        if (model == null) return;
-        if (!_gamepadEnabled) model.SetRandomExpression();
-        model.StartRandomMotion(LAppDefine.MotionGroupTapBody, MotionPriority.PriorityNormal);
+        model?.StartRandomMotion(LAppDefine.MotionGroupTapBody, MotionPriority.PriorityNormal);
     }
 
     /// <summary>

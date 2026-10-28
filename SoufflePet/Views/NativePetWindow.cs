@@ -25,7 +25,7 @@ public class NativePetWindow : Window, IPetWindow
     private readonly DispatcherTimer _renderTimer;
     private readonly IChatWindowService _chat;
 
-    /// <summary>右键交互菜单：在光标处弹出（目前仅"戳一戳"）。</summary>
+    /// <summary>右键交互菜单：在光标处弹出（戳一戳 / 摸摸头）。</summary>
     private readonly MenuFlyout _petMenu;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
@@ -130,12 +130,19 @@ public class NativePetWindow : Window, IPetWindow
             _control.PlayPokeReaction();
             _chat.WakeByPoke(this);
         };
-        _petMenu = new MenuFlyout { Items = { pokeItem } };
+        // 摸摸头 = 先播 TapHead 反应动作/表情，再发起一轮对话唤醒桌宠
+        var patItem = new MenuItem { Header = "摸摸头" };
+        patItem.Click += (_, _) =>
+        {
+            _control.PlayHeadPatReaction();
+            _chat.WakeByHeadPat(this);
+        };
+        _petMenu = new MenuFlyout { Items = { pokeItem, patItem } };
 
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
         // - 左键单击 → 呼出 / 收起 LLM 对话窗口
-        // - 右键 → 在光标处弹出交互菜单（戳一戳）
+        // - 右键 → 在光标处弹出交互菜单（戳一戳 / 摸摸头）
         // - 滚轮 → 缩放模型
         // - 中键按住拖动 → 移动模型在窗口内的位置（不移动窗口）
         Point? pressPoint = null;

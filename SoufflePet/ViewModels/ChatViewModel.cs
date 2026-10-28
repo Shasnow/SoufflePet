@@ -557,8 +557,9 @@ public partial class ChatViewModel : ViewModelBase
             try
             {
                 var attachment = new ChatDisplayAttachment(display.FilePath, display.FileName, display.IsImage);
+                // 附件气泡只展示卡片/图片本身，正文留空（IsPlain 对附件消息为 false，不会再叠一行说明文字）
                 var message = new Models.ChatMessage(
-                    $"已展示文件：{display.FileName}",
+                    string.Empty,
                     isUser: false,
                     displayAttachment: attachment);
 
@@ -733,8 +734,17 @@ public partial class ChatViewModel : ViewModelBase
         var display = "👉 你被戳了一下，回应一下吧。";
         var prompt = new StringBuilder()
             .Append(SystemPrefix)
-            .Append("用户戳了你一下。")
-            .Append("请以自然地向用户回应，可以带一点被戳到的俏皮反应。").ToString();
+            .Append("用户戳了你一下。").ToString();
+        EnqueuePendingTurn(new PendingTurn(prompt, display));
+    }
+
+    /// <summary>摸摸头：用户从桌宠交互菜单摸了摸桌宠的头，发起一轮自主对话（与戳一戳共用串行通道）。</summary>
+    public void WakeByHeadPat()
+    {
+        var display = "🖐 摸摸头";
+        var prompt = new StringBuilder()
+            .Append(SystemPrefix)
+            .Append("用户摸了摸你的头。").ToString();
         EnqueuePendingTurn(new PendingTurn(prompt, display));
     }
 

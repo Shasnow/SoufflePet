@@ -319,15 +319,19 @@ async function main() {
     menuOpen = true;
     tellHost({ type: 'hit', value: true }); // 菜单打开期间保持窗口可交互（否则光标移到菜单上会被判穿透）
   }
-  // 菜单项：戳一戳 = 先播被戳反应动作/表情，再通知宿主发起一轮对话唤醒桌宠（先做反应再对话）
+  // 菜单项：戳一戳 / 摸摸头 = 先播反应动作/表情，再通知宿主发起一轮对话唤醒桌宠（先做反应再对话）
   (function buildMenu() {
-    const d = document.createElement('div');
-    d.className = 'item';
-    d.textContent = '戳一戳';
-    // 阻止冒泡：菜单项上的按下/抬起不参与左键拖窗与单击判定
-    d.addEventListener('pointerdown', (e) => e.stopPropagation());
-    d.addEventListener('click', (e) => { e.stopPropagation(); hideMenu(); pokePet(); });
-    menuEl.appendChild(d);
+    addItem('戳一戳', pokePet);
+    addItem('摸摸头', patHead);
+    function addItem(text, action) {
+      const d = document.createElement('div');
+      d.className = 'item';
+      d.textContent = text;
+      // 阻止冒泡：菜单项上的按下/抬起不参与左键拖窗与单击判定
+      d.addEventListener('pointerdown', (e) => e.stopPropagation());
+      d.addEventListener('click', (e) => { e.stopPropagation(); hideMenu(); action(); });
+      menuEl.appendChild(d);
+    }
   })();
 
   // 右键：弹出交互菜单（抑制默认菜单）
@@ -439,6 +443,14 @@ async function main() {
     randomExpression();
     try { model.motion('TapBody'); } catch (_) { /* 无该动作组时忽略 */ }
     tellHost({ type: 'poke' });
+  }
+
+  // 摸摸头：先播摸头反应动作/表情，再通知宿主发起一轮对话（与戳一戳同流程）。
+  // TapHead 动作组由模型定义；不存在时静默忽略，只换表情。
+  function patHead() {
+    randomExpression();
+    try { model.motion('TapHead'); } catch (_) { /* 无该动作组时忽略 */ }
+    tellHost({ type: 'pat' });
   }
 
   // 手柄联动：宿主把手柄（或 WASD + 鼠标）输入推给页面，写入模型 ParamGroup3「手柄」的

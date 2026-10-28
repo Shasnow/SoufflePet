@@ -28,6 +28,9 @@ public interface IChatWindowService
     /// 并确保对话窗口可见，以便用户看到桌宠的回应。
     /// </summary>
     void WakeByPoke(Window anchor);
+
+    /// <summary>摸摸头唤醒：同戳一戳，发起一轮自主对话并确保对话窗口可见。</summary>
+    void WakeByHeadPat(Window anchor);
 }
 
 /// <summary>
@@ -112,7 +115,22 @@ public sealed class ChatWindowService : IChatWindowService, IDisposable
     {
         if (_disposed) return;
         _statistics.AddPoke();
-        _viewModel.WakeByPoke();
+        WakeAndShow(anchor, _viewModel.WakeByPoke);
+    }
+
+    /// <summary>摸摸头：同戳一戳，发起一轮自主对话并保证对话窗口可见。</summary>
+    public void WakeByHeadPat(Window anchor)
+    {
+        if (_disposed) return;
+        _statistics.AddHeadPat();
+        WakeAndShow(anchor, _viewModel.WakeByHeadPat);
+    }
+
+    /// <summary>唤醒桌宠发起一轮自主对话，并保证对话窗口显示在 anchor 旁边（已显示则仅激活）。</summary>
+    private void WakeAndShow(Window anchor, Action wake)
+    {
+        if (_disposed) return;
+        wake();
 
         var window = _window ??= new ChatWindow { DataContext = _viewModel };
         if (window.IsVisible)
