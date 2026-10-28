@@ -252,6 +252,7 @@
                                         Classes.tool="{Binding IsTool}"
                                         Classes.thinking="{Binding IsReasoning}"
                                         Classes.approval="{Binding IsApproval}"
+                                        Classes.attachment="{Binding HasDisplayAttachment}"
                                         Classes.notice="{Binding IsPlatformNotice}">
                                     <StackPanel Spacing="7">
                                         <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看。
@@ -311,17 +312,20 @@
                                                                    MaxHeight="240"
                                                                    Stretch="Uniform" />
                                                         </Button>
-                                                        <Button Classes="ghost"
-                                                                Padding="8,4"
+                                                        <Button Classes="fileCard"
                                                                 HorizontalAlignment="Left"
                                                                 IsVisible="{Binding IsFileCard}"
                                                                 Command="{Binding OpenCommand}"
                                                                 ToolTip.Tip="{Binding FilePath}"
                                                                 ToolTip.Placement="Top">
-                                                            <TextBlock Text="{Binding FileName}"
-                                                                       MaxWidth="240"
-                                                                       FontSize="11.5"
-                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                                <TextBlock Text="📄" FontSize="14" />
+                                                                <TextBlock Text="{Binding FileName}"
+                                                                           MaxWidth="220"
+                                                                           FontSize="12"
+                                                                           VerticalAlignment="Center"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
                                                         </Button>
                                                     </StackPanel>
                                                 </DataTemplate>

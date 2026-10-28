@@ -16,6 +16,19 @@
         <Setter Property="Background" Value="#1AFFFFFF" />
     </Style>
 
+    <!-- 文件卡片（show_file 展示的非图片附件）：独立卡片样式，与聊天气泡明显区分 -->
+    <Style Selector="Button.fileCard">
+        <Setter Property="Background" Value="#12FFFFFF" />
+        <Setter Property="BorderBrush" Value="#26FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.fileCard:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#1FFFFFFF" />
+    </Style>
+
     <!-- 强调色主按钮（发送 / 保存） -->
     <Style Selector="Button.primary">
         <Setter Property="Background" Value="#E8879B" />

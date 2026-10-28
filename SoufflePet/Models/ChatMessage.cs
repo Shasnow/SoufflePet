@@ -113,8 +113,9 @@ public sealed partial class ChatMessage : ObservableObject
     /// <summary>工具记录气泡：用折叠面板展示（待审批的气泡走普通文本，保证按钮始终可见）。</summary>
     public bool IsToolPanel => IsTool && Approval is null;
 
-    /// <summary>普通文本气泡：既不是思考过程，也不是工具记录（待审批的气泡按普通消息展示）。</summary>
-    public bool IsPlain => !IsReasoning && !IsToolPanel;
+    /// <summary>普通文本气泡：既不是思考过程，也不是工具记录，也不带展示附件
+    /// （附件气泡只展示卡片/图片本身，正文留空；待审批的气泡按普通消息展示）。</summary>
+    public bool IsPlain => !IsReasoning && !IsToolPanel && !HasDisplayAttachment;
 
     /// <summary>
     /// 思考气泡折叠面板的内容载体（即本条消息自身）：非思考消息为 null。

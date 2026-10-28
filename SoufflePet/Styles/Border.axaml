@@ -72,6 +72,12 @@
         <Setter Property="Foreground" Value="#D9FFFFFF" />
     </Style>
 
+    <!-- 展示附件的气泡（show_file 展示的文件卡片/图片）：不叠气泡底色与内边距，附件卡片本身就是主体 -->
+    <Style Selector="Border.bubble.attachment">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
     <!-- 工作区列表项：整行圆角，当前激活项用强调色底色与描边标记 -->
     <Style Selector="Border.workspaceRow">
         <Setter Property="CornerRadius" Value="8" />
