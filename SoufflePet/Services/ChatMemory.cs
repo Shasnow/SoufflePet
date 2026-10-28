@@ -259,17 +259,18 @@ public sealed class ChatMemory
     }
 
     /// <summary>
-    /// 生成本轮要注入系统提示词的记忆块：档案全量 + 与 query 相关的回忆，均不截断（保证内容完整）。
+    /// 生成本轮要注入系统提示词的记忆块并追加到 builder：档案全量 + 与 query 相关的回忆，均不截断（保证内容完整）。
     /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
     /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
-    /// 关闭记忆或没有任何内容时返回空串。
+    /// 关闭记忆或没有任何内容时不追加。
     /// </summary>
-    public string BuildMemoryBlock(
+    public void BuildMemoryBlock(
         string? query,
+        StringBuilder builder,
         IReadOnlyCollection<string>? exclude = null,
         IReadOnlyCollection<string>? excludeCallIds = null)
     {
-        if (!Enabled) return string.Empty;
+        if (!Enabled) return;
 
         List<string> profileLines;
         lock (_gate)
@@ -284,19 +285,25 @@ public sealed class ChatMemory
 
         var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude, excludeCallIds);
 
-        if (profileLines.Count == 0 && snippets.Count == 0) return string.Empty;
+        if (profileLines.Count == 0 && snippets.Count == 0) return;
 
-        var builder = new StringBuilder();
-        builder.AppendLine("【长期记忆】以下是之前对话里保存下来的信息，回答时可以自然使用，不要生硬复述。");
+        builder.AppendLine();
+        builder.AppendLine("## 长期记忆");
+        builder.AppendLine();
+        builder.AppendLine("以下是之前对话里保存下来的信息，回答时可以自然使用，不要生硬复述。");
         if (profileLines.Count > 0)
         {
-            builder.AppendLine("用户档案：");
+            builder.AppendLine();
+            builder.AppendLine("### 用户档案：");
+            builder.AppendLine();
             foreach (var line in profileLines) builder.AppendLine(line);
         }
 
         if (snippets.Count > 0)
         {
-            builder.AppendLine("相关回忆：");
+            builder.AppendLine();
+            builder.AppendLine("### 相关回忆：");
+            builder.AppendLine();
             foreach (var turn in snippets)
             {
                 builder.Append("- [")
@@ -307,8 +314,6 @@ public sealed class ChatMemory
                     .AppendLine(turn.Text);
             }
         }
-
-        return builder.ToString().TrimEnd();
     }
 
     private List<MemoryTurn> Search(
@@ -346,6 +351,8 @@ public sealed class ChatMemory
             var scored = new List<(Turn Turn, double Score)>(count);
             foreach (var turn in _turns)
             {
+                // 召回旧对话时不带工具调用与工具结果：它们只是过程的中间产物，不是「回忆」的内容
+                if (IsToolRole(turn.Role)) continue;
                 if (excluded is not null && excluded.Contains(turn.Text)) continue;
                 if (excludeCallIds is not null && turn.CallId is { Length: > 0 } callId
                     && excludeCallIds.Contains(callId)) continue;

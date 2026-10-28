@@ -46,7 +46,8 @@ public interface ISkillService
     /// 每轮对话注入系统提示词的技能清单（仅 name 与 description 两项 frontmatter），
     /// 让模型知道有哪些技能可用，再按需调用 read_skill 读取正文。没有已启用技能时返回空串。
     /// </summary>
-    string BuildCatalog();
+    /// <param name="builder"></param>
+    void BuildCatalog(StringBuilder builder);
 
     /// <summary>读取技能正文（去掉 YAML frontmatter）；文件不存在时返回空字符串。</summary>
     string ReadContent(SkillInfo skill);
@@ -125,19 +126,21 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
     public bool IsEnabled(SkillInfo skill) =>
         !settings.DisabledSkills.Any(d => string.Equals(d, skill.Name, StringComparison.OrdinalIgnoreCase));
 
-    public string BuildCatalog()
+    public void BuildCatalog(StringBuilder builder)
     {
         var skills = DiscoverEnabled();
-        if (skills.Count == 0) return string.Empty;
+        if (skills.Count == 0) return;
 
-        var builder = new StringBuilder("可用技能（任务与某个技能相关时，先调用 read_skill 读取完整说明，再按说明执行）：");
+        builder.AppendLine();
+        builder.AppendLine("## 技能");
+        builder.AppendLine();
+        builder.AppendLine("可用技能（使用 read_skill 读取完整说明）：");
         foreach (var skill in skills)
         {
-            builder.Append("\n- ").Append(skill.Name);
-            if (skill.HasDescription) builder.Append("：").Append(skill.Description);
+            builder.Append($"- {skill.Name}");
+            if (skill.HasDescription) builder.Append('：').Append(skill.Description);
+            builder.Append('\n');
         }
-
-        return builder.ToString();
     }
 
     public string ReadContent(SkillInfo skill)
