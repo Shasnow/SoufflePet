@@ -127,7 +127,6 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         LoadRecentLogs();
         Refresh();
         var enabled = _settings.ScheduledTasks.Count(t => t.Enabled);
-        AddLog($"调度器已启动，恢复 {enabled} 条启用任务");
         Logger.Information("scheduled task service started, enabled={Enabled}", enabled);
     }
 

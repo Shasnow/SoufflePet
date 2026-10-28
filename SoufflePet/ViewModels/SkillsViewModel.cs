@@ -38,6 +38,7 @@ public partial class SkillsViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
+    [NotifyPropertyChangedFor(nameof(UninstallPrompt))]
     public partial SkillItemViewModel? SelectedSkill { get; set; }
 
     public bool HasSelection => SelectedSkill is not null;
@@ -57,12 +58,20 @@ public partial class SkillsViewModel : ViewModelBase
     [ObservableProperty]
     public partial string Status { get; set; } = string.Empty;
 
-    /// <summary>安装结果提示（成功与失败都用这一行，空串表示不显示）。</summary>
+    /// <summary>安装/卸载结果提示（成功与失败都用这一行，空串表示不显示）。</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasInstallMessage))]
-    public partial string InstallMessage { get; set; } = string.Empty;
+    [NotifyPropertyChangedFor(nameof(HasResultMessage))]
+    public partial string ResultMessage { get; set; } = string.Empty;
 
-    public bool HasInstallMessage => InstallMessage.Length > 0;
+    public bool HasResultMessage => ResultMessage.Length > 0;
+
+    /// <summary>卸载二次确认是否显示：技能目录会整个从磁盘删除，先确认再动手。</summary>
+    [ObservableProperty]
+    public partial bool IsConfirmingUninstall { get; set; }
+
+    public string UninstallPrompt => SelectedSkill is { } skill
+        ? $"「{skill.Name}」将从磁盘删除：\n{skill.FilePath}"
+        : string.Empty;
 
     /// <summary>按磁盘内容重建列表（窗口每次显示前调用）。</summary>
     public void Reload()
@@ -93,7 +102,7 @@ public partial class SkillsViewModel : ViewModelBase
     public void InstallFromArchive(string archivePath)
     {
         var result = _skills.Install(archivePath);
-        InstallMessage = result.Message;
+        ResultMessage = result.Message;
         if (!result.Success) return;
 
         Reload();
@@ -102,6 +111,34 @@ public partial class SkillsViewModel : ViewModelBase
             SelectedSkill = Skills.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
                             ?? SelectedSkill;
         }
+    }
+
+    /// <summary>点击卸载：先弹出二次确认，确认后才真正删盘。</summary>
+    [RelayCommand]
+    private void RequestUninstall()
+    {
+        if (SelectedSkill is null) return;
+        ResultMessage = string.Empty;
+        OnPropertyChanged(nameof(UninstallPrompt));
+        IsConfirmingUninstall = true;
+    }
+
+    [RelayCommand]
+    private void CancelUninstall() => IsConfirmingUninstall = false;
+
+    /// <summary>确认卸载：删除技能目录（单个 *.md 技能则删文件），成功后重新扫描列表。</summary>
+    [RelayCommand]
+    private void ConfirmUninstall()
+    {
+        IsConfirmingUninstall = false;
+        if (SelectedSkill is not { } skill) return;
+
+        var result = _skills.Uninstall(skill.Skill);
+        ResultMessage = result.Message;
+        if (!result.Success) return;
+
+        Reload();
+        PersistDisabledSkills();
     }
 
     /// <summary>在资源管理器中打开技能目录；都不存在时打开（并创建）安装目录。</summary>
@@ -122,9 +159,13 @@ public partial class SkillsViewModel : ViewModelBase
 
     private void OnItemEnabledChanged(object? sender, EventArgs e)
     {
-        _settings.DisabledSkills = [.. Skills.Where(s => !s.Enabled).Select(s => s.Name)];
+        PersistDisabledSkills();
         UpdateStatus();
     }
+
+    /// <summary>把当前列表的启用状态写回设置（卸载后也要重新写，去掉已删除技能的名字）。</summary>
+    private void PersistDisabledSkills() =>
+        _settings.DisabledSkills = [.. Skills.Where(s => !s.Enabled).Select(s => s.Name)];
 
     private void UpdateStatus()
     {

@@ -18,8 +18,10 @@ public sealed record SkillInfo(string Name, string Description, string Source, s
     public bool HasDescription => Description.Length > 0;
 }
 
-/// <summary>安装结果：Message 可直接展示给用户，SkillName 为装好后选中的技能名（失败时为 null）。</summary>
-public readonly record struct SkillInstallResult(bool Success, string Message, string? SkillName = null);
+/// <summary>
+/// 安装/卸载结果：Message 可直接展示给用户，SkillName 为装好后要选中的技能名（失败或卸载时为 null）。
+/// </summary>
+public readonly record struct SkillOperationResult(bool Success, string Message, string? SkillName = null);
 
 /// <summary>扫描并读取技能文档。技能本身无需注册，扫描目录即可发现。</summary>
 public interface ISkillService
@@ -53,7 +55,13 @@ public interface ISkillService
     string ReadContent(SkillInfo skill);
 
     /// <summary>从压缩包安装技能：解压到家目录下的 <c>.souffle/skills</c>，与工作区无关。返回安装结果。</summary>
-    SkillInstallResult Install(string archivePath);
+    SkillOperationResult Install(string archivePath);
+
+    /// <summary>
+    /// 卸载技能：删除该技能所在的目录（整个技能目录），直接放在技能目录下的单个 *.md 则只删该文件。
+    /// 只处理扫描目录内的技能，其余路径一律拒绝，返回可直接展示的结果。
+    /// </summary>
+    SkillOperationResult Uninstall(SkillInfo skill);
 }
 
 /// <summary>
@@ -156,10 +164,10 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
         }
     }
 
-    public SkillInstallResult Install(string archivePath)
+    public SkillOperationResult Install(string archivePath)
     {
         if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
-            return new SkillInstallResult(false, "找不到压缩包");
+            return new SkillOperationResult(false, "找不到压缩包");
 
         try
         {
@@ -173,7 +181,7 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
                 .Where(e => string.Equals(e.Name, "SKILL.md", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(e => e.FullName.Count(c => c == '/'))
                 .FirstOrDefault();
-            if (entry is null) return new SkillInstallResult(false, "压缩包里没有找到 SKILL.md");
+            if (entry is null) return new SkillOperationResult(false, "压缩包里没有找到 SKILL.md");
 
             var prefix = entry.FullName[..^entry.Name.Length]; // 形如 "my-skill/"，根目录时为空串
             var folder = ResolveFolderName(entry, prefix, archivePath);
@@ -202,7 +210,7 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
             }
 
             Logger.Information("skill installed {Skill} from {Archive}", folder, archivePath);
-            return new SkillInstallResult(
+            return new SkillOperationResult(
                 true,
                 existed ? $"已更新技能「{folder}」" : $"已安装技能「{folder}」",
                 folder);
@@ -210,8 +218,57 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
         catch (Exception ex)
         {
             Logger.Warning(ex, "install skill from {Archive} failed", archivePath);
-            return new SkillInstallResult(false, $"安装失败：{ex.Message}");
+            return new SkillOperationResult(false, $"安装失败：{ex.Message}");
         }
+    }
+
+    public SkillOperationResult Uninstall(SkillInfo skill)
+    {
+        try
+        {
+            var file = Path.GetFullPath(skill.FilePath);
+
+            // 只允许删除扫描目录内的技能：工作区外的路径一律不动，避免误删
+            var root = SearchDirectories
+                .Select(Path.GetFullPath)
+                .Where(r => IsUnder(file, r))
+                .OrderByDescending(r => r.Length)
+                .FirstOrDefault();
+            if (root is null)
+                return new SkillOperationResult(false, "该技能不在可管理的技能目录内，未删除");
+
+            var directory = Path.GetFullPath(Path.GetDirectoryName(file)!);
+            if (!IsUnder(directory, root))
+            {
+                // 直接放在技能目录下的单个 *.md：只删这个文件
+                File.Delete(file);
+            }
+            else if (string.Equals(Path.GetFullPath(Path.GetDirectoryName(directory)!),
+                         Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase))
+            {
+                // 形如 <root>/<技能名>/SKILL.md：整个技能目录一起删掉
+                Directory.Delete(directory, recursive: true);
+            }
+            else
+            {
+                return new SkillOperationResult(false, "技能目录层级不符合约定，未删除");
+            }
+
+            Logger.Information("skill uninstalled {Skill} ({Path})", skill.Name, file);
+            return new SkillOperationResult(true, $"已卸载技能「{skill.Name}」");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "uninstall skill {Skill} failed", skill.Name);
+            return new SkillOperationResult(false, $"卸载失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>path 是否位于 root 目录内（不包含 root 自身）；比较忽略大小写并兼容跨盘符。</summary>
+    private static bool IsUnder(string path, string root)
+    {
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>装进哪个文件夹：优先用 SKILL.md 里声明的 name，退回到包内目录名，再退回到压缩包文件名。</summary>

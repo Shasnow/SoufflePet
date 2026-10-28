@@ -72,6 +72,13 @@
                                 </Button>
                                 <Button Classes="ghost"
                                         Padding="7,3"
+                                        ToolTip.Tip="从磁盘卸载选中的技能"
+                                        IsEnabled="{Binding HasSelection}"
+                                        Command="{Binding RequestUninstallCommand}">
+                                    <TextBlock Text="卸载" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
                                         ToolTip.Tip="重新扫描技能目录"
                                         Command="{Binding RefreshCommand}">
                                     <TextBlock Text="刷新" Classes="muted" />
@@ -90,9 +97,9 @@
                                        Classes="label"
                                        TextTrimming="CharacterEllipsis" />
 
-                            <!-- 安装结果：装好后提示技能名，失败时提示原因 -->
-                            <TextBlock Text="{Binding InstallMessage}"
-                                       IsVisible="{Binding HasInstallMessage}"
+                            <!-- 安装/卸载结果：装好后提示技能名，卸载后提示已删除，失败时提示原因 -->
+                            <TextBlock Text="{Binding ResultMessage}"
+                                       IsVisible="{Binding HasResultMessage}"
                                        FontSize="10.5"
                                        Foreground="#8CFFFFFF"
                                        TextWrapping="Wrap" />
@@ -195,6 +202,40 @@
                     </Grid>
                 </Grid>
             </Grid>
+        </Border>
+
+        <!-- 卸载二次确认：整块覆盖在面板上，确认后才从磁盘删除技能 -->
+        <Border IsVisible="{Binding IsConfirmingUninstall}"
+                Background="#F21B1C22"
+                BorderBrush="#26FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16">
+            <StackPanel Width="320"
+                        Spacing="12"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center">
+                <TextBlock Text="卸载技能？"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#F2FFFFFF" />
+                <TextBlock Text="{Binding UninstallPrompt}"
+                           FontSize="11"
+                           LineHeight="17"
+                           Foreground="#8CFFFFFF"
+                           TextWrapping="Wrap" />
+                <TextBlock Text="技能目录会整个从磁盘删除，此操作不可撤销。"
+                           FontSize="10.5"
+                           Foreground="#66FFFFFF"
+                           TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Classes="secondary"
+                            Content="取消"
+                            Command="{Binding CancelUninstallCommand}" />
+                    <Button Classes="primary"
+                            Content="卸载"
+                            Command="{Binding ConfirmUninstallCommand}" />
+                </StackPanel>
+            </StackPanel>
         </Border>
     </Panel>
 </UserControl>
