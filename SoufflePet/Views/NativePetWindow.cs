@@ -23,10 +23,6 @@ public class NativePetWindow : Window, IPetWindow
 
     private readonly NativePetControl _control;
     private readonly DispatcherTimer _renderTimer;
-    private readonly IChatWindowService _chat;
-
-    /// <summary>右键交互菜单：在光标处弹出（戳一戳 / 摸摸头）。</summary>
-    private readonly MenuFlyout _petMenu;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
@@ -59,6 +55,12 @@ public class NativePetWindow : Window, IPetWindow
     /// <summary>显示器电源状态（false=屏已关）：关屏期间停渲染链，亮屏恢复。</summary>
     private bool _displayOn = true;
 
+    /// <summary>隐藏超时卸载模型：到点后请求渲染线程释放显存，恢复显示时首帧重新加载。</summary>
+    private readonly DispatcherTimer _unloadTimer = new() { Interval = ModelUnloadDelay };
+
+    /// <summary>隐藏多久后释放模型显存：太短会在频繁开关时反复重载，太长则显存一直占着。</summary>
+    private static readonly TimeSpan ModelUnloadDelay = TimeSpan.FromMinutes(1);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
@@ -69,7 +71,6 @@ public class NativePetWindow : Window, IPetWindow
     public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad,
         IChatWindowService chat)
     {
-        _chat = chat;
         Title = "SoufflePet";
         Width = 480;
         Height = 680;
@@ -116,6 +117,9 @@ public class NativePetWindow : Window, IPetWindow
         };
         _renderTimer.Start();
 
+        // 隐藏超时后卸载模型释放显存：到点请求渲染线程释放，恢复显示时停表并由首帧重新加载
+        _unloadTimer.Tick += OnUnloadTick;
+
         // 窗口可见性 或 显示器电源：两者都允许才拉起渲染链（关屏/隐藏时停，恢复时立即拉起）。
         // 用 ControlRenderLoop 而非直接读 IsVisible，状态门控集中在一处，避免两条路径互相覆盖
         PropertyChanged += (_, e) =>
@@ -128,16 +132,16 @@ public class NativePetWindow : Window, IPetWindow
         pokeItem.Click += (_, _) =>
         {
             _control.PlayPokeReaction();
-            _chat.WakeByPoke(this);
+            chat.WakeByPoke(this);
         };
         // 摸摸头 = 先播 TapHead 反应动作/表情，再发起一轮对话唤醒桌宠
         var patItem = new MenuItem { Header = "摸摸头" };
         patItem.Click += (_, _) =>
         {
             _control.PlayHeadPatReaction();
-            _chat.WakeByHeadPat(this);
+            chat.WakeByHeadPat(this);
         };
-        _petMenu = new MenuFlyout { Items = { pokeItem, patItem } };
+        var petMenu = new MenuFlyout { Items = { pokeItem, patItem } };
 
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
@@ -198,12 +202,12 @@ public class NativePetWindow : Window, IPetWindow
             // 右键在释放时弹出菜单：light-dismiss 监听的是"按下"，若在按下时弹出会被随后的释放立即收起
             if (kind == PointerUpdateKind.RightButtonReleased)
             {
-                _petMenu.ShowAt(this, showAtPointer: true);
+                petMenu.ShowAt(this, showAtPointer: true);
                 return;
             }
             if (pressPoint is null) return;
             pressPoint = null;
-            _chat.Toggle(this);
+            chat.Toggle(this);
         };
         PointerWheelChanged += (_, e) =>
         {
@@ -351,7 +355,34 @@ public class NativePetWindow : Window, IPetWindow
     }
 
     /// <summary>按"窗口可见 且 显示器亮"决定渲染链启停：关屏/隐藏都停，两者都恢复才拉起。</summary>
-    private void ControlRenderLoop() => _control.SetRenderLoopEnabled(IsVisible && _displayOn);
+    private void ControlRenderLoop()
+    {
+        var active = IsVisible && _displayOn;
+        _control.SetRenderLoopEnabled(active);
+
+        // 停渲染的同时挂上卸载计时：真隐藏满一分钟后把模型纹理等显存还回去；
+        // 重新可见时停表并撤销卸载请求（模型若已释放，首帧会自动重新加载）
+        if (active)
+        {
+            _unloadTimer.Stop();
+            return;
+        }
+
+        _unloadTimer.Start();
+    }
+
+    /// <summary>
+    /// 隐藏计时到点：请求渲染线程卸载模型。隐藏窗口仍会响应显式请求的帧，
+    /// 一次请求即可；窗口已恢复可见或模型早就卸掉了就什么都不做。
+    /// </summary>
+    private void OnUnloadTick(object? sender, EventArgs e)
+    {
+        _unloadTimer.Stop();
+
+        if (IsVisible && _displayOn || !_control.IsModelLoaded) return;
+
+        _control.RequestModelUnload();
+    }
 
     /// <summary>帧率统计：取走渲染层这一秒渲染的帧数，刷新显示。</summary>
     private void UpdateFps()
@@ -370,5 +401,13 @@ public class NativePetWindow : Window, IPetWindow
     public void ExitForShutdown()
     {
         Close();
+    }
+
+    /// <summary>关闭时停掉两个定时器：DispatcherTimer 的回调一直引用着窗口，不停表窗口就回收不掉。</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        _renderTimer.Stop();
+        _unloadTimer.Stop();
+        base.OnClosed(e);
     }
 }

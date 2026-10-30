@@ -301,6 +301,14 @@ public class AvaloniaApi(OpenGlControlBase con, GlInterface gl) : OpenGLApi
     {
         gl.BindVertexArray(vertexArray);
     }
+    public override void DeleteBuffer(int buffer)
+    {
+        gl.DeleteBuffer(buffer);
+    }
+    public override void DeleteVertexArray(int vertexArray)
+    {
+        gl.DeleteVertexArray(vertexArray);
+    }
     public override void ValidateProgram(int index)
     {
         GLValidateProgram(index);

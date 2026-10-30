@@ -88,8 +88,11 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     private static readonly string[] PadButtonKeys =
         ["LShoulder", "RShoulder", "LStickButton", "RStickButton", "ButtonA", "ButtonB", "ButtonX", "ButtonY"];
 
-    private LAppModel? _model;
+    private volatile LAppModel? _model;
     private string? _modelDir;
+
+    /// <summary>隐藏超时后的卸载请求：窗口层置位，渲染线程在下一次拿到的帧里释放模型。</summary>
+    private volatile bool _unloadRequested;
 
     /// <summary>模型加载完成前缓存的自动表情（配合 _hasPendingExpression 区分"无缓存"）。</summary>
     private string? _pendingExpression;
@@ -129,8 +132,29 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// <summary>窗口可见性变化时启停续帧：隐藏即停，重新显示立即拉起。</summary>
     public void SetRenderLoopEnabled(bool enabled)
     {
-        if (enabled) StartRenderLoop();
-        else StopRenderLoop();
+        if (enabled)
+        {
+            // 重新显示时撤销待执行的卸载：模型还没释放就继续用，首帧会按需重新加载
+            _unloadRequested = false;
+            StartRenderLoop();
+        }
+        else
+        {
+            StopRenderLoop();
+        }
+    }
+
+    /// <summary>模型是否还在显存里（窗口层据此判断隐藏超时后要不要请求卸载）。</summary>
+    public bool IsModelLoaded => _model != null;
+
+    /// <summary>
+    /// 请求渲染线程卸载模型释放显存：隐藏窗口没有自动续帧，这里显式请求一帧，
+    /// 由渲染回调执行释放；隐藏期间拿不到帧时由窗口层按秒重试。
+    /// </summary>
+    public void RequestModelUnload()
+    {
+        _unloadRequested = true;
+        RequestNextFrameRendering();
     }
 
     /// <summary>拉起渲染链：直接请求一帧，续帧链自此自行维持。</summary>
@@ -220,46 +244,8 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
 
             // 模型目录/名称来自设置（SoufflePet.json 的 ModelsDirectory / ModelName）：
             // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码
-            var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelName);
-            _modelDir = modelDir;
-            Logger.Debug("loading model dir={Dir} name={Name}", modelDir, settings.ModelName);
-            _model = _lapp.Live2dManager.LoadModel(modelDir, settings.ModelName);
-            // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
-            // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
-            // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。
-            _model.Renderer?.Anisotropy = 16f;
-            // 水印是独立部件 "Part13"（cdi3.json 显示名"水印.png"），部件透明度
-            // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
-            if (!string.IsNullOrEmpty(settings.ModelWatermarkPartId))
-                _model?.Model.SetPartOpacity(settings.ModelWatermarkPartId, 0f);
-            // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
-            _model?.GamepadValueUpdate = ApplyGamepadParams;
-
-            // 测量双眼中心
-            MeasureEyeCenter(_model?.Model);
-            Logger.Debug("LoadModel ok textures={TextureCount}", _model?.Textures.Count);
-
-            // Idle 组动作由 SDK 在 LAppModel.Update 里自动播放，无需手动触发
-
-            // 补设模型加载完成前缓存的自动表情（组合根应用初始状态时模型还没加载）
-            if (_hasPendingExpression)
-            {
-                _hasPendingExpression = false;
-                var pending = _pendingExpression;
-                _pendingExpression = null;
-                if (pending == null) _model?.ResetExpression();
-                else _model?.SetExpression(pending);
-            }
-
-            // 注意：不要设 CustomValueUpdate=true——LAppModel.Update 里它与拖拽参数
-            // 应用是 if/else 互斥的，设了会禁用目光跟随。水印直接在渲染循环里隐藏。
-
-            // 补设模型加载完成前缓存的目光跟随开关（托盘可能在 GL 初始化前切换）
-            if (_hasPendingGaze)
-            {
-                _hasPendingGaze = false;
-                _model?.EnableFaceTracking = _pendingGaze;
-            }
+            _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelName);
+            LoadModel();
 
             _lastStamp = Stopwatch.GetTimestamp();
             Logger.Debug("OnOpenGlInit done");
@@ -270,12 +256,91 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         }
     }
 
+    /// <summary>
+    /// 加载模型并恢复各项设置（各向异性、水印、手柄回调、缓存的表情与目光跟随）。
+    /// 首次初始化与「隐藏超时卸载后重新显示」共用这一条路径。
+    /// </summary>
+    private void LoadModel()
+    {
+        if (_lapp == null || _modelDir == null) return;
+
+        Logger.Debug("loading model dir={Dir} name={Name}", _modelDir, settings.ModelName);
+        _model = _lapp.Live2dManager.LoadModel(_modelDir, settings.ModelName);
+        // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
+        // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
+        // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。
+        _model.Renderer?.Anisotropy = 16f;
+        // 水印是独立部件 "Part13"（cdi3.json 显示名"水印.png"），部件透明度
+        // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
+        if (!string.IsNullOrEmpty(settings.ModelWatermarkPartId))
+            _model?.Model.SetPartOpacity(settings.ModelWatermarkPartId, 0f);
+        // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
+        _model?.GamepadValueUpdate = ApplyGamepadParams;
+
+        // 测量双眼中心
+        MeasureEyeCenter(_model?.Model);
+        Logger.Debug("LoadModel ok textures={TextureCount}", _model?.Textures.Count);
+
+        // Idle 组动作由 SDK 在 LAppModel.Update 里自动播放，无需手动触发
+
+        // 补设模型加载完成前缓存的自动表情（组合根应用初始状态时模型还没加载）
+        if (_hasPendingExpression)
+        {
+            _hasPendingExpression = false;
+            var pending = _pendingExpression;
+            _pendingExpression = null;
+            if (pending == null) _model?.ResetExpression();
+            else _model?.SetExpression(pending);
+        }
+
+        // 注意：不要设 CustomValueUpdate=true——LAppModel.Update 里它与拖拽参数
+        // 应用是 if/else 互斥的，设了会禁用目光跟随。水印直接在渲染循环里隐藏。
+
+        // 补设模型加载完成前缓存的目光跟随开关（托盘可能在 GL 初始化前切换）
+        if (_hasPendingGaze)
+        {
+            _hasPendingGaze = false;
+            _model?.EnableFaceTracking = _pendingGaze;
+        }
+    }
+
+    /// <summary>卸载模型：释放纹理、着色器与 moc，把显存还给驱动；重新显示的首帧会重新加载。</summary>
+    private void UnloadModel()
+    {
+        if (_model == null || _lapp == null) return;
+
+        // 卸载前把运行期状态存回"待恢复"缓存，LoadModel 会照常补设：
+        // 否则重载后表情退回默认（自动表情只在状态变化时推送，要等下一次切换才回来），
+        // 用户关掉的目光跟随也会变回开启（SDK 默认 true）。
+        _pendingExpression = _model.CurrentExpression;
+        _hasPendingExpression = true;
+        _pendingGaze = _model.EnableFaceTracking;
+        _hasPendingGaze = true;
+
+        _lapp.Live2dManager.RemoveModel(_model);
+        _model = null;
+        IsPointerOverModel = false;
+        Logger.Information("live2d model unloaded while hidden (GPU memory released)");
+    }
+
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
         if (_lapp == null) return;
 
         try
         {
+            // 隐藏超时后窗口层请求卸载：这一帧只做释放，不再续帧（隐藏期间本来就没有自动续帧）
+            if (_unloadRequested && !_renderLoopEnabled)
+            {
+                _unloadRequested = false;
+                UnloadModel();
+                return;
+            }
+
+            // 重新显示后的首帧：把隐藏期间卸载掉的模型装回来。
+            // 隐藏状态下不要顺手加载，否则卸载完又被下一次合成帧装回去，等于白卸
+            if (_model == null && _renderLoopEnabled) LoadModel();
+
             // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
             // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。
             // 视口尺寸只在 Bounds 变化（OnPropertyChanged 置 _vpDirty）时重算，不做每帧轮询；

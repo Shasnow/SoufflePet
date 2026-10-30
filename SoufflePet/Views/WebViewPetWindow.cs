@@ -237,6 +237,13 @@ public class WebViewPetWindow : Window, IPetWindow
         Close();
     }
 
+    /// <summary>关闭时停掉光标轮询计时器，否则它的回调会一直引用着窗口，窗口回收不掉。</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        _cursorTimer.Stop();
+        base.OnClosed(e);
+    }
+
     private void MoveToBottomRight()
     {
         var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;

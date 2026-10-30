@@ -129,4 +129,7 @@ public abstract class OpenGLApi
     public abstract unsafe void BufferSubData(int type, nint offset, nint size, void* data);
     public abstract int GenVertexArray();
     public abstract void BindVertexArray(int vertexArray);
+    // 删除缓冲/顶点数组对象：模型卸载时要把渲染器申请的 GL 资源一并还回去
+    public abstract void DeleteBuffer(int buffer);
+    public abstract void DeleteVertexArray(int vertexArray);
 }

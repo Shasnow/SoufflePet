@@ -447,6 +447,30 @@ public class CubismRenderer_OpenGLES2 : CubismRenderer
     public override void Dispose()
     {
         Shader.ReleaseShaderProgram();
+
+        // 释放本渲染器申请的 GL 资源：遮罩离屏表面（FBO + 颜色纹理）、每个 drawable 的
+        // VBO/IBO 以及 VAO。原先只释放着色器，模型卸载后这些句柄一直留在显存里，
+        // 隐藏超时卸载 / 重新显示反复发生时越积越多。
+        foreach (var buffer in _offscreenFrameBuffers)
+            buffer.DestroyOffscreenSurface();
+        _offscreenFrameBuffers.Clear();
+
+        foreach (var buffer in _posBuffers)
+            if (buffer != 0) GL.DeleteBuffer(buffer);
+        foreach (var buffer in _uvBuffers)
+            if (buffer != 0) GL.DeleteBuffer(buffer);
+        foreach (var buffer in _indexBuffers)
+            if (buffer != 0) GL.DeleteBuffer(buffer);
+        _posBuffers = [];
+        _uvBuffers = [];
+        _indexBuffers = [];
+        _meshPrepared = [];
+
+        if (VertexArray != 0)
+        {
+            GL.DeleteVertexArray(VertexArray);
+            VertexArray = 0;
+        }
     }
 
     public int GetBindedTextureId(int textureId)
