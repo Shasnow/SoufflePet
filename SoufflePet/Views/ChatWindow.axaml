@@ -388,7 +388,7 @@
                                                            Foreground="#D9FFFFFF"
                                                            TextTrimming="CharacterEllipsis"
                                                            VerticalAlignment="Center"
-                                                           ToolTip.Tip="{Binding FullPath}"
+                                                           ToolTip.Tip="{Binding Location}"
                                                            ToolTip.Placement="Top" />
                                                 <Button Classes="ghost"
                                                         Width="14"

@@ -4,11 +4,15 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -257,12 +261,20 @@ public partial class ChatWindow : Window
     }
 
     /// <summary>
-    /// 输入框按键：输入框为空时 Backspace 整块删除最后一个附件；Enter 发送消息
-    /// （Shift+Enter 等组合保留文本框的换行行为）。
+    /// 输入框按键：Ctrl+V 走自己的粘贴（剪贴板是图片时存成附件），输入框为空时 Backspace 整块删除最后一个附件，
+    /// Enter 发送消息（Shift+Enter 等组合保留文本框的换行行为）。
     /// </summary>
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not ChatViewModel vm) return;
+
+        // 粘贴要先于文本框的内置处理：隧道阶段拦下，图片当附件、文本再按普通粘贴插回
+        if (e is { Key: Key.V, KeyModifiers: KeyModifiers.Control })
+        {
+            e.Handled = true;
+            _ = PasteFromClipboardAsync(vm);
+            return;
+        }
 
         if (e is { Key: Key.Back, KeyModifiers: KeyModifiers.None } && vm.Draft.Length == 0 && vm.HasAttachments)
         {
@@ -276,6 +288,49 @@ public partial class ChatWindow : Window
 
         e.Handled = true;
         vm.SendCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Ctrl+V：剪贴板里是图片时存成文件加入待发送附件（不把图片数据塞进正文）；
+    /// 复制的是文件/文件夹时同样按路径加入附件；两者都没有才退回文本框原本的文本粘贴。
+    /// </summary>
+    private async Task PasteFromClipboardAsync(ChatViewModel vm)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+
+        try
+        {
+            if (await clipboard.TryGetBitmapAsync() is { } bitmap)
+            {
+                using (bitmap)
+                using (var stream = new MemoryStream())
+                {
+                    bitmap.Save(stream, PngBitmapEncoderOptions.Default);
+                    vm.AddImageAttachment(stream.ToArray(), $"粘贴图片-{DateTime.Now:HHmmss}.png");
+                }
+                return;
+            }
+
+            // 资源管理器里复制的文件/文件夹：与拖放一致，只记路径
+            if (await clipboard.TryGetFilesAsync() is { } items && items.Any())
+            {
+                vm.AddAttachments(items.Select(item => item.Path.LocalPath));
+                return;
+            }
+
+            if (await clipboard.TryGetTextAsync() is { Length: > 0 } text)
+            {
+                var start = Math.Min(InputBox.SelectionStart, InputBox.SelectionEnd);
+                InputBox.SelectedText = text;
+                InputBox.SelectionStart = InputBox.SelectionEnd = start + text.Length;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 剪贴板内容可能被其他程序占用或格式异常，失败只记录，不影响继续输入
+            Logger.Warning(ex, "paste clipboard content failed");
+        }
     }
 
     /// <summary>提问面板的自由输入框按 Enter 直接翻到下一题（最后一题停留，等用户提交）。</summary>

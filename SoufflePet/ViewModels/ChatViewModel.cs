@@ -223,6 +223,13 @@ public partial class ChatViewModel : ViewModelBase
         AttachmentHint = failed.Count == 0 ? null : $"未能添加：{string.Join("、", failed)}";
     }
 
+    /// <summary>添加一张内存里的图片附件（粘贴的剪贴板图片）：发送时才转储成文件。</summary>
+    public void AddImageAttachment(byte[] data, string fileName)
+    {
+        Attachments.Add(new ChatAttachment(fileName, string.Empty, data));
+        AttachmentHint = null;
+    }
+
     /// <summary>移除一个待发送附件。</summary>
     public void RemoveAttachment(ChatAttachment attachment)
     {
@@ -852,6 +859,10 @@ public partial class ChatViewModel : ViewModelBase
             return;
         }
 
+        // 粘贴的图片此刻才落盘：此前的占位路径为空，转储后换成真实路径
+        attachments = PersistPendingImages(attachments);
+        var persistHint = AttachmentHint;
+
         // 气泡列出附件名；消息正文统一附加 @绝对路径，模型之后可随时按路径读取
         var attachmentLines = string.Join("\n", attachments.Select(a => $"[附件] {a.FileName}"));
         var bubbleText = text.Length == 0 ? attachmentLines
@@ -860,7 +871,7 @@ public partial class ChatViewModel : ViewModelBase
         Messages.Add(new Models.ChatMessage(bubbleText, isUser: true));
         Draft = string.Empty;
         Attachments.Clear();
-        AttachmentHint = null;
+        AttachmentHint = persistHint;
 
         var pathReferences = attachments.Select(a => $"@{a.FullPath}");
         var messageText = string.Join("\n", new[] { text }.Concat(pathReferences).Where(line => line.Length > 0));
@@ -869,6 +880,53 @@ public partial class ChatViewModel : ViewModelBase
         // 平台提醒 / 戳一戳 / 定时任务唤醒走的是带提醒标记的排队通道，不计入
         _statistics.AddConversation();
         await RunTurnAsync(model, messageText);
+    }
+
+    /// <summary>粘贴图片的落盘目录：与长期记忆同属应用数据目录，历史里的 @路径 不会因临时目录清理失效。</summary>
+    private static readonly string AttachmentDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SoufflePet", "attachments");
+
+    /// <summary>
+    /// 发送前把内存里的粘贴图片转储成 PNG（重名时加序号），返回换成真实路径的附件列表；
+    /// 写盘失败的丢弃并留一行提示，不用无效路径去糊弄模型。
+    /// </summary>
+    private List<ChatAttachment> PersistPendingImages(List<ChatAttachment> attachments)
+    {
+        var failed = new List<string>();
+        var result = new List<ChatAttachment>(attachments.Count);
+        AttachmentHint = null;
+
+        foreach (var attachment in attachments)
+        {
+            if (attachment.Data is not { } data)
+            {
+                result.Add(attachment);
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(AttachmentDirectory);
+                var path = Path.Combine(AttachmentDirectory, attachment.FileName);
+                for (var index = 2; File.Exists(path); index++)
+                {
+                    path = Path.Combine(
+                        AttachmentDirectory,
+                        $"{Path.GetFileNameWithoutExtension(attachment.FileName)}-{index}.png");
+                }
+
+                File.WriteAllBytes(path, data);
+                result.Add(attachment with { FullPath = path, FileName = Path.GetFileName(path), Data = null });
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "save pasted image {Name} failed", attachment.FileName);
+                failed.Add(attachment.FileName);
+            }
+        }
+
+        if (failed.Count > 0) AttachmentHint = $"未能保存：{string.Join("、", failed)}";
+        return result;
     }
 
     /// <summary>
