@@ -75,8 +75,26 @@ public partial class SouffleSettings : ObservableObject
     [Description("模型根目录（应用目录下 wwwroot 内的相对路径，默认 models）")]
     public string ModelsDirectory { get; init; } = "models";
 
-    [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；修改后重启生效）")]
+    [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；两者不一致时可写成「目录/模型名」；修改后重启生效）")]
     public string ModelName { get; init; } = "舒芙蕾";
+
+    /// <summary>模型所在子目录：ModelName 写成「目录/模型名」时取斜杠前部分，只有一段时与主文件名相同。</summary>
+    [JsonIgnore]
+    public string ModelFolderName => SplitModelName().Folder;
+
+    /// <summary>model3.json 的主文件名（不含扩展名）：ModelName 写成「目录/模型名」时取斜杠后部分。</summary>
+    [JsonIgnore]
+    public string ModelFileStem => SplitModelName().File;
+
+    /// <summary>把 ModelName 拆成「目录名 + 主文件名」，兼容 \ 与 / 两种分隔写法；只有一段时两者相同。</summary>
+    private (string Folder, string File) SplitModelName()
+    {
+        var name = (ModelName ?? string.Empty).Replace('\\', '/').Trim().Trim('/');
+        var index = name.LastIndexOf('/');
+        return index > 0 && index < name.Length - 1
+            ? (name[..index], name[(index + 1)..])
+            : (name, name);
+    }
     
     [Description("模型水印资源 ID")]
     public string ModelWatermarkPartId { get; init; } = "watermark";

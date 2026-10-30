@@ -243,8 +243,9 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             Logger.Debug("LAppDelegateOpenGL ok");
 
             // 模型目录/名称来自设置（SoufflePet.json 的 ModelsDirectory / ModelName）：
-            // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码
-            _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelName);
+            // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码。
+            // ModelName 支持「目录/模型名」写法，目录名不必与 model3.json 主文件名一致
+            _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelFolderName);
             LoadModel();
 
             _lastStamp = Stopwatch.GetTimestamp();
@@ -264,8 +265,8 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     {
         if (_lapp == null || _modelDir == null) return;
 
-        Logger.Debug("loading model dir={Dir} name={Name}", _modelDir, settings.ModelName);
-        _model = _lapp.Live2dManager.LoadModel(_modelDir, settings.ModelName);
+        Logger.Debug("loading model dir={Dir} name={Name}", _modelDir, settings.ModelFileStem);
+        _model = _lapp.Live2dManager.LoadModel(_modelDir, settings.ModelFileStem);
         // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
         // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
         // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。

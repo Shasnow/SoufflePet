@@ -40,8 +40,8 @@ public sealed class PetExpressionService
     /// <summary>当前模型声明的表情名（model3.json 的 FileReferences.Expressions，未配置时为空）。</summary>
     public IReadOnlyList<string> GetExpressionNames()
     {
-        var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", _settings.ModelsDirectory, _settings.ModelName);
-        var path = Path.Combine(modelDir, $"{_settings.ModelName}.model3.json");
+        var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", _settings.ModelsDirectory, _settings.ModelFolderName);
+        var path = Path.Combine(modelDir, $"{_settings.ModelFileStem}.model3.json");
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));

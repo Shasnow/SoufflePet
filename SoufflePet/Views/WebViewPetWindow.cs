@@ -100,8 +100,9 @@ public class WebViewPetWindow : Window, IPetWindow
         {
             var port = server.Start();
             // 模型 URL 走查询参数传给页面：换模型只改设置（SoufflePet.json 的
-            // ModelsDirectory / ModelName），页面脚本无需跟着改
-            var modelUrl = $"{settings.ModelsDirectory}/{settings.ModelName}/{settings.ModelName}.model3.json";
+            // ModelsDirectory / ModelName），页面脚本无需跟着改。
+            // ModelName 支持「目录/模型名」，目录名与 model3.json 主文件名可以不一致
+            var modelUrl = $"{settings.ModelsDirectory}/{settings.ModelFolderName}/{settings.ModelFileStem}.model3.json";
             _webView.Source = new Uri($"http://localhost:{port}/index.html?model={Uri.EscapeDataString(modelUrl)}");
             Logger.Debug("webview model url={Url}", modelUrl);
         }

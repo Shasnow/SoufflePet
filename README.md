@@ -223,9 +223,9 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 ### 首次使用
 
-1. 把获得授权的模型放入 `wwwroot/models/模型名/`（`ModelsDirectory` 默认为 `models`）。
-2. 确认该目录下存在 `模型名.model3.json`（目录名需与 `model3.json` 主文件名一致）。
-3. 在 `SoufflePet.json` 中把 `ModelName` 设为 `模型名`。
+1. 把获得授权的模型放入 `wwwroot/models/目录名/`（`ModelsDirectory` 默认为 `models`）。
+2. 确认该目录下存在 `主文件名.model3.json`（目录名与主文件名相同或不同都可以，见下）。
+3. 在 `SoufflePet.json` 中把 `ModelName` 设为 `目录名/主文件名`；两者一致时只写一段即可。
 4. 重启应用（模型仅在启动时加载）。
 
 未配置模型时应用**仍可正常启动**，只是窗口不渲染模型；WebView 版会在左上角显示缺少模型的提示。
@@ -242,7 +242,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 ```
 
 - `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
-- `ModelName`：模型目录名，同时作为 `model3.json` 的主文件名（SDK 约定：目录名与 model3.json 主文件名一致，即 `wwwroot/models/你的模型名/你的模型名.model3.json`）
+- `ModelName`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `wwwroot/models/你的模型名/你的模型名.model3.json`）；两者不一致时写成 `目录名/主文件名`（对应 `wwwroot/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
 - 两个键都在启动时读取，**修改后需重启生效**
 
 ### 模型相关的可配置项
