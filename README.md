@@ -17,7 +17,7 @@
   - 左键拖动 → 移动窗口
   - 中键拖动 → 移动模型
   - 左键单击 → 呼出 / 收起对话窗口
-  - 右键 → 交互菜单：「戳一戳」，先播放被戳反应动作再发起一轮对话唤醒桌宠
+  - 右键 → 交互菜单：「戳一戳」「摸摸头」，先播放反应动作再发起一轮对话唤醒桌宠；「切换模型」换当前模型；「切换表情」「切换动作」手动切换表情（可多选同时激活，按激活顺序叠加参数，切换时淡入淡出）/ 播放指定动作（列表来自模型已登记的表情与动作组；「清除动作」把非循环动作留下的姿势/参数恢复默认）
   - 滚轮 → 缩放模型
 - **托盘图标**：显示 / 隐藏、重置模型、对话窗口、退出；关闭窗口默认隐藏到托盘
 - **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
@@ -196,7 +196,7 @@ SoufflePet.sln
 
 - `LAppModel.EnableFaceTracking`：目光跟随开关。关闭时跳过拖拽角度参数，`LoadParameters` 每帧重置为保存值，视线自然回正
 - `LAppModel.GamepadValueUpdate`：手柄参数钩子，在动作/表情之后、**物理演算之前**触发（模型作者把摇杆/扳机/ABXY 设计为物理输入源，推摇杆会带出身体晃动）。单独开钩子而非复用 `ValueUpdate`——后者与拖拽参数被 `CustomValueUpdate` 二选一门控，手柄需要两种情况下都能写入
-- `LAppModel.LipSyncValue` / `LipSyncWideValue`：口型音量外部输入（第 1 个口型参数写嘴开闭、其余写水平宽窄），替换官方示例里写死 `0` 的实现
+- `LAppModel.LipSyncValue` / `LipSyncWideValue`：口型音量外部输入（第 1 个口型参数写嘴开闭、其余写水平宽窄），替换官方示例里写死 `0` 的实现；模型 `Groups` 里的 `LipSync` 组缺失或 `Ids` 为空时（部分 VTube Studio 导出模型）回退到标准口型参数 `ParamMouthOpenY` / `ParamMouthForm`，否则口型律动没有任何可写参数
 - `LAppModel.ResetExpression()`：清空表情队列并以 weight=0 写回基线，等价 Web SDK 的 `resetExpression()`
 - `LAppLive2DManager.ModelToClip()`：模型坐标 → 裁剪坐标换算（用上一帧累积的 MVP，须在渲染后调用），供逐像素命中检测与包围盒测量使用
 - `LAppView` 暴露视图矩阵操作：`AdjustScale` / `GetScale` / `AdjustTranslate` / `TranslateX/Y` / `ViewLeft/Right/Bottom/Top`。注意 `Render()` 每帧把 `_viewMatrix` 拷给 `manager.ViewMatrix`，缩放/平移必须落在 `_viewMatrix` 侧
@@ -223,41 +223,54 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 ### 首次使用
 
-1. 把获得授权的模型放入 `wwwroot/models/目录名/`（`ModelsDirectory` 默认为 `models`）。
+把获得授权的模型压缩包（zip）直接导入即可：对话窗口「更多操作 → 模型…」打开模型管理面板，点「导入」选择压缩包，面板会自动解压到 `wwwroot/models/`、登记动作与表情，并设为当前模型。
+
+也可以手动放置：
+
+1. 把模型放入 `wwwroot/models/目录名/`（`ModelsDirectory` 默认为 `models`）。
 2. 确认该目录下存在 `主文件名.model3.json`（目录名与主文件名相同或不同都可以，见下）。
-3. 在 `SoufflePet.json` 中把 `ModelName` 设为 `目录名/主文件名`；两者一致时只写一段即可。
-4. 重启应用（模型仅在启动时加载）。
+3. 在模型管理面板里「打开目录」后手工添加，或在 `SoufflePet.json` 的 `Live2DModels` 里加一项：`Name` 写 `目录名/主文件名`，两者一致时只写一段即可。
 
 未配置模型时应用**仍可正常启动**，只是窗口不渲染模型；WebView 版会在左上角显示缺少模型的提示。
 
 ### 配置模型
 
-修改 `SoufflePet.json`（首次运行自动生成，位于可执行文件同级目录）两个键即可：
+修改 `SoufflePet.json`（首次运行自动生成，位于可执行文件同级目录）里的模型列表：
 
 ```json
 {
   "ModelsDirectory": "models",
-  "ModelName": "你的模型名"
+  "Live2DModels": [
+    { "Name": "舒芙蕾", "WatermarkPartId": "Part13", "GameExpression": "手柄", "MusicExpression": "麦克风" },
+    { "Name": "黑猫/cat", "WatermarkPartId": "", "GameExpression": "手柄", "MusicExpression": "麦克风" }
+  ]
 }
 ```
 
 - `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
-- `ModelName`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `wwwroot/models/你的模型名/你的模型名.model3.json`）；两者不一致时写成 `目录名/主文件名`（对应 `wwwroot/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
+- `Live2DModels`：可切换的模型列表，每项四个字段
+  - `Name`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `wwwroot/models/你的模型名/你的模型名.model3.json`）；不一致时写成 `目录名/主文件名`（对应 `wwwroot/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
+  - `WatermarkPartId`：该模型的水印部件 Id（如 `Part13`），加载时把透明度压 0；留空表示不处理水印
+  - `GameExpression` / `MusicExpression`：该模型在游戏 / 音乐状态下自动切换的表情名，取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。默认「手柄」「麦克风」；表情名因模型而异，换模型后请在模型管理面板里按实际表情文件改，留空表示该模型不切换
+- 启动加载上次选中的模型（首次为列表第一项）；运行中可在桌宠右键菜单「切换模型」里换，选择会**写回配置**，重启沿用
+- 切换模型时表情名随之切换，并按新模型重算一次自动表情与联动（旧模型的手柄 / 口型服务不会残留）
 - VTube Studio 导出的模型（目录内有 `.vtube.json`）：原生版会读取其中的 `ParameterSettings`，把面捕角度（`FaceAngleX/Y/Z`）按作者配置的范围映射到 `AngleX/AngleY/AngleZ`、`PositionX/Y/Z` 等自定义参数，保证这类模型的物理链有输入；普通模型不受影响
-- 两个键都在启动时读取，**修改后需重启生效**
+
+### 模型管理面板
+
+对话窗口「更多操作 → 模型…」：
+
+- **导入**：选择一个 zip 压缩包，找其中层级最浅的 `*.model3.json` 作为主模型，解压到 `wwwroot/models/<目录名>/`；目录名优先取压缩包内主模型所在目录名，取不到时用压缩包文件名。导入后自动登记引用：
+  - 目录内所有 `*.exp3.json` 写进 `FileReferences.Expressions`（`Name` 为去掉后缀的文件名），已有的跳过
+  - 目录内所有 `*.motion3.json` 写进 `FileReferences.Motions`：文件名含 `idle` / `待机` 的归到 `Idle` 组，其余每个文件自成一组（因此都能被 `StartRandomMotion` 的随机动作抽到）
+  - 从 `.cdi3.json` 的 `Parts` 里找名称含「水印」或 `watermark` 的部件，自动填入 `WatermarkPartId`
+- **移除**：删除选中模型对应的目录（整个目录从磁盘删除，有二次确认），若删的是当前模型则自动切到相邻的一个
+- **修改**：右侧可改模型名（`Name`）、水印部件 Id、游戏 / 音乐表情名，改完点「保存配置」；「设为当前」切换生效模型
+- 导入、切换、移除都会写回 `SoufflePet.json` 并触发桌宠重载，无需重启
 
 ### 模型相关的可配置项
 
-`SoufflePet.json` 中还有两个表情名配置：
-
-```json
-{
-  "AutoExpressionGameExpression": "游戏表情名",
-  "AutoExpressionMusicExpression": "音乐表情名"
-}
-```
-
-取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。默认值是「手柄」「麦克风」——表情名因模型而异，换模型后请按实际表情文件填写，否则自动表情不会生效；留空表示不切换表情。
+游戏 / 音乐表情名已改为**跟随模型**的配置（`Live2DModels` 每项的 `GameExpression` / `MusicExpression`），不再有全局配置项：检测到游戏或音乐时，按当前模型自己登记的表情名切换，因此不同模型可以各用各的表情。
 
 ## 许可证
 

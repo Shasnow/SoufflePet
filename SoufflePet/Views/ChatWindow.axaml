@@ -582,6 +582,15 @@
                                             </StackPanel>
                                         </Button>
 
+                                        <Button Classes="modeItem" Command="{Binding OpenLive2DModelsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="模型…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="导入、切换或移除 Live2D 模型"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
+
                                         <Button Classes="modeItem" Command="{Binding OpenSkillsCommand}">
                                             <StackPanel Spacing="1">
                                                 <TextBlock Text="技能…" FontSize="12.5" Foreground="#F2FFFFFF" />

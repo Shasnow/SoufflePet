@@ -1,0 +1,254 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             xmlns:models="using:SoufflePet.Models"
+             x:Class="SoufflePet.Views.Live2DModelsView"
+             x:DataType="vm:Live2DModelsViewModel"
+             x:CompileBindings="True">
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="模"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="模型" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：模型列表 -->
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,2">
+                            <TextBlock Text="模型" Classes="section" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="导入模型压缩包（自动登记包内的 exp3 表情与 motion3 动作）"
+                                        Click="OnImportClick">
+                                    <TextBlock Text="导入" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="从磁盘移除选中的模型目录"
+                                        IsEnabled="{Binding HasSelection}"
+                                        Command="{Binding RequestRemoveCommand}">
+                                    <TextBlock Text="移除" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="在资源管理器中打开模型目录"
+                                        Command="{Binding OpenFolderCommand}">
+                                    <TextBlock Text="打开" Classes="muted" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="1" Margin="4,0,4,6" Spacing="1">
+                            <TextBlock Text="{Binding Status}"
+                                       Classes="label"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <TextBlock Text="{Binding ResultMessage}"
+                                       IsVisible="{Binding HasResultMessage}"
+                                       FontSize="10.5"
+                                       Foreground="#8CFFFFFF"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <ListBox Grid.Row="2"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Models}"
+                                 SelectedItem="{Binding SelectedModel, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:Live2DModelConfig">
+                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="12.5"
+                                                   Foreground="#F2FFFFFF"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding WatermarkPartId}"
+                                                   FontSize="10.5"
+                                                   Foreground="#66FFFFFF"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：模型配置编辑 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0" RowDefinitions="*,Auto">
+
+                        <StackPanel VerticalAlignment="Center"
+                                    Spacing="4"
+                                    IsVisible="{Binding !HasSelection}">
+                            <TextBlock Text="还没有选中模型"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="在左侧选择一个模型，或点「导入」上传模型压缩包"
+                                       FontSize="10.5"
+                                       Foreground="#66FFFFFF"
+                                       HorizontalAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- 详情通过 ContentControl + DataTemplate 绑定：未选中时内容为 null，不会产生空引用绑定错误 -->
+                        <ContentControl Content="{Binding SelectedModel}"
+                                        HorizontalContentAlignment="Stretch"
+                                        VerticalContentAlignment="Stretch">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate x:DataType="models:Live2DModelConfig">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="10" Margin="0,2,8,0">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="模型名" FontSize="11" Foreground="#8CFFFFFF" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding Name, Mode=TwoWay}"
+                                                     PlaceholderText="目录名，或「目录/主文件名」" />
+                                            <TextBlock Text="两种写法：目录名与 model3.json 主文件名一致时只写一段；不一致时写「目录/主文件名」"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="水印部件 Id" FontSize="11" Foreground="#8CFFFFFF" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding WatermarkPartId, Mode=TwoWay}"
+                                                     PlaceholderText="例如 Part13；留空表示不处理水印" />
+                                            <TextBlock Text="加载时把该部件透明度压 0；导入时若 cdi3 里存在名称含「水印」的部件会自动填入"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="游戏表情" FontSize="11" Foreground="#8CFFFFFF" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding GameExpression, Mode=TwoWay}"
+                                                     PlaceholderText="例如 手柄；留空表示该模型不切换" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="音乐表情" FontSize="11" Foreground="#8CFFFFFF" />
+                                            <TextBox Classes="field"
+                                                     Text="{Binding MusicExpression, Mode=TwoWay}"
+                                                     PlaceholderText="例如 麦克风；留空表示该模型不切换" />
+                                            <TextBlock Text="自动表情按当前模型取这两项：检测到游戏 / 音乐时切到对应表情名，须是该模型已登记的表情"
+                                                       FontSize="10.5"
+                                                       Foreground="#59FFFFFF"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+
+                                        <TextBlock Text="修改模型名会改变实际读取的路径；模型文件不在新路径下时会保存失败"
+                                                   FontSize="10.5"
+                                                   Foreground="#59FFFFFF"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
+
+                        <StackPanel Grid.Row="1"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Spacing="8"
+                                    Margin="0,10,0,0">
+                            <Button Classes="secondary"
+                                    Content="设为当前"
+                                    IsEnabled="{Binding HasSelection}"
+                                    Command="{Binding ActivateCommand}" />
+                            <Button Classes="primary"
+                                    Content="保存配置"
+                                    IsEnabled="{Binding HasSelection}"
+                                    Command="{Binding SaveEditCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 移除二次确认：整块覆盖在面板上，确认后才删盘 -->
+        <Border IsVisible="{Binding IsConfirmingRemove}"
+                Background="#F21B1C22"
+                BorderBrush="#26FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16">
+            <StackPanel Width="320"
+                        Spacing="12"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center">
+                <TextBlock Text="移除模型？"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#F2FFFFFF" />
+                <TextBlock Text="{Binding RemovePrompt}"
+                           FontSize="11"
+                           LineHeight="17"
+                           Foreground="#8CFFFFFF"
+                           TextWrapping="Wrap" />
+                <TextBlock Text="模型目录会整个从磁盘删除，此操作不可撤销。"
+                           FontSize="10.5"
+                           Foreground="#66FFFFFF"
+                           TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Classes="secondary"
+                            Content="取消"
+                            Command="{Binding CancelRemoveCommand}" />
+                    <Button Classes="primary"
+                            Content="移除"
+                            Command="{Binding ConfirmRemoveCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Panel>
+</UserControl>

@@ -38,11 +38,95 @@ public class LAppModel : CubismUserModel
     /// </summary>
     private readonly Dictionary<string, ACubismMotion> _expressions = [];
 
-    public List<string> Motions => new(_motions.Keys);
+    /// <summary>动作组名列表（按 model3.json 的登记顺序）；没有 Motions 节点时为空。</summary>
+    public List<string> Motions =>
+        _modelSetting.FileReferences?.Motions is { } motions ? [.. motions.Keys] : [];
     public List<string> Expressions => new(_expressions.Keys);
 
     /// <summary>当前生效的表情名（null = 无表情、处于默认状态）。</summary>
     public string? CurrentExpression { get; private set; }
+
+    /// <summary>
+    /// 手动多选的表情名（按激活顺序，含正在淡出的）。SDK 的表情队列是替换式的——最新表情淡入完成后
+    /// 会丢弃之前的，无法叠加，因此多选表情不走表情管理器，由 <see cref="ApplyManualExpressions"/> 每帧
+    /// 按各自权重叠加写回，切换时做淡入淡出。
+    /// </summary>
+    private readonly List<string> _manualExpressions = [];
+
+    /// <summary>手动表情的目标激活集合（不在集合里但仍在列表中的项正在淡出）。</summary>
+    private readonly HashSet<string> _manualActive = [];
+
+    /// <summary>手动表情的当前权重（0~1，逐帧向目标 0/1 逼近）。</summary>
+    private readonly Dictionary<string, float> _manualWeights = [];
+
+    /// <summary>手动表情淡入淡出时长（秒），与表情文件默认的 FadeInTime 接近。</summary>
+    private const float ManualExpressionFadeSeconds = 0.3f;
+
+    /// <summary>当前手动激活的表情名列表（副本，不含淡出中的项）。</summary>
+    public List<string> ManualExpressions => new(_manualExpressions.FindAll(_manualActive.Contains));
+
+    /// <summary>某个表情是否在手动激活集合里。</summary>
+    public bool IsExpressionActive(string name) => _manualActive.Contains(name);
+
+    /// <summary>切换表情的手动激活状态，返回切换后是否处于激活状态（表情不存在时返回 false）。</summary>
+    public bool ToggleExpression(string name)
+    {
+        if (!_expressions.ContainsKey(name)) return false;
+
+        if (_manualActive.Remove(name))
+        {
+            // 淡出：保留在列表里，等权重降到 0 再移除
+        }
+        else
+        {
+            if (!_manualWeights.ContainsKey(name)) _manualWeights[name] = 0f;
+            if (!_manualExpressions.Contains(name)) _manualExpressions.Add(name);
+            _manualActive.Add(name);
+        }
+
+        // 手动接管：停掉表情管理器里的自动表情，避免两份表情叠在同一批参数上
+        _expressionManager.StopAllMotions();
+        CurrentExpression = null;
+        return _manualActive.Contains(name);
+    }
+
+    /// <summary>设置手动表情集合（多选叠加）：空集合即清除（淡出），回到自动表情。</summary>
+    public void SetManualExpressions(IEnumerable<string> names)
+    {
+        var wanted = new HashSet<string>();
+        foreach (var name in names)
+            if (_expressions.ContainsKey(name)) wanted.Add(name);
+
+        // 只保留「仍然想要」的那些：取消的留在 _manualExpressions 里淡出到 0 后移除
+        _manualActive.IntersectWith(wanted);
+        foreach (var name in wanted)
+        {
+            if (!_manualWeights.ContainsKey(name)) _manualWeights[name] = 0f;
+            if (!_manualExpressions.Contains(name)) _manualExpressions.Add(name);
+            _manualActive.Add(name);
+        }
+
+        _expressionManager.StopAllMotions();
+        CurrentExpression = null;
+    }
+
+    /// <summary>清除所有手动表情（淡出）。</summary>
+    public void ClearExpressions() => SetManualExpressions([]);
+
+    /// <summary>某个动作组内的动作数量（供宿主构建手动切换菜单）；组不存在时为 0。</summary>
+    public int MotionCount(string group) =>
+        _modelSetting.FileReferences?.Motions is { } motions
+        && motions.TryGetValue(group, out var list) ? list.Count : 0;
+
+    /// <summary>动作组内某个动作的文件名（去掉目录与 .motion3.json 后缀），用于菜单显示；越界时返回 null。</summary>
+    public string? MotionFileName(string group, int no)
+    {
+        if (_modelSetting.FileReferences?.Motions is not { } motions
+            || !motions.TryGetValue(group, out var list)
+            || no < 0 || no >= list.Count)
+            return null;
+        return Path.GetFileNameWithoutExtension(list[no].File);
+    }
     public List<(string, int, float)> Parts
     {
         get
@@ -262,6 +346,14 @@ public class LAppModel : CubismUserModel
             }
         }
 
+        // 组存在但 Ids 为空（部分 VTube Studio 导出模型会这样写）：回退到 Cubism 标准口型参数。
+        // 否则口型律动没有任何可写参数，表现为完全不张嘴
+        if (_lipSyncIds.Count == 0)
+        {
+            _lipSyncIds.Add(CubismDefaultParameterId.ParamMouthOpenY);
+            _lipSyncIds.Add(CubismDefaultParameterId.ParamMouthForm);
+        }
+
         //Layout
         Dictionary<string, float> layout = [];
         _modelSetting.GetLayoutMap(layout);
@@ -297,9 +389,11 @@ public class LAppModel : CubismUserModel
         _motions.Clear();
         _expressions.Clear();
 
-        if (_modelSetting.FileReferences?.Motions.Count > 0)
+        // Motions 整个节点缺失时（例如只带物理、不带动作的模型）这里是 null，
+        // 只给 FileReferences 判空会在卸载时抛 NullReferenceException
+        if (_modelSetting.FileReferences?.Motions is { Count: > 0 } motions)
         {
-            foreach (var item in _modelSetting.FileReferences.Motions)
+            foreach (var item in motions)
             {
                 ReleaseMotionGroup(item.Key);
             }
@@ -411,6 +505,7 @@ public class LAppModel : CubismUserModel
         _eyeBlink?.UpdateParameters(Model, deltaTimeSeconds); // 目パチ
 
         _expressionManager?.UpdateMotion(Model, deltaTimeSeconds); // 表情でパラメータ更新（相対変化）
+        ApplyManualExpressions(deltaTimeSeconds);                  // 手动多选表情：按权重叠加写回
 
         if (CustomValueUpdate)
         {
@@ -590,18 +685,17 @@ public class LAppModel : CubismUserModel
     /// <param name="expressionID">表情モーションのID</param>
     public void SetExpression(string expressionID)
     {
-        ACubismMotion motion = _expressions[expressionID];
-        CubismLog.Debug($"[Live2D App]expression: [{expressionID}]");
+        // 表情名不存在时直接忽略：切换模型后旧模型的自动表情配置（settings 里的表情名）
+        // 可能在新模型里没有，抛 KeyNotFoundException 会让整个渲染帧失败、续帧链断掉
+        if (!_expressions.TryGetValue(expressionID, out var motion) || motion == null)
+        {
+            CubismLog.Debug($"[Live2D App]expression not found: [{expressionID}]");
+            return;
+        }
 
-        if (motion != null)
-        {
-            CurrentExpression = expressionID;
-            _expressionManager.StartMotionPriority(motion, MotionPriority.PriorityForce);
-        }
-        else
-        {
-            CubismLog.Debug($"[Live2D App]expression[{expressionID}] is null ");
-        }
+        CubismLog.Debug($"[Live2D App]expression: [{expressionID}]");
+        CurrentExpression = expressionID;
+        _expressionManager.StartMotionPriority(motion, MotionPriority.PriorityForce);
     }
 
     /// <summary>
@@ -636,6 +730,74 @@ public class LAppModel : CubismUserModel
     {
         CurrentExpression = null;
         _expressionManager.StopAllMotions();
+    }
+
+    /// <summary>
+    /// 把手动表情按各自权重叠加到模型上：权重逐帧向目标（激活 1 / 停用 0）逼近，
+    /// 因此激活是淡入、取消是淡出，与 SDK 表情的 FadeInTime/FadeOutTime 效果一致。
+    /// 多个表情作用于同一参数时按激活顺序依次叠加：Add 累加、Multiply 累乘、Overwrite 覆盖。
+    /// </summary>
+    private void ApplyManualExpressions(float deltaTimeSeconds)
+    {
+        if (_manualExpressions.Count == 0) return;
+
+        var step = deltaTimeSeconds / ManualExpressionFadeSeconds;
+
+        for (var i = _manualExpressions.Count - 1; i >= 0; i--)
+        {
+            var name = _manualExpressions[i];
+            var target = _manualActive.Contains(name) ? 1f : 0f;
+            var weight = _manualWeights[name];
+            weight = target > weight ? MathF.Min(target, weight + step) : MathF.Max(target, weight - step);
+            _manualWeights[name] = weight;
+
+            // 淡出结束：从列表里摘掉，不再影响参数
+            if (weight <= 0f && target == 0f)
+            {
+                _manualWeights.Remove(name);
+                _manualExpressions.RemoveAt(i);
+                continue;
+            }
+
+            if (!_expressions.TryGetValue(name, out var motion) || motion is not CubismExpressionMotion expression)
+                continue;
+
+            // 与表情管理器一致：按权重做相对叠加，参数权重为 0 时不影响画面
+            foreach (var parameter in expression.Parameters)
+            {
+                var id = parameter.ParameterId;
+                if (string.IsNullOrEmpty(id)) continue;
+
+                switch (parameter.BlendType)
+                {
+                    case ExpressionBlendType.Multiply:
+                        Model.MultiplyParameterValue(id, parameter.Value, weight);
+                        break;
+                    case ExpressionBlendType.Overwrite:
+                        Model.SetParameterValue(id, parameter.Value, weight);
+                        break;
+                    default:
+                        Model.AddParameterValue(id, parameter.Value, weight);
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 清除当前动作并恢复默认状态：停止所有动作，把参数逐个写回 model3.json 的默认值并保存为基线。
+    /// 非循环动作（换姿势、变装等）播放完会把参数留在末帧状态，仅停动作无法复原——
+    /// Update 每帧都是「先 LoadParameters 再 SaveParameters」，基线是上一帧的状态，
+    /// 所以必须直接写默认值再存一次，后续帧才会从默认值起步；待机动作会在下一次 Update 自动重开。
+    /// </summary>
+    public void ResetMotion()
+    {
+        _motionManager.StopAllMotions();
+
+        var count = Model.GetParameterCount();
+        for (var i = 0; i < count; i++)
+            Model.SetParameterValue(i, Model.GetParameterDefaultValue(i));
+        Model.SaveParameters();
     }
 
     /// <summary>

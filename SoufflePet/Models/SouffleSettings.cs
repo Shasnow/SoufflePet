@@ -32,14 +32,16 @@ public partial class SouffleSettings : ObservableObject
     [Description("是否启用自动表情（检测到游戏/音乐应用自动切换表情，进程白名单见 autoexpression.json）")]
     public partial bool AutoExpressionEnabled { get; set; } = true;
 
-    /// <summary>
-    /// 自动表情轮询间隔（秒）
-    /// </summary>
+    /// <summary>自动表情轮询间隔（秒）</summary>
     public float AutoExpressionPollSeconds { get; init; } = 3f;
 
-    public string AutoExpressionGameExpression { get; init; } = "手柄";
+    /// <summary>当前模型在游戏状态下使用的表情名：跟随 Live2DModels 里当前模型的配置，无模型时为空。</summary>
+    [JsonIgnore]
+    public string AutoExpressionGameExpression => ActiveLive2DModel?.GameExpression ?? string.Empty;
 
-    public string AutoExpressionMusicExpression { get; init; } = "麦克风";
+    /// <summary>当前模型在音乐状态下使用的表情名：跟随 Live2DModels 里当前模型的配置，无模型时为空。</summary>
+    [JsonIgnore]
+    public string AutoExpressionMusicExpression => ActiveLive2DModel?.MusicExpression ?? string.Empty;
 
     [Description("自动表情应用列表")]
     public List<AppEntry> AutoExpressionApps { get; init; } = AppEntry.BuildDefaults();
@@ -75,29 +77,28 @@ public partial class SouffleSettings : ObservableObject
     [Description("模型根目录（应用目录下 wwwroot 内的相对路径，默认 models）")]
     public string ModelsDirectory { get; init; } = "models";
 
-    [Description("模型名称（ModelsDirectory 下的子目录名，需与 model3.json 主文件名一致；两者不一致时可写成「目录/模型名」；修改后重启生效）")]
-    public string ModelName { get; init; } = "舒芙蕾";
+    [Description("Live2D 模型列表：启动时加载上次选中的模型（默认第一个），运行中可从桌宠右键菜单切换")]
+    public ObservableCollection<Live2DModelConfig> Live2DModels { get; set; } = [];
 
-    /// <summary>模型所在子目录：ModelName 写成「目录/模型名」时取斜杠前部分，只有一段时与主文件名相同。</summary>
+    /// <summary>当前加载的模型下标：切换模型时更新并随设置落盘，重启后沿用上次选中的模型。</summary>
+    [ObservableProperty]
+    [Description("当前加载的 Live2D 模型下标：右键菜单切换时写回，重启后沿用")]
+    public partial int ActiveLive2DModelIndex { get; set; }
+
+    /// <summary>当前选中的模型：列表为空时返回 null，下标越界时按第一个处理。</summary>
     [JsonIgnore]
-    public string ModelFolderName => SplitModelName().Folder;
+    public Live2DModelConfig? ActiveLive2DModel =>
+        Live2DModels.Count == 0
+            ? null
+            : Live2DModels[Math.Clamp(ActiveLive2DModelIndex, 0, Live2DModels.Count - 1)];
 
-    /// <summary>model3.json 的主文件名（不含扩展名）：ModelName 写成「目录/模型名」时取斜杠后部分。</summary>
-    [JsonIgnore]
-    public string ModelFileStem => SplitModelName().File;
-
-    /// <summary>把 ModelName 拆成「目录名 + 主文件名」，兼容 \ 与 / 两种分隔写法；只有一段时两者相同。</summary>
-    private (string Folder, string File) SplitModelName()
-    {
-        var name = (ModelName ?? string.Empty).Replace('\\', '/').Trim().Trim('/');
-        var index = name.LastIndexOf('/');
-        return index > 0 && index < name.Length - 1
-            ? (name[..index], name[(index + 1)..])
-            : (name, name);
-    }
-    
-    [Description("模型水印资源 ID")]
-    public string ModelWatermarkPartId { get; init; } = "watermark";
+    /// <summary>
+    /// 值没变也触发一次「当前模型下标」的变更通知：若只靠改写属性值，
+    /// 移除当前模型后夹紧到的下标可能仍是原值，重载订阅就收不到通知（桌宠不会换模型）。
+    /// 通知只发一次，因此不会像「先抖到 -1 再写回」那样产生两次落盘与两次重载。
+    /// </summary>
+    public void NotifyActiveLive2DModelIndexChanged() =>
+        OnPropertyChanged(nameof(ActiveLive2DModelIndex));
 
     /// <summary>默认称呼：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
     public const string DefaultPetName = "舒芙蕾";
@@ -169,7 +170,8 @@ public partial class SouffleSettings : ObservableObject
 
         try
         {
-            var settings = JsonSerializer.Deserialize<SouffleSettings>(File.ReadAllText(SettingsFilePath)) ?? new SouffleSettings();
+            var text = File.ReadAllText(SettingsFilePath);
+            var settings = JsonSerializer.Deserialize<SouffleSettings>(text) ?? new SouffleSettings();
             settings.Normalize();
             return settings;
         }
@@ -186,6 +188,9 @@ public partial class SouffleSettings : ObservableObject
         if (string.IsNullOrWhiteSpace(PetName)) PetName = DefaultPetName;
         if (ChatSystemPrompt == BuildDefaultChatSystemPrompt(DefaultPetName) && PetName != DefaultPetName)
             ChatSystemPrompt = BuildDefaultChatSystemPrompt(PetName);
+        // 列表被改短/清空后旧下标可能越界：回到第一个，避免启动时加载不存在的模型
+        if (ActiveLive2DModelIndex < 0 || ActiveLive2DModelIndex >= Live2DModels.Count)
+            ActiveLive2DModelIndex = 0;
     }
 
     public void Save()
@@ -196,7 +201,9 @@ public partial class SouffleSettings : ObservableObject
 
     private static SouffleSettings FallBackLoad()
     {
+        // 首次运行（或配置损坏）：沿用原来的默认模型，用户自行在 SoufflePet.json 里配模型列表
         var defaultSettings = new SouffleSettings();
+        defaultSettings.Live2DModels.Add(new Live2DModelConfig { Name = "舒芙蕾", WatermarkPartId = "watermark" });
         defaultSettings.Save();
         return defaultSettings;
     }

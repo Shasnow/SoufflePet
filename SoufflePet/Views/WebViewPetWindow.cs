@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -30,6 +31,10 @@ public class WebViewPetWindow : Window, IPetWindow
 
     /// <summary>对话窗口服务：左键单击呼出 / 收起对话窗口、戳一戳后发起一轮对话。</summary>
     private readonly IChatWindowService _chat;
+    private readonly SouffleSettings _settings;
+
+    /// <summary>本地静态服务器端口（0 = 未启动）：切换模型时用它重开页面。</summary>
+    private int _port;
 
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -79,6 +84,7 @@ public class WebViewPetWindow : Window, IPetWindow
         _lipSync = lipSync;
         _gamepad = gamepad;
         _chat = chat;
+        _settings = settings;
 
         Title = "SoufflePet（WebView）";
         Width = 480;
@@ -98,13 +104,8 @@ public class WebViewPetWindow : Window, IPetWindow
 
         if (server != null)
         {
-            var port = server.Start();
-            // 模型 URL 走查询参数传给页面：换模型只改设置（SoufflePet.json 的
-            // ModelsDirectory / ModelName），页面脚本无需跟着改。
-            // ModelName 支持「目录/模型名」，目录名与 model3.json 主文件名可以不一致
-            var modelUrl = $"{settings.ModelsDirectory}/{settings.ModelFolderName}/{settings.ModelFileStem}.model3.json";
-            _webView.Source = new Uri($"http://localhost:{port}/index.html?model={Uri.EscapeDataString(modelUrl)}");
-            Logger.Debug("webview model url={Url}", modelUrl);
+            _port = server.Start();
+            LoadModelPage();
         }
 
         // Opened 在每次 Hide 后再 Show 时都会触发，只在首次显示时定位到右下角，
@@ -155,6 +156,12 @@ public class WebViewPetWindow : Window, IPetWindow
         {
             // 页面尚未加载完成时忽略
         }
+    }
+
+    /// <summary>切换模型 / 模型列表变化后重载：按当前下标重开页面（模型与右键菜单一起重建）。</summary>
+    public void ReloadModel()
+    {
+        LoadModelPage();
     }
 
     /// <summary>自动表情联动：缓存状态后转发给页面；页面加载完成前先缓存，收到 ready 后重放。</summary>
@@ -243,6 +250,44 @@ public class WebViewPetWindow : Window, IPetWindow
     {
         _cursorTimer.Stop();
         base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// 按当前选中的模型加载页面：模型地址、水印部件、模型列表与当前下标都走查询参数，
+    /// 页面脚本不带任何模型配置。切换模型即重新设置 Source（页面按新参数重建模型与菜单）。
+    /// </summary>
+    private void LoadModelPage()
+    {
+        if (_port <= 0) return;
+
+        var model = _settings.ActiveLive2DModel;
+        if (model == null)
+        {
+            Logger.Warning("no live2d model configured, skip loading page");
+            return;
+        }
+
+        var names = new List<string>(_settings.Live2DModels.Count);
+        foreach (var entry in _settings.Live2DModels) names.Add(entry.Name);
+
+        var active = Math.Clamp(_settings.ActiveLive2DModelIndex, 0, _settings.Live2DModels.Count - 1);
+        var modelUrl = $"{_settings.ModelsDirectory}/{model.FolderName}/{model.FileStem}.model3.json";
+        var query = $"model={Uri.EscapeDataString(modelUrl)}"
+                    + $"&watermark={Uri.EscapeDataString(model.WatermarkPartId)}"
+                    + $"&models={Uri.EscapeDataString(JsonSerializer.Serialize(names))}"
+                    + $"&active={active}";
+
+        _webView.Source = new Uri($"http://localhost:{_port}/index.html?{query}");
+        Logger.Debug("webview model url={Url}", modelUrl);
+    }
+
+    /// <summary>切换模型：更新下标（随设置落盘），随后重开页面按新模型重建。</summary>
+    private void SwitchModel(int index)
+    {
+        if (index < 0 || index >= _settings.Live2DModels.Count) return;
+        if (index == _settings.ActiveLive2DModelIndex) return;
+
+        _settings.ActiveLive2DModelIndex = index;
     }
 
     private void MoveToBottomRight()
@@ -483,6 +528,18 @@ public class WebViewPetWindow : Window, IPetWindow
             {
                 // 摸摸头：页面已先播放反应动作/表情，这里发起一轮对话唤醒桌宠（与戳一戳同流程）
                 Dispatcher.Post(() => _chat.WakeByHeadPat(this));
+                return;
+            }
+            if (kind == "switchModel")
+            {
+                // 切换模型：页面菜单点了某一项，宿主更新下标后重开页面（新模型 + 新菜单）
+                if (!doc.RootElement.TryGetProperty("index", out var indexElement)
+                    || indexElement.ValueKind != JsonValueKind.Number)
+                {
+                    return;
+                }
+                var index = indexElement.GetInt32();
+                Dispatcher.Post(() => SwitchModel(index));
                 return;
             }
             if (kind != "drag") return;

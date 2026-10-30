@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -22,7 +23,14 @@ public class NativePetWindow : Window, IPetWindow
     private static readonly ILogger Logger = Log.ForContext<NativePetWindow>();
 
     private readonly NativePetControl _control;
+    private readonly SouffleSettings _settings;
     private readonly DispatcherTimer _renderTimer;
+
+    /// <summary>右键菜单与其中的「切换模型」「切换表情」「切换动作」子菜单：子项每次弹出前重建。</summary>
+    private readonly MenuFlyout _petMenu;
+    private readonly MenuItem _modelMenu;
+    private readonly MenuItem _expressionMenu;
+    private readonly MenuItem _motionMenu;
 
     /// <summary>帧率采样起点与期间累计的渲染帧数（每满 1 秒刷新一次显示）。</summary>
     private DateTime _fpsSampleTime = DateTime.Now;
@@ -82,6 +90,7 @@ public class NativePetWindow : Window, IPetWindow
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _control = new NativePetControl(settings);
+        _settings = settings;
 
         // 右上角帧率叠加层：半透明底保证任意背景下可读，不参与命中检测（穿透判定读的是 GL 帧缓冲）
         _fpsText = new TextBlock
@@ -141,7 +150,26 @@ public class NativePetWindow : Window, IPetWindow
             _control.PlayHeadPatReaction();
             chat.WakeByHeadPat(this);
         };
-        var petMenu = new MenuFlyout { Items = { pokeItem, patItem } };
+        // 「切换模型」子项每次弹出前按设置重建：导入/移除模型后不用重启即可看到新列表，
+        // 当前模型的勾选也随之下标同步；点选只改下标，重载由 App 的设置变更订阅统一触发
+        _modelMenu = new MenuItem { Header = "切换模型" };
+        // 「切换表情 / 切换动作」同样在弹出前重建：列表来自当前模型登记的表情与动作组，
+        // 切换模型后自动跟着变；表情用单选勾选标出当前生效的那个
+        _expressionMenu = new MenuItem { Header = "切换表情" };
+        _motionMenu = new MenuItem { Header = "切换动作" };
+        RebuildModelMenu();
+        RebuildExpressionMenu();
+        RebuildMotionMenu();
+        _petMenu = new MenuFlyout
+        {
+            Items = { pokeItem, patItem, _modelMenu, _expressionMenu, _motionMenu }
+        };
+        _petMenu.Opening += (_, _) =>
+        {
+            RebuildModelMenu();
+            RebuildExpressionMenu();
+            RebuildMotionMenu();
+        };
 
         // 交互：
         // - 左键按住拖动（位移 > 6px）→ 系统级拖拽窗口
@@ -202,7 +230,7 @@ public class NativePetWindow : Window, IPetWindow
             // 右键在释放时弹出菜单：light-dismiss 监听的是"按下"，若在按下时弹出会被随后的释放立即收起
             if (kind == PointerUpdateKind.RightButtonReleased)
             {
-                petMenu.ShowAt(this, showAtPointer: true);
+                _petMenu.ShowAt(this, showAtPointer: true);
                 return;
             }
             if (pressPoint is null) return;
@@ -317,6 +345,12 @@ public class NativePetWindow : Window, IPetWindow
         _control.ResetModel();
     }
 
+    /// <summary>切换模型 / 模型列表变化后重载：交给渲染线程卸载旧模型再按当前下标加载。</summary>
+    public void ReloadModel()
+    {
+        _control.ReloadModel();
+    }
+
     /// <summary>自动表情联动：转发给控制层切换/清除表情。</summary>
     public void SetExpression(string? name)
     {
@@ -409,5 +443,96 @@ public class NativePetWindow : Window, IPetWindow
         _renderTimer.Stop();
         _unloadTimer.Stop();
         base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// 重建右键菜单的「切换模型」子项：按设置里的模型列表逐项生成，当前模型打勾。
+    /// 点选只改下标（随设置落盘），重载由 App 的设置变更订阅统一触发。
+    /// </summary>
+    private void RebuildModelMenu()
+    {
+        _modelMenu.Items.Clear();
+
+        for (var i = 0; i < _settings.Live2DModels.Count; i++)
+        {
+            var index = i;
+            var name = _settings.Live2DModels[i].Name;
+            var item = new MenuItem
+            {
+                Header = string.IsNullOrWhiteSpace(name) ? $"模型 {i + 1}" : name,
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked = i == _settings.ActiveLive2DModelIndex,
+            };
+            item.Click += (_, _) =>
+            {
+                if (index < _settings.Live2DModels.Count) _settings.ActiveLive2DModelIndex = index;
+            };
+            _modelMenu.Items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// 重建「切换表情」子项：列表来自当前模型登记的表情，可多选同时激活（勾选框标出已激活项）；
+    /// 表情是叠加应用的，多选时按激活顺序合并参数。
+    /// </summary>
+    private void RebuildExpressionMenu()
+    {
+        _expressionMenu.Items.Clear();
+
+        var clear = new MenuItem { Header = "清除表情" };
+        clear.Click += (_, _) => _control.ClearExpressions();
+        _expressionMenu.Items.Add(clear);
+
+        foreach (var expression in _control.ExpressionNames)
+        {
+            var name = expression;
+            var item = new MenuItem
+            {
+                Header = name,
+                ToggleType = MenuItemToggleType.CheckBox,
+                IsChecked = _control.IsExpressionActive(name),
+            };
+            item.Click += (_, _) => _control.ToggleExpression(name);
+            _expressionMenu.Items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// 重建「切换动作」子项：只有单个动作的组直接平铺成菜单项，多动作的组包一层子菜单，
+    /// 避免把几十个动作一次性铺满右键菜单。点选以 Force 优先级立即播放。
+    /// </summary>
+    private void RebuildMotionMenu()
+    {
+        _motionMenu.Items.Clear();
+
+        // 首项固定为「清除动作」：部分动作不是循环的，播完会把参数留在末帧状态（换姿势、变装等），
+        // 这里停掉动作并把参数写回默认值，恢复模型初始状态
+        var reset = new MenuItem { Header = "清除动作" };
+        reset.Click += (_, _) => _control.ResetMotion();
+        _motionMenu.Items.Add(reset);
+
+        foreach (var group in _control.MotionGroups)
+        {
+            var count = _control.MotionCount(group);
+            if (count <= 0) continue;
+
+            if (count == 1)
+            {
+                var single = new MenuItem { Header = _control.MotionFileName(group, 0) ?? group };
+                single.Click += (_, _) => _control.PlayMotion(group, 0);
+                _motionMenu.Items.Add(single);
+                continue;
+            }
+
+            var parent = new MenuItem { Header = group };
+            for (var i = 0; i < count; i++)
+            {
+                var no = i;
+                var child = new MenuItem { Header = _control.MotionFileName(group, no) ?? $"{group}_{no}" };
+                child.Click += (_, _) => _control.PlayMotion(group, no);
+                parent.Items.Add(child);
+            }
+            _motionMenu.Items.Add(parent);
+        }
     }
 }

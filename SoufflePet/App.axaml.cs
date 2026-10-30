@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -80,6 +81,9 @@ public class App : Application
             services.AddSingleton<IMcpSettingsWindowService, McpSettingsWindowService>();
             services.AddSingleton<SkillsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的技能上
             services.AddSingleton<ISkillsWindowService, SkillsWindowService>();
+            services.AddSingleton<ILive2DModelService, Live2DModelService>(); // 模型导入/移除/校验
+            services.AddSingleton<Live2DModelsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的模型上
+            services.AddSingleton<ILive2DModelsWindowService, Live2DModelsWindowService>();
             services.AddSingleton<PluginsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的插件上
             services.AddSingleton<IPluginsWindowService, PluginsWindowService>();
             services.AddSingleton<ScheduledTasksViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的任务上
@@ -105,7 +109,8 @@ public class App : Application
             Logger.Debug("Main window assigned");
 
             // 表情工具需要窗口才能生效；ChatTools 先于窗口解析，所以在这里补挂（避免 DI 循环）
-            _provider.GetRequiredService<PetExpressionService>().Attach(petOps);
+            var expressions = _provider.GetRequiredService<PetExpressionService>();
+            expressions.Attach(petOps);
 
             // 自动表情检测服务的事件订阅必须早于其内部 DispatcherTimer 首次触发，避免漏掉初始状态
             var autoExpression = _provider.GetRequiredService<IAutoExpressionService>();
@@ -150,6 +155,15 @@ public class App : Application
                     case nameof(SouffleSettings.AutoExpressionEnabled):
                         ApplyAutoExpression();
                         break;
+                    case nameof(SouffleSettings.ActiveLive2DModelIndex):
+                        // 右键菜单与模型管理面板都只改这个下标，重载统一在这里触发。
+                        // 表情名是跟随模型的配置，换模型后先清掉「已生效」记录再按新模型重算；
+                        // 新模型没有对应表情时也要重置联动，避免旧模型的手柄/口型服务继续跑。
+                        autoExpression.EffectiveExpression = null;
+                        petOps.ReloadModel();
+                        ApplyExpression();
+                        if (autoExpression.EffectiveExpression is null) ApplyLinkage();
+                        break;
                 }
             };
             
@@ -180,6 +194,8 @@ public class App : Application
                 var next = settings.GamepadManual ? settings.AutoExpressionGameExpression
                     : settings.MusicManual ? settings.AutoExpressionMusicExpression
                     : autoExpression.CurrentExpression;
+                // 模型没配表情（空串）时按「无表情」处理，否则空串也会被当成一个表情名去比对联动
+                if (string.IsNullOrWhiteSpace(next)) next = null;
                 if (next == autoExpression.EffectiveExpression) return; // 无变化：不重复写参数、不重启服务
                 autoExpression.EffectiveExpression = next;
                 petOps.SetExpression(next);
@@ -192,7 +208,16 @@ public class App : Application
             //         这里不重复判断（重复判断会让总开关重新勾选时服务的 music 态已被清掉、采不回来）。
             void ApplyLinkage()
             {
-                var pad = settings.GamepadEnabled && autoExpression.EffectiveExpression == settings.AutoExpressionGameExpression;
+                // 手柄联动只在当前模型确实登记了游戏表情时开启：表情不存在时模型不会显示手柄，
+                // 用户按键看不到任何反馈，继续轮询只是白耗 CPU。
+                // 口型不受此限制——模型总有嘴，表情缺失时口型律动照常工作。
+                var gameExpression = settings.AutoExpressionGameExpression;
+                var hasGameExpression = gameExpression.Length > 0
+                    && expressions.GetExpressionNames()
+                        .Any(name => string.Equals(name, gameExpression, StringComparison.OrdinalIgnoreCase));
+                var pad = settings.GamepadEnabled
+                    && hasGameExpression
+                    && autoExpression.EffectiveExpression == gameExpression;
                 petOps.SetGamepadEnabled(pad);
                 if (pad) gamepad.Start(); else gamepad.Stop();
 

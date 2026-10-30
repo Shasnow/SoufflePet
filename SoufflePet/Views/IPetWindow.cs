@@ -9,6 +9,12 @@ public interface IPetWindow
     void ToggleVisible();
     void ResetModel();
 
+    /// <summary>
+    /// 按设置里的当前模型下标重新加载 Live2D 模型：切换模型、导入/移除模型后调用。
+    /// 原生版在渲染线程完成「卸载旧模型 → 加载新模型」，WebView 版重开页面。
+    /// </summary>
+    void ReloadModel();
+
     /// <summary>自动表情联动：传表情名切换，传 null 恢复默认（无表情）。</summary>
     void SetExpression(string? name);
 

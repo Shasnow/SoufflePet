@@ -98,7 +98,7 @@ SoufflePet.sln
 
   插件契约 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件**不要**自带副本。
 - **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；长期记忆 `%AppData%\SoufflePet`；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
-- 模型在**启动时**加载，`ModelName` / `ModelsDirectory` 改后需重启生效。
+- 模型在**启动时**加载，`Live2DModels` / `ModelsDirectory` 改后需重启生效；运行中可从桌宠右键菜单切换模型。
 
 ## 快速定位
 

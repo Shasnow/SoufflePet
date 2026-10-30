@@ -27,6 +27,7 @@
      弹出层会被它遮挡（airspace），页面内菜单不受影响。 */
   #menu {
     display: none; position: fixed; z-index: 20; min-width: 96px;
+    max-height: 70vh; overflow-y: auto;
     background: rgba(23, 24, 29, 0.92); border: 1px solid rgba(255, 255, 255, 0.13);
     border-radius: 8px; padding: 4px; color: rgba(255, 255, 255, 0.95);
     font-size: 13px; user-select: none;
@@ -34,6 +35,8 @@
   }
   #menu .item { padding: 6px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   #menu .item:hover { background: rgba(255, 255, 255, 0.16); }
+  /* 分组标题（表情 / 动作）：不可点击，只做分隔 */
+  #menu .header { padding: 6px 12px 2px; color: rgba(255, 255, 255, 0.5); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -47,11 +50,16 @@
   <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
 
 <script>
-// 模型地址由宿主通过查询参数传入（SoufflePet.json 的 ModelsDirectory / ModelName），
+// 模型地址由宿主通过查询参数传入（SoufflePet.json 的 ModelsDirectory / Live2DModels），
 // 直接打开页面（无参数）时回退到默认模型
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') || 'models/舒芙蕾/舒芙蕾.model3.json';
 const CDI_URL = MODEL_URL.replace(/\.model3\.json$/, '.cdi3.json');
+// 模型列表与当前下标（右键菜单里的「切换模型」），由宿主传入；切换时宿主重开页面
+const MODELS = (() => { try { return JSON.parse(params.get('models') || '[]'); } catch (_) { return []; } })();
+const ACTIVE_MODEL = Number.parseInt(params.get('active') || '0', 10) || 0;
+// 水印部件 Id 因模型而异，由宿主按模型配置传入；留空表示不处理水印
+const WATERMARK_PART = params.get('watermark') || '';
 const EXPRESSIONS = ['哭哭', '手柄', '星星', '水印', '爱心', '猫猫手', '生气', '眼罩', '眼镜', '脸红', '麦克风', '黑脸'];
 
 const errEl = document.getElementById('err');
@@ -107,12 +115,21 @@ async function main() {
     } catch (_) { /* API 版本差异时忽略 */ }
   }
 
-  // 水印开关：水印是模型里的独立部件 "Part13"（cdi3.json 显示名"水印.png"）。
+  // 表情与动作列表直接读模型自己的 model3.json（宿主导入时已把 exp3/motion3 登记进去），
+  // 不依赖渲染库的内部字段：换模型后右键菜单里的「表情 / 动作」自动跟着变。
+  let modelRefs = { expressions: [], motions: {} };
+  try {
+    const refs = (await (await fetch(MODEL_URL)).json()).FileReferences || {};
+    modelRefs = { expressions: refs.Expressions || [], motions: refs.Motions || {} };
+  } catch (_) { /* 读不到就不显示表情/动作分组 */ }
+
+  // 水印开关：水印是模型里的独立部件（Id 由宿主按模型配置传入，如 "Part13"，cdi3.json 显示名"水印.png"）。
   // 每帧在参数提交前把该部件透明度压 0，等同于 VTube Studio"按空格关闭水印"的内置功能。
-  const WATERMARK_PART = 'Part13';
-  PIXI.Ticker.shared.add(() => {
-    try { model.internalModel.coreModel.setPartOpacityById(WATERMARK_PART, 0); } catch (_) {}
-  });
+  if (WATERMARK_PART) {
+    PIXI.Ticker.shared.add(() => {
+      try { model.internalModel.coreModel.setPartOpacityById(WATERMARK_PART, 0); } catch (_) {}
+    });
+  }
 
   // 自动眨眼：待机动作是循环动作，每帧都会更新参数，框架内置的眨眼逻辑（仅在动作
   // 未更新参数时才触发）因此永远不会执行。这里挂到 beforeModelUpdate（各参数更新之后、
@@ -311,6 +328,7 @@ async function main() {
     lastHit = null;                 // 置空让下一次命中检测重新上报，恢复按模型命中判穿透
   }
   function showMenu(x, y) {
+    buildMenu();                    // 每次弹出前重建：勾选状态与列表都可能已变
     menuEl.style.display = 'block';
     // 贴边时夹回窗口内，避免菜单被裁掉
     const w = menuEl.offsetWidth, h = menuEl.offsetHeight;
@@ -319,10 +337,49 @@ async function main() {
     menuOpen = true;
     tellHost({ type: 'hit', value: true }); // 菜单打开期间保持窗口可交互（否则光标移到菜单上会被判穿透）
   }
-  // 菜单项：戳一戳 / 摸摸头 = 先播反应动作/表情，再通知宿主发起一轮对话唤醒桌宠（先做反应再对话）
-  (function buildMenu() {
+
+  // 动作平铺成一行一项：单动作组显示组名，多动作组显示「组名 · 文件名」，不嵌套子菜单
+  function motionEntries() {
+    const entries = [];
+    for (const group of Object.keys(modelRefs.motions)) {
+      const list = modelRefs.motions[group] || [];
+      list.forEach((m, i) => {
+        const file = String(m.File || '').split('/').pop().replace(/\.motion3\.json$/, '');
+        entries.push({ group, index: i, text: list.length > 1 ? `${group} · ${file}` : group });
+      });
+    }
+    return entries;
+  }
+
+  // 菜单项：戳一戳 / 摸摸头 = 先播反应动作/表情，再通知宿主发起一轮对话唤醒桌宠（先做反应再对话）；
+  // 切换模型 = 模型列表由宿主传入，点击后由宿主更新下标并重开页面（模型与菜单按新参数重建）；
+  // 表情 / 动作 = 在当前模型上直接切换，表情用 ●/○ 标出当前生效项
+  function buildMenu() {
+    menuEl.textContent = '';
     addItem('戳一戳', pokePet);
     addItem('摸摸头', patHead);
+    MODELS.forEach((name, i) => {
+      addItem((i === ACTIVE_MODEL ? '● ' : '○ ') + name,
+        () => tellHost({ type: 'switchModel', index: i }));
+    });
+
+    const expressions = modelRefs.expressions.map((e) => e.Name).filter(Boolean);
+    if (expressions.length) {
+      addHeader('表情');
+      addItem('清除表情', clearExpressions);
+      for (const name of expressions) {
+        addItem((manualActive.has(name) ? '● ' : '○ ') + name,
+          () => toggleExpression(name));
+      }
+    }
+
+    const motions = motionEntries();
+    if (motions.length) {
+      addHeader('动作');
+      addItem('清除动作', resetMotion);
+      for (const m of motions) addItem(m.text, () => playMotion(m.group, m.index));
+    }
+
     function addItem(text, action) {
       const d = document.createElement('div');
       d.className = 'item';
@@ -332,7 +389,14 @@ async function main() {
       d.addEventListener('click', (e) => { e.stopPropagation(); hideMenu(); action(); });
       menuEl.appendChild(d);
     }
-  })();
+    function addHeader(text) {
+      const d = document.createElement('div');
+      d.className = 'header';
+      d.textContent = text;
+      d.addEventListener('pointerdown', (e) => e.stopPropagation());
+      menuEl.appendChild(d);
+    }
+  }
 
   // 右键：弹出交互菜单（抑制默认菜单）
   document.addEventListener('contextmenu', (e) => {
@@ -420,7 +484,12 @@ async function main() {
 
   async function setExpr(name) {
     const em = model.internalModel.motionManager.expressionManager;
-    if (name && name !== curExpr) {
+    // 自动 / 外部指定的单个表情接管：立即清掉手动多选，避免两套表情叠在同一批参数上
+    manualActive.clear();
+    manualWeights.clear();
+    manualExprs.length = 0;
+    // 传名字就切换到该表情（重复点同一项保持不动），传 null 清除回默认
+    if (name) {
       await model.expression(name);
       curExpr = name;
     } else {
@@ -428,6 +497,115 @@ async function main() {
       curExpr = null;
     }
     tellHost({ type: 'expression', name: curExpr });   // 回报实际表情，供宿主查询当前表情
+  }
+
+  // 手动切换动作：优先级 3（Force）立即接管当前动作，与原生版 PlayMotion 一致；
+  // 组名/序号无效时渲染库内部会抛错，这里吞掉即可
+  function playMotion(group, index) {
+    try {
+      // motion() 返回 Promise，失败（无效组/序号）会 reject 而不是同步抛错
+      const p = model.motion(group, index, 3);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) { /* 无效组/序号时忽略 */ }
+  }
+
+  // 清除动作并恢复默认状态：非循环动作播完会把参数留在末帧（换姿势、变装等），
+  // 停掉动作后把参数逐个写回默认值并保存为基线，与原生版 ResetMotion 一致
+  function resetMotion() {
+    try {
+      const im = model.internalModel;
+      im.motionManager.stopAllMotions();
+      const core = im.coreModel;
+      const count = core.getParameterCount();
+      for (let i = 0; i < count; i++) {
+        core.setParameterValueByIndex(i, core.getParameterDefaultValue(i));
+      }
+      core.saveParameters();
+    } catch (_) { /* 参数接口不可用时忽略 */ }
+  }
+
+  // 手动表情（多选叠加，带淡入淡出）：渲染库的表情队列是替换式的，多选时页面自己按 Blend 规则
+  // 逐帧写回；每个表情有独立权重，激活时淡入、取消时淡出，与原生版一致。
+  const EXPR_FADE_SECONDS = 0.3;
+  const manualExprs = [];              // 激活顺序（含正在淡出的）
+  const manualActive = new Set();      // 目标为激活的集合
+  const manualWeights = new Map();     // 表情名 → 当前权重（0~1）
+  const manualExprDefs = new Map();    // 表情名 → 参数定义（异步读 exp3.json 后缓存）
+
+  async function loadExpressionDefs(name) {
+    if (manualExprDefs.has(name)) return manualExprDefs.get(name);
+    const entry = modelRefs.expressions.find((e) => e.Name === name);
+    if (!entry || !entry.File) return [];
+    try {
+      const dir = MODEL_URL.replace(/[^/]*$/, '');
+      const json = await (await fetch(dir + entry.File)).json();
+      const defs = (json.Parameters || []).map((p) => ({
+        id: p.Id, value: Number(p.Value) || 0, blend: p.Blend || 'Add',
+      }));
+      manualExprDefs.set(name, defs);
+      return defs;
+    } catch (_) { return []; }
+  }
+
+  // 把手动表情按权重叠加到当前参数上（挂在 beforeModelUpdate：动作/物理之后、顶点计算之前）。
+  // 权重逐帧向目标逼近，因此切换表情是平滑过渡而不是瞬间跳变。
+  function applyManualExprs() {
+    if (!manualExprs.length) return;
+    try {
+      const core = blink.coreModel;
+      const step = Math.min(0.5, (PIXI.Ticker.shared.deltaMS || 0) / 1000) / EXPR_FADE_SECONDS;
+      for (let i = manualExprs.length - 1; i >= 0; i--) {
+        const name = manualExprs[i];
+        const target = manualActive.has(name) ? 1 : 0;
+        let w = manualWeights.get(name) || 0;
+        w = target > w ? Math.min(target, w + step) : Math.max(target, w - step);
+        manualWeights.set(name, w);
+        // 淡出结束：从列表里摘掉，不再影响参数
+        if (w <= 0 && target === 0) {
+          manualWeights.delete(name);
+          manualExprs.splice(i, 1);
+          continue;
+        }
+
+        const defs = manualExprDefs.get(name);
+        if (!defs) { loadExpressionDefs(name); continue; }   // 还没读完：下一帧再叠
+        for (const p of defs) {
+          const cur = core.getParameterValueById(p.id);
+          // 与 SDK 的权重语义一致：Add 按权重加、Multiply 按权重插值、Overwrite 按权重覆盖
+          const v = p.blend === 'Multiply' ? cur * (1 + (p.value - 1) * w)
+                  : p.blend === 'Overwrite' ? cur + (p.value - cur) * w
+                  : cur + p.value * w;
+          core.setParameterValueById(p.id, v);
+        }
+      }
+    } catch (_) { /* 参数接口不可用时忽略 */ }
+  }
+  blink.on('beforeModelUpdate', applyManualExprs);
+
+  // 切换某个表情的手动激活状态：多选同时生效，点已激活项即取消（淡出）
+  async function toggleExpression(name) {
+    if (manualActive.has(name)) {
+      manualActive.delete(name);      // 保留在列表里，等权重降到 0 再移除
+    } else {
+      manualActive.add(name);
+      if (!manualWeights.has(name)) manualWeights.set(name, 0);
+      if (!manualExprs.includes(name)) manualExprs.push(name);
+      await loadExpressionDefs(name);
+    }
+
+    // 手动接管：停掉渲染库的表情队列，避免自动表情残留叠在手动表情上
+    const em = model.internalModel.motionManager.expressionManager;
+    if (em) em.stopAllExpressions();
+    curExpr = null;
+    tellHost({ type: 'expression', name: null });
+  }
+
+  function clearExpressions() {
+    manualActive.clear();             // 已激活的表情自然淡出
+    const em = model.internalModel.motionManager.expressionManager;
+    if (em) em.stopAllExpressions();
+    curExpr = null;
+    tellHost({ type: 'expression', name: null });
   }
 
   // 戳一戳的表情：随机取一个（与原生版 SetRandomExpression 一致），经 setExpr 保证上报宿主

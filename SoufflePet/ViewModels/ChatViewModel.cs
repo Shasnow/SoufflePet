@@ -64,6 +64,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IMcpToolService _mcpTools;
     private readonly IMcpConfigStore _mcpConfig;
     private readonly ISkillsWindowService _skillsWindow;
+    private readonly ILive2DModelsWindowService _live2DModelsWindow;
     private readonly IPluginsWindowService _pluginsWindow;
     private readonly IScheduledTasksWindowService _scheduledTasksWindow;
     private readonly IStatisticsService _statistics;
@@ -99,6 +100,7 @@ public partial class ChatViewModel : ViewModelBase
         IMcpToolService mcpTools,
         IMcpConfigStore mcpConfig,
         ISkillsWindowService skillsWindow,
+        ILive2DModelsWindowService live2DModelsWindow,
         IPluginsWindowService pluginsWindow,
         IScheduledTasksWindowService scheduledTasksWindow,
         PlatformService platforms,
@@ -115,6 +117,7 @@ public partial class ChatViewModel : ViewModelBase
         _mcpTools = mcpTools;
         _mcpConfig = mcpConfig;
         _skillsWindow = skillsWindow;
+        _live2DModelsWindow = live2DModelsWindow;
         _pluginsWindow = pluginsWindow;
         _scheduledTasksWindow = scheduledTasksWindow;
         _statistics = statistics;
@@ -645,6 +648,14 @@ public partial class ChatViewModel : ViewModelBase
     {
         IsMoreOpen = false;
         _mcpSettings.Show();
+    }
+
+    /// <summary>打开模型管理窗口（导入/移除/修改 Live2D 模型配置）。</summary>
+    [RelayCommand]
+    private void OpenLive2DModels()
+    {
+        IsMoreOpen = false;
+        _live2DModelsWindow.Show();
     }
 
     /// <summary>打开技能管理窗口（每次打开前重新扫描技能目录）。</summary>

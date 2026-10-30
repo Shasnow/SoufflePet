@@ -97,8 +97,29 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// <summary>隐藏超时后的卸载请求：窗口层置位，渲染线程在下一次拿到的帧里释放模型。</summary>
     private volatile bool _unloadRequested;
 
+    /// <summary>切换模型的请求：窗口层置位，渲染线程在下一帧卸载旧模型并按当前下标加载新模型。</summary>
+    private volatile bool _reloadRequested;
+
+    /// <summary>
+    /// 上次加载失败（模型未配置 / model3.json 不存在）：防止渲染帧逐帧重试把日志刷爆。
+    /// 只在窗口层显式重新加载（切换模型、导入模型后重载）时清掉。
+    /// </summary>
+    private volatile bool _loadFailed;
+
     /// <summary>模型加载完成前缓存的自动表情（配合 _hasPendingExpression 区分"无缓存"）。</summary>
     private string? _pendingExpression;
+
+    /// <summary>
+    /// 宿主最近一次要求的自动表情（null = 默认）；只有自动联动与表情工具会写它。
+    /// 切换模型的请求发出到渲染线程真正换完之间有窗口期，此间 SetExpression 打在旧模型上会随旧模型一起丢弃，
+    /// 因此这里单独记一份"宿主的意愿"，换模型后优先按它恢复（与 WebView 版缓存 _autoExpression 的做法对齐）。
+    /// </summary>
+    private volatile string? _hostExpression;
+    private volatile bool _hasHostExpression;
+
+    /// <summary>模型加载完成前缓存的手动多选表情（卸载/隐藏重载后恢复用）。</summary>
+    private List<string>? _pendingExpressions;
+    private bool _hasPendingExpressions;
 
     private bool _pendingGaze;
     private bool _renderErrLogged;
@@ -160,6 +181,14 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         RequestNextFrameRendering();
     }
 
+    /// <summary>右键菜单切换模型：请求渲染线程卸载旧模型并按设置里的当前下标重新加载。</summary>
+    public void ReloadModel()
+    {
+        _loadFailed = false; // 用户显式重载（含刚导入/修好配置），允许再试一次
+        _reloadRequested = true;
+        RequestNextFrameRendering();
+    }
+
     /// <summary>拉起渲染链：直接请求一帧，续帧链自此自行维持。</summary>
     private void StartRenderLoop()
     {
@@ -192,13 +221,23 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// </summary>
     public void SetExpression(string? name)
     {
-        if (_model == null)
+        _hostExpression = name;
+        _hasHostExpression = true;
+
+        // 模型未就绪、或切换模型的请求已发出（旧模型这一帧就要被丢弃，写它没有意义）：
+        // 一律记进待恢复缓存，由新模型加载后补设
+        if (_model == null || _reloadRequested)
         {
             _pendingExpression = name;
             _hasPendingExpression = true;
+            // 接管语义：自动表情生效意味着手动多选作废
+            _pendingExpressions = [];
+            _hasPendingExpressions = true;
             return;
         }
 
+        // 自动 / 工具指定的单个表情接管：清掉手动多选，避免两套表情叠在同一批参数上
+        _model.ClearExpressions();
         if (name == null) _model.ResetExpression();
         else _model.SetExpression(name);
     }
@@ -209,6 +248,63 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// </summary>
     public string? CurrentExpression =>
         _model?.CurrentExpression ?? (_hasPendingExpression ? _pendingExpression : null);
+
+    /// <summary>当前模型可用的表情名（右键「切换表情」菜单的数据源）；模型未加载时为空。</summary>
+    public List<string> ExpressionNames => _model?.Expressions ?? [];
+
+    /// <summary>当前模型可用的动作组名（右键「切换动作」菜单的数据源）；模型未加载时为空。</summary>
+    public List<string> MotionGroups => _model?.Motions ?? [];
+
+    /// <summary>动作组内的动作数量。</summary>
+    public int MotionCount(string group) => _model?.MotionCount(group) ?? 0;
+
+    /// <summary>动作组内某个动作的文件名（菜单显示用）；组名或序号无效时返回 null。</summary>
+    public string? MotionFileName(string group, int no) => _model?.MotionFileName(group, no);
+
+    /// <summary>手动播放指定动作：用 Force 优先级立即接管当前动作（否则会被待机动作压住）。</summary>
+    public void PlayMotion(string group, int no) =>
+        _model?.StartMotion(group, no, MotionPriority.PriorityForce);
+
+    /// <summary>清除当前表情（含手动多选）：回到模型默认状态（等同右键菜单里的「清除表情」）。</summary>
+    public void ResetExpression()
+    {
+        _hostExpression = null;
+        _hasHostExpression = true;
+
+        if (_model == null || _reloadRequested)
+        {
+            _pendingExpression = null;
+            _hasPendingExpression = true;
+            _pendingExpressions = [];
+            _hasPendingExpressions = true;
+            return;
+        }
+
+        _model.ClearExpressions();
+        _model.ResetExpression();
+    }
+
+    /// <summary>某个表情是否处于手动激活状态。</summary>
+    public bool IsExpressionActive(string name) => _model?.IsExpressionActive(name) ?? false;
+
+    /// <summary>切换表情的手动激活状态：可同时激活多个，按激活顺序叠加。</summary>
+    public void ToggleExpression(string name) => _model?.ToggleExpression(name);
+
+    /// <summary>清除所有手动表情。</summary>
+    public void ClearExpressions()
+    {
+        if (_model == null || _reloadRequested)
+        {
+            _pendingExpressions = [];
+            _hasPendingExpressions = true;
+            return;
+        }
+
+        _model.ClearExpressions();
+    }
+
+    /// <summary>清除当前动作并恢复默认状态（非循环动作改变过的姿势/部件状态一并复原）。</summary>
+    public void ResetMotion() => _model?.ResetMotion();
 
     /// <summary>目光跟随开关：转发给模型的 EnableFaceTracking；模型加载前先缓存。</summary>
     public void SetGazeFollow(bool enabled)
@@ -245,10 +341,8 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             };
             Logger.Debug("LAppDelegateOpenGL ok");
 
-            // 模型目录/名称来自设置（SoufflePet.json 的 ModelsDirectory / ModelName）：
-            // 换模型只需把模型目录放进 wwwroot/<ModelsDirectory>/ 并改设置，无需改代码。
-            // ModelName 支持「目录/模型名」写法，目录名不必与 model3.json 主文件名一致
-            _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, settings.ModelFolderName);
+            // 模型来自设置里的列表（SoufflePet.json 的 ModelsDirectory / Live2DModels）：
+            // 启动加载第一个，右键菜单可在运行中切换（切换只改运行期下标，不落盘）
             LoadModel();
 
             _lastStamp = Stopwatch.GetTimestamp();
@@ -261,23 +355,45 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     }
 
     /// <summary>
-    /// 加载模型并恢复各项设置（各向异性、水印、手柄回调、缓存的表情与目光跟随）。
-    /// 首次初始化与「隐藏超时卸载后重新显示」共用这一条路径。
+    /// 加载当前选中的模型并恢复各项设置（各向异性、水印、手柄回调、缓存的表情与目光跟随）。
+    /// 首次初始化、「隐藏超时卸载后重新显示」与「右键菜单切换模型」共用这一条路径。
     /// </summary>
     private void LoadModel()
     {
-        if (_lapp == null || _modelDir == null) return;
+        if (_lapp == null) return;
 
-        Logger.Debug("loading model dir={Dir} name={Name}", _modelDir, settings.ModelFileStem);
-        _model = _lapp.Live2dManager.LoadModel(_modelDir, settings.ModelFileStem);
+        var model = settings.ActiveLive2DModel;
+        if (model == null)
+        {
+            _loadFailed = true;
+            Logger.Warning("no live2d model configured, skip loading");
+            return;
+        }
+
+        _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, model.FolderName);
+
+        // 先确认 model3.json 存在：SDK 找不到时会兜底拼成「目录/模型名/模型名.model3.json」，
+        // 报错信息看不出是配置写错，所以这里直接给出解析后的真实路径
+        var modelJson = Path.Combine(_modelDir, $"{model.FileStem}.model3.json");
+        if (!File.Exists(modelJson))
+        {
+            _loadFailed = true;
+            Logger.Error("live2d model not found: {Path}（检查 Live2DModels 里的目录名与 model3.json 主文件名）", modelJson);
+            return;
+        }
+
+        _loadFailed = false;
+
+        Logger.Debug("loading model dir={Dir} name={Name}", _modelDir, model.FileStem);
+        _model = _lapp.Live2dManager.LoadModel(_modelDir, model.FileStem);
         // 16x 各向异性过滤：修复模型嘴部唇线在高 mip 层被采样成碎点/虚线的问题
         // （模型采用 4096×4096 图集，最小 artmesh 在纹理中仅 27px 宽，屏幕约 20px）。
         // 实测该项 GPU 开销约 0.7%，与 VTS 显示效果一致，保留。
         _model.Renderer?.Anisotropy = 16f;
-        // 水印是独立部件 "Part13"（cdi3.json 显示名"水印.png"），部件透明度
-        // 不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
-        if (!string.IsNullOrEmpty(settings.ModelWatermarkPartId))
-            _model?.Model.SetPartOpacity(settings.ModelWatermarkPartId, 0f);
+        // 水印是独立部件（模型配置里指定 Id，如 "Part13"，cdi3.json 显示名"水印.png"），
+        // 部件透明度不会被参数恢复/动作覆盖，每帧压 0 即可，等同于 VTS 空格关水印。
+        if (!string.IsNullOrEmpty(model.WatermarkPartId))
+            _model?.Model.SetPartOpacity(model.WatermarkPartId, 0f);
         // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
         _model?.GamepadValueUpdate = ApplyGamepadParams;
         // VTS 面捕映射：模型的物理输入可能是自定义参数（AngleX 等），宿主不产生这些值，
@@ -304,6 +420,15 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         // 注意：不要设 CustomValueUpdate=true——LAppModel.Update 里它与拖拽参数
         // 应用是 if/else 互斥的，设了会禁用目光跟随。水印直接在渲染循环里隐藏。
 
+        // 补设模型加载完成前缓存的手动多选表情（卸载重载后恢复多选状态）
+        if (_hasPendingExpressions)
+        {
+            _hasPendingExpressions = false;
+            var pending = _pendingExpressions ?? [];
+            _pendingExpressions = null;
+            if (pending.Count > 0) _model?.SetManualExpressions(pending);
+        }
+
         // 补设模型加载完成前缓存的目光跟随开关（托盘可能在 GL 初始化前切换）
         if (_hasPendingGaze)
         {
@@ -322,6 +447,8 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
         // 用户关掉的目光跟随也会变回开启（SDK 默认 true）。
         _pendingExpression = _model.CurrentExpression;
         _hasPendingExpression = true;
+        _pendingExpressions = _model.ManualExpressions;
+        _hasPendingExpressions = true;
         _pendingGaze = _model.EnableFaceTracking;
         _hasPendingGaze = true;
 
@@ -345,9 +472,30 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
                 return;
             }
 
+            // 切换模型：同一帧里先释放旧模型再装新的，避免两份显存同时占用。
+            // 隐藏期间拿不到帧就先记着，等重新显示时再换
+            if (_reloadRequested && _renderLoopEnabled)
+            {
+                _reloadRequested = false;
+                UnloadModel(); // 先抓取旧模型的表情 / 手动多选 / 目光跟随作为兜底
+                // 宿主的意愿优先于旧模型的运行期状态：ReloadModel 之后 App 会紧接着重算一次自动表情，
+                // 那次 SetExpression 打在还没换掉的旧模型上会随它一起丢弃，只能靠这份缓存带到新模型；
+                // 否则新模型停在默认表情，而 App 侧已把表情记为「已生效」，要等下次状态变化才切回来。
+                if (_hasHostExpression)
+                {
+                    _pendingExpression = _hostExpression;
+                    _hasPendingExpression = true;
+                    _pendingExpressions = [];
+                    _hasPendingExpressions = true;
+                }
+
+                LoadModel();
+            }
+
             // 重新显示后的首帧：把隐藏期间卸载掉的模型装回来。
-            // 隐藏状态下不要顺手加载，否则卸载完又被下一次合成帧装回去，等于白卸
-            if (_model == null && _renderLoopEnabled) LoadModel();
+            // 隐藏状态下不要顺手加载，否则卸载完又被下一次合成帧装回去，等于白卸。
+            // 上次加载已失败（模型文件不存在）时不再逐帧重试，等窗口层显式重载。
+            if (_model == null && _renderLoopEnabled && !_loadFailed) LoadModel();
 
             // 注意：渲染回调在渲染线程执行，此时 VisualRoot 尚未挂载，RenderScaling 取不到，
             // 模型会缩小并被锚定到窗口左下角（GL 视口原点在左下）。

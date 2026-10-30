@@ -399,9 +399,10 @@ public sealed class ChatTools
     private string GetExpressions()
     {
         var names = _expressions.GetExpressionNames();
+        var model = _settings.ActiveLive2DModel?.Name ?? "当前模型";
         return names.Count == 0
-            ? $"当前模型 {_settings.ModelName} 没有配置表情。"
-            : $"当前模型 {_settings.ModelName} 的可用表情：{string.Join("、", names)}。";
+            ? $"当前模型 {model} 没有配置表情。"
+            : $"当前模型 {model} 的可用表情：{string.Join("、", names)}。";
     }
 
     private string GetCurrentExpression() =>
