@@ -2,12 +2,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-        日期 / 时间选择器：Fluent 默认外观是方角浅色块，且最小宽度很大（DatePicker 296 / TimePicker 242），
+        日期 / 时间 / 数值选择器：Fluent 默认外观是方角浅色块，且最小宽度很大（DatePicker 296 / TimePicker 242），
         放在深色玻璃面板里既违和又会被挤到溢出裁切。这里统一成与 TextBox.field 一致的深色圆角输入框，
         并放开最小宽度、默认撑满一行（与同一面板里的输入框对齐）。
         Fluent 模板把背景 / 描边 / 圆角 / 前景通过 TemplateBinding 透传给内部按钮，因此直接设控件属性即可生效。
     -->
-    <Style Selector="DatePicker, TimePicker">
+    <Style Selector="DatePicker, TimePicker, NumericUpDown">
         <Setter Property="Background" Value="#12FFFFFF" />
         <Setter Property="BorderBrush" Value="#22FFFFFF" />
         <Setter Property="BorderThickness" Value="1" />
@@ -19,11 +19,21 @@
         <Setter Property="MaxWidth" Value="720" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />
     </Style>
-    <Style Selector="DatePicker:pointerover, TimePicker:pointerover">
+    <Style Selector="DatePicker:pointerover, TimePicker:pointerover, NumericUpDown:pointerover">
         <Setter Property="BorderBrush" Value="#40FFFFFF" />
     </Style>
-    <Style Selector="DatePicker:focus-within, TimePicker:focus-within">
+    <Style Selector="DatePicker:focus-within, TimePicker:focus-within, NumericUpDown:focus-within">
         <Setter Property="BorderBrush" Value="#E8879B" />
+    </Style>
+
+    <!--
+        数值选择器另外两点：内部 ButtonSpinner 用 {TemplateBinding Padding} 传给里面的 TextBox，
+        默认内边距偏大，这里与 TextBox.field 对齐；数值文本默认贴顶，NumericUpDown 自带 VerticalContentAlignment，直接居中。
+        （加 / 减小按钮的描边通过 TemplateBinding 跟着 BorderBrush 走，随上面的描边一起变化，不再单独设。）
+    -->
+    <Style Selector="NumericUpDown">
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
     <!--
@@ -35,6 +45,23 @@
     </Style>
     <Style Selector="TimePicker /template/ Button#PART_FlyoutButton TextBlock">
         <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        模板里月份段（PART_MonthTextBlock）是唯一被写成 TextAlignment="Left" 的一段，日 / 年段则是 HorizontalAlignment="Center"，
+        加上月份列还是三段里最宽的一列，月份值看起来明显贴左。HorizontalAlignment 在模板里没有写死，样式可以覆盖；
+        TextAlignment="Left" 是模板里的局部值、样式覆盖不了，但收缩到内容宽度后它就不再起作用。
+        另外模板只给月份段留了 9px 左内边距（日 / 年段没有），收缩居中后文字会右偏 4.5px；Padding 是模板里的局部值改不了，
+        但 Margin 没有写死，这里用等量负左外边距抵消，使文字正好落在列中心。
+    -->
+    <Style Selector="DatePicker /template/ TextBlock#PART_MonthTextBlock">
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="-9,0,0,0" />
+    </Style>
+
+    <!-- 月份默认按当前文化显示成「十月」等汉字，与年 / 日的数字混排不统一；固定为两位数月份 -->
+    <Style Selector="DatePicker">
+        <Setter Property="MonthFormat" Value="MM" />
     </Style>
 
     <!-- 折叠态里分隔各段（日｜月｜年、时｜分｜秒）的竖线默认取主题资源，在深色玻璃上偏亮，压暗一档 -->

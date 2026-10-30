@@ -212,12 +212,14 @@
                                                     </Grid>
                                                 </StackPanel>
 
-                                                <!-- 单次：日期 + 时刻 -->
+                                                <!-- 单次：日期 + 时刻（同一行） -->
                                                 <StackPanel Spacing="3" IsVisible="{Binding IsOnce}">
                                                     <TextBlock Text="触发时间" Classes="label" />
-                                                    <DatePicker SelectedDate="{Binding OnceDate, Mode=TwoWay}" />
-                                                    <TimePicker SelectedTime="{Binding OnceTime, Mode=TwoWay}"
-                                                                Margin="0,4,0,0" />
+                                                    <Grid ColumnDefinitions="3*,2*" ColumnSpacing="6">
+                                                        <DatePicker SelectedDate="{Binding OnceDate, Mode=TwoWay}" />
+                                                        <TimePicker Grid.Column="1"
+                                                                    SelectedTime="{Binding OnceTime, Mode=TwoWay}" />
+                                                    </Grid>
                                                 </StackPanel>
 
                                                 <!-- 每日：时刻 -->
