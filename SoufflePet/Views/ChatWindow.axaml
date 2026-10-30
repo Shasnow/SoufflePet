@@ -16,6 +16,7 @@
         TransparencyLevelHint="Transparent"
         Background="Transparent"
         ShowInTaskbar="False"
+        Topmost="True"
         RequestedThemeVariant="Dark">
     <!-- 深色玻璃面板的外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
 
