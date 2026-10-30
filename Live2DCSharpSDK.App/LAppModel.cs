@@ -83,6 +83,12 @@ public class LAppModel : CubismUserModel
     public Action<LAppModel>? GamepadValueUpdate;
 
     /// <summary>
+    /// 物理输入回调（应用层挂载）：在物理演算之前写入模型自定义的物理输入参数，
+    /// 例如 VTube Studio 导出模型里由 .vtube.json 映射出的 AngleX / PositionX。
+    /// </summary>
+    public Action<LAppModel>? PhysicsInputUpdate;
+
+    /// <summary>
     /// パラメータID: ParamAngleX
     /// </summary>
     public string IdParamAngleX { get; set; }
@@ -436,6 +442,9 @@ public class LAppModel : CubismUserModel
         // 位置选在物理演算之前：physics3.json 把摇杆、扳机、ABXY 作为物理输入源，
         // 这样推摇杆/按键会随即带出身体与手臂的晃动（模型作者的设计意图）。
         GamepadValueUpdate?.Invoke(this);
+
+        // 模型自定义物理输入（VTS 面捕映射参数）：同样在物理演算之前写入
+        PhysicsInputUpdate?.Invoke(this);
 
         // 物理演算の設定
         _physics?.Evaluate(Model, deltaTimeSeconds);

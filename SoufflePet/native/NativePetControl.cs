@@ -91,6 +91,9 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     private volatile LAppModel? _model;
     private string? _modelDir;
 
+    /// <summary>VTS 面捕映射：把标准角度参数同步到模型作者在 .vtube.json 声明的自定义物理输入。</summary>
+    private VtsInputBinding[] _vtsInputs = [];
+
     /// <summary>隐藏超时后的卸载请求：窗口层置位，渲染线程在下一次拿到的帧里释放模型。</summary>
     private volatile bool _unloadRequested;
 
@@ -277,6 +280,10 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             _model?.Model.SetPartOpacity(settings.ModelWatermarkPartId, 0f);
         // 手柄参数回调：在动作/表情之后、物理演算之前写入摇杆与按键（见 ApplyGamepadParams）
         _model?.GamepadValueUpdate = ApplyGamepadParams;
+        // VTS 面捕映射：模型的物理输入可能是自定义参数（AngleX 等），宿主不产生这些值，
+        // 需要每帧从标准角度参数同步过去，否则整条物理链一直是默认值
+        _model?.PhysicsInputUpdate = ApplyVtsInputs;
+        LoadVtsInputMappings();
 
         // 测量双眼中心
         MeasureEyeCenter(_model?.Model);
@@ -736,6 +743,103 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     }
 
     private static float Bool(bool v) => v ? 1f : 0f;
+
+    /// <summary>VTS 参数映射：按作者声明的输入/输出范围，把一个参数的值线性换算到另一个参数。</summary>
+    private readonly record struct VtsInputBinding(
+        string SourceId, string TargetId,
+        float InputLower, float InputUpper,
+        float OutputLower, float OutputUpper);
+
+    /// <summary>
+    /// 每帧把标准角度参数（此时已叠加过呼吸/拖拽）按 .vtube.json 声明的范围映射到模型的
+    /// 自定义物理输入参数（如 AngleX / PositionX），由 LAppModel.PhysicsInputUpdate 在物理演算前回调。
+    /// 没有映射（普通模型）时直接返回，行为不变。
+    /// </summary>
+    private void ApplyVtsInputs(LAppModel model)
+    {
+        if (_vtsInputs.Length == 0) return;
+
+        var m = model.Model;
+        foreach (var binding in _vtsInputs)
+        {
+            var t = (m.GetParameterValue(binding.SourceId) - binding.InputLower)
+                    / (binding.InputUpper - binding.InputLower);
+            t = Math.Clamp(t, 0f, 1f);
+            m.SetParameterValue(
+                binding.TargetId,
+                binding.OutputLower + t * (binding.OutputUpper - binding.OutputLower));
+        }
+    }
+
+    /// <summary>
+    /// 解析模型目录下的 *.vtube.json，只取 Input 为面捕角度（FaceAngleX/Y/Z）的条目：
+    /// 这类模型的 physics3.json 用作者自定义的参数（AngleX、PositionX 等）当物理输入，
+    /// 宿主不产生这些值，物理链就会一直停在默认值上。
+    /// </summary>
+    private void LoadVtsInputMappings()
+    {
+        _vtsInputs = [];
+        if (_modelDir == null) return;
+
+        var files = Directory.GetFiles(_modelDir, "*.vtube.json");
+        if (files.Length == 0) return;
+
+        try
+        {
+            using var stream = File.OpenRead(files[0]);
+            var config = JsonSerializer.Deserialize<VtsModelConfig>(stream);
+            if (config?.ParameterSettings == null) return;
+
+            var bindings = new List<VtsInputBinding>();
+            foreach (var setting in config.ParameterSettings)
+            {
+                // 只支持宿主已有对应量的输入：面捕角度复用呼吸/拖拽写入的 ParamAngleX/Y/Z
+                var source = setting.Input switch
+                {
+                    "FaceAngleX" => "ParamAngleX",
+                    "FaceAngleY" => "ParamAngleY",
+                    "FaceAngleZ" => "ParamAngleZ",
+                    _ => null
+                };
+
+                if (source == null
+                    || string.IsNullOrWhiteSpace(setting.OutputLive2D)
+                    || setting.InputRangeLower == setting.InputRangeUpper)
+                {
+                    continue;
+                }
+
+                bindings.Add(new VtsInputBinding(
+                    source, setting.OutputLive2D,
+                    setting.InputRangeLower, setting.InputRangeUpper,
+                    setting.OutputRangeLower, setting.OutputRangeUpper));
+            }
+
+            _vtsInputs = [.. bindings];
+            if (_vtsInputs.Length > 0)
+                Logger.Debug("vts input mapping loaded count={Count} file={File}", _vtsInputs.Length, files[0]);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "read vtube.json {File} failed", files[0]);
+        }
+    }
+
+    /// <summary>.vtube.json 的最小解析模型：只有 ParameterSettings 里的面捕到参数映射用得上。</summary>
+    private sealed class VtsModelConfig
+    {
+        public List<VtsParameterSetting>? ParameterSettings { get; set; }
+    }
+
+    private sealed class VtsParameterSetting
+    {
+        public string? Input { get; set; }
+        public string? OutputLive2D { get; set; }
+        public float InputRangeLower { get; set; }
+        public float InputRangeUpper { get; set; }
+        public float OutputRangeLower { get; set; }
+        public float OutputRangeUpper { get; set; }
+    }
 
     /// <summary>
     ///     逐像素命中检测：读取帧缓冲中光标下的 1 个像素，alpha 大于阈值说明压在模型可见区域。

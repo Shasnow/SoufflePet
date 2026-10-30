@@ -243,6 +243,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 - `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
 - `ModelName`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `wwwroot/models/你的模型名/你的模型名.model3.json`）；两者不一致时写成 `目录名/主文件名`（对应 `wwwroot/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
+- VTube Studio 导出的模型（目录内有 `.vtube.json`）：原生版会读取其中的 `ParameterSettings`，把面捕角度（`FaceAngleX/Y/Z`）按作者配置的范围映射到 `AngleX/AngleY/AngleZ`、`PositionX/Y/Z` 等自定义参数，保证这类模型的物理链有输入；普通模型不受影响
 - 两个键都在启动时读取，**修改后需重启生效**
 
 ### 模型相关的可配置项
