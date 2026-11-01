@@ -32,7 +32,7 @@ public sealed class ChatTools
     private const int DefaultShellTimeoutSeconds = 30;
 
     /// <summary>命令执行允许的最大超时（秒）：模型传得更大时按此上限处理。</summary>
-    private const int MaxShellTimeoutSeconds = 600;
+    private const int MaxShellTimeoutSeconds = 1800;
 
     /// <summary>命令输出回传给模型的最大长度，超出截断。</summary>
     private const int ShellOutputMaxLength = 4000;
@@ -136,73 +136,72 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 WebSearch,
                 "web_search",
-                "联网搜索实时信息，返回网页标题、链接和摘要。"),
+                "联网搜索实时信息"),
             AIFunctionFactory.Create(
                 GetExpressions,
                 "get_expressions",
-                "列出当前 Live2D 模型可用的表情名称。"),
+                "列出当前 Live2D 模型可用的表情名称"),
             AIFunctionFactory.Create(
                 GetCurrentExpression,
                 "get_current_expression",
-                "获取当前显示的 Live2D 表情。"),
+                "获取当前显示的 Live2D 表情"),
             AIFunctionFactory.Create(
                 SetExpression,
                 "set_expression",
-                "切换桌宠的 Live2D 表情；空字符串表示恢复默认。"),
+                "切换桌宠的 Live2D 表情；空字符串表示恢复默认"),
             AIFunctionFactory.Create(
                 ReadFile,
                 "read_file",
-                "读取文件内容，支持文本、图片、音频。"),
+                "读取文件内容，支持文本、图片、音频"),
             AIFunctionFactory.Create(
                 RunShellCommand,
                 "run_shell_command",
-                "执行 PowerShell 命令，返回退出码与输出。"),
+                "执行 PowerShell 命令，返回退出码与输出"),
             AIFunctionFactory.Create(
                 ListWindows,
                 "list_windows",
-                "列出当前屏幕上的可见窗口。"),
+                "列出当前屏幕上的可见窗口"),
             AIFunctionFactory.Create(
                 AskUser,
                 "ask_user",
                 "向用户提问以补全信息：每个问题给 2-5 个预设选项，"
-                + "界面会附带一个「其他」选项；用户全部回答后返回结果。"),
+                + "界面会附带一个「其他」选项；用户全部回答后返回结果"),
             AIFunctionFactory.Create(
                 TakeScreenshot,
                 "take_screenshot",
-                "截取屏幕画面，图片会返回给你，同时保存为 PNG。"
-                + "不传 window 截取光标所在显示器；传 window 按标题截取该窗口（可不完整、不区分大小写，被遮挡也能截）。"),
+                "截取屏幕或窗口画面"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
-                "把用户信息写入长期记忆（跨会话保留）；同一个 key 会覆盖旧值。"),
+                "把用户信息写入长期记忆；同一个 key 会覆盖旧值"),
             AIFunctionFactory.Create(
                 Forget,
                 "forget",
-                "删除长期记忆里的一条记录。"),
+                "删除长期记忆里的一条记录"),
             AIFunctionFactory.Create(
                 Recall,
                 "recall",
-                "按关键词检索过去的对话记录。"),
+                "按关键词检索过去的对话记录"),
             AIFunctionFactory.Create(
                 ReadSkill,
                 "read_skill",
-                "读取某个技能的完整说明。"),
+                "读取某个技能的完整说明"),
             AIFunctionFactory.Create(
                 GetMessages,
                 "get_messages",
-                "读取消息平台某个会话（私聊或群聊）的最近消息。"),
+                "读取消息平台某个会话的最近消息"),
             AIFunctionFactory.Create(
                 SendMessage,
                 "send_message",
-                "向消息平台的某个会话（私聊或群聊）发送消息。"),
+                "向消息平台的某个会话发送消息"),
             AIFunctionFactory.Create(
                 SendAttachment,
                 "send_attachment",
-                "向消息平台的某个会话发送本地图片或文件。"),
+                "向消息平台的某个会话发送文件"),
             AIFunctionFactory.Create(
                 ShowFile,
                 "show_file",
-                "在本地对话窗口里直接给用户展示一张图片或一个文件卡片"),
+                "向用户展示文件"),
             AIFunctionFactory.Create(
                 ListScheduledTasks,
                 "list_scheduled_tasks",
@@ -222,39 +221,39 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 GetStatistics,
                 "get_statistics",
-                "查询统计信息（陪伴时长、对话 token 用量等）。不传 item 返回全部统计项，传统计项名称返回单项。"),
+                "查询统计信息"),
             AIFunctionFactory.Create(
                 BrowserOpen,
                 "browser_open",
-                "在内置浏览器窗口里打开网址，返回页面标题与加载状态。"),
+                "在内置浏览器窗口里打开网址"),
             AIFunctionFactory.Create(
                 BrowserSnapshot,
                 "browser_snapshot",
-                "读取内置浏览器当前网页的标题、可交互元素（带 e0、e1 这类引用编号）和正文。"),
+                "读取内置浏览器当前网页的标题、可交互元素和正文"),
             AIFunctionFactory.Create(
                 BrowserClick,
                 "browser_click",
-                "点击内置浏览器网页上的某个元素。"),
+                "点击内置浏览器网页上的某个元素"),
             AIFunctionFactory.Create(
                 BrowserType,
                 "browser_type",
-                "向内置浏览器网页的输入框写入文本，可选择先清空原有内容、写入后直接提交所在表单。"),
+                "向内置浏览器网页的输入框写入文本，可选择先清空原有内容、写入后直接提交所在表单"),
             AIFunctionFactory.Create(
                 BrowserPressKey,
                 "browser_press_key",
-                "向内置浏览器网页派发按键事件，作用于当前焦点元素或指定引用。"),
+                "向内置浏览器网页派发按键事件，作用于当前焦点元素或指定引用"),
             AIFunctionFactory.Create(
                 BrowserScroll,
                 "browser_scroll",
-                "滚动内置浏览器网页或其中某个元素，正数向下、负数向上。"),
+                "滚动内置浏览器网页或其中某个元素"),
             AIFunctionFactory.Create(
                 BrowserBack,
                 "browser_back",
-                "内置浏览器返回上一页。"),
+                "内置浏览器返回上一页"),
             AIFunctionFactory.Create(
                 BrowserClose,
                 "browser_close",
-                "关闭内置浏览器窗口并释放内存。"),
+                "关闭内置浏览器窗口并释放内存"),
             AIFunctionFactory.Create(
                 BrowserScreenshot,
                 "browser_screenshot",
@@ -430,7 +429,7 @@ public sealed class ChatTools
         => _memory.Recall(query);
 
     private string ReadSkill(
-        [Description("技能名称（取自系统提示词的技能清单）")] string name)
+        [Description("技能名称")] string name)
     {
         if (_skills.DiscoverEnabled().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
             return $"没有名为「{name}」的可用技能，请从系统提示词的技能清单中选择。";
@@ -475,7 +474,7 @@ public sealed class ChatTools
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(content))
-            return "任务内容不能为空：它是到点后交给桌宠的提示词。";
+            return "任务内容不能为空";
         if (!TryParseKind(kind, out var parsedKind)) return UnrecognizedKind(kind);
         if (!TryBuildSchedule(parsedKind, time, date, weekdays, intervalMinutes, out var schedule, out var error))
             return error;
@@ -704,7 +703,7 @@ public sealed class ChatTools
     private Task<string> GetMessages(
         [Description("消息平台 id，例如 napcat")]
         string platform,
-        [Description("会话 id，形如 group:12345 或 private:777，可从平台消息的 [会话 id] 前缀获取")]
+        [Description("会话 id，形如 group:12345 或 private:777")]
         string conversation,
         [Description("最多读取多少条最近消息，默认 20")]
         int limit = 20)
@@ -726,9 +725,9 @@ public sealed class ChatTools
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777")]
         string conversation,
-        [Description("本地文件的绝对路径，可带 @ 前缀")]
+        [Description("本地文件的绝对路径")]
         string path,
-        [Description("展示文件名；不传时用文件名")]
+        [Description("展示文件名")]
         string? displayName = null,
         CancellationToken cancellationToken = default)
     {
@@ -749,9 +748,9 @@ public sealed class ChatTools
 
     /// <summary>在本地对话窗口展示图片或文件卡片。</summary>
     private string ShowFile(
-        [Description("本地文件的绝对路径，可带 @ 前缀")]
+        [Description("本地文件的绝对路径")]
         string path,
-        [Description("展示文件名；不传时用文件名")]
+        [Description("展示文件名")]
         string? displayName = null)
     {
         if (!TryResolveLocalFile(path, out var fullPath, out var info, out var error)) return error;
@@ -853,7 +852,7 @@ public sealed class ChatTools
     /// 其余二进制文件只回报文件信息，不把乱码塞进提示词。
     /// </summary>
     private static AIContent[] ReadFile(
-        [Description("文件绝对路径，可带 @ 前缀")]
+        [Description("文件绝对路径")]
         string path,
         [Description("文本起始字符位置，默认 0")]
         int offset = 0,
@@ -1102,9 +1101,9 @@ public sealed class ChatTools
 
     private async Task<string> RunShellCommand(
         [Description(
-            "要执行的 PowerShell 命令，例如 Get-ChildItem C:\\ 或 Get-Process | Sort-Object CPU -Descending | Select-Object -First 5")]
+            "要执行的 PowerShell 命令")]
         string command,
-        [Description("命令超时时间（秒），默认 30，最大 600，超出按上限处理")]
+        [Description("命令超时时间（秒），默认 30，最大 1800")]
         int timeoutSeconds = DefaultShellTimeoutSeconds,
         CancellationToken cancellationToken = default)
     {
