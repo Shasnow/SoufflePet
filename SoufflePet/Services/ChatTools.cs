@@ -284,14 +284,10 @@ public sealed class ChatTools
             if (seen.Add(tool.Name)) tools.Add(tool);
         }
 
+        // tools 数组同样属于请求前缀的一部分：按名称固定排序，避免插件 / MCP 服务器的
+        // 枚举顺序变化导致每轮 tools 段不同、服务端前缀缓存整段失效。
+        tools.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
         return tools;
-    }
-
-    private static string GetCurrentTime()
-    {
-        var now = DateTimeOffset.Now;
-        var culture = CultureInfo.GetCultureInfo("zh-CN");
-        return $"{now.ToString("yyyy-MM-dd HH:mm:ss dddd", culture)}，UTC{now:zzz}，时区 {TimeZoneInfo.Local.Id}";
     }
 
     /// <summary>统计查询：不传 item 返回全部统计项，传名称/标识返回匹配的单项。</summary>

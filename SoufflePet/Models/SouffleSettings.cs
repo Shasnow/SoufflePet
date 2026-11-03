@@ -146,6 +146,14 @@ public partial class SouffleSettings : ObservableObject
     public int MaxToolRounds { get; init; } = 10;
 
     [ObservableProperty]
+    [Description("对话历史窗口高水位（用户提问轮数）：超过后一次性裁到 HistoryKeepTurns；越小越省 token，但上下文越短")]
+    public partial int HistoryWindowTurns { get; set; } = 50;
+
+    [ObservableProperty]
+    [Description("对话历史窗口低水位（用户提问轮数）：与高水位差得越多，裁剪越少、前缀缓存越稳定，但上下文压缩得越狠")]
+    public partial int HistoryKeepTurns { get; set; } = 30;
+
+    [ObservableProperty]
     [Description("已停用的技能名称（未列出的技能默认启用；技能自动从当前工作区与家目录下的 .agents/skills、.souffle/skills 读取）")]
     public partial List<string> DisabledSkills { get; set; } = [];
 
@@ -191,6 +199,10 @@ public partial class SouffleSettings : ObservableObject
         // 列表被改短/清空后旧下标可能越界：回到第一个，避免启动时加载不存在的模型
         if (ActiveLive2DModelIndex < 0 || ActiveLive2DModelIndex >= Live2DModels.Count)
             ActiveLive2DModelIndex = 0;
+        // 历史窗口：至少要保留 1 轮，且低水位必须小于高水位，否则裁剪逻辑会退化成每轮都切
+        if (HistoryWindowTurns < 2) HistoryWindowTurns = 2;
+        if (HistoryKeepTurns < 1) HistoryKeepTurns = 1;
+        if (HistoryKeepTurns >= HistoryWindowTurns) HistoryKeepTurns = HistoryWindowTurns - 1;
     }
 
     public void Save()

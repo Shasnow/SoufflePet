@@ -26,7 +26,8 @@ public readonly record struct MemoryTurn(
     string? Result = null,
     string? Reasoning = null,
     string? Display = null,
-    bool IsPlatformNotice = false);
+    bool IsPlatformNotice = false,
+    string? RequestText = null);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -78,8 +79,10 @@ public sealed class ChatMemory
     private readonly SouffleSettings _settings;
     private readonly string _conversationsPath;
     private readonly string _profilePath;
+    private readonly string _windowPath;
     private readonly List<Turn> _turns = [];
     private List<MemoryEntry> _profile = [];
+    private int _windowTurns;
 
     public ChatMemory(SouffleSettings settings)
     {
@@ -91,9 +94,11 @@ public sealed class ChatMemory
         Directory.CreateDirectory(root);
         _conversationsPath = Path.Combine(root, "conversations.jsonl");
         _profilePath = Path.Combine(root, "profile.json");
+        _windowPath = Path.Combine(root, "window.json");
 
         LoadProfile();
         LoadTurns();
+        LoadWindow();
     }
 
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
@@ -102,6 +107,8 @@ public sealed class ChatMemory
     /// <summary>
     /// 追加一条记录并落盘；role 为 user / assistant / tool。
     /// tool 记录额外保存调用信息（CallId、工具名、参数、完整结果），供启动时重建请求上下文。
+    /// requestText 是真正发给模型的正文（含时间 / 回忆等附加内容）；与展示用的 text 分开保存，
+    /// 重启后按它重建请求历史，第一次请求才能接上上一轮的前缀缓存。
     /// </summary>
     public void AddTurn(
         string role,
@@ -112,7 +119,8 @@ public sealed class ChatMemory
         string? result = null,
         string? reasoning = null,
         string? display = null,
-        bool isPlatformNotice = false)
+        bool isPlatformNotice = false,
+        string? requestText = null)
     {
         // 正文统一去空白：纯空白视作无正文，只有存在思考内容时才继续落库
         text = text.Trim();
@@ -123,6 +131,7 @@ public sealed class ChatMemory
             Time = DateTimeOffset.Now,
             Role = role,
             Text = text,
+            RequestText = string.IsNullOrWhiteSpace(requestText) ? null : requestText,
             CallId = callId,
             ToolName = toolName,
             Arguments = arguments,
@@ -173,12 +182,55 @@ public sealed class ChatMemory
             var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
                 .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result,
-                    t.Reasoning, t.Display, t.IsPlatformNotice))
+                    t.Reasoning, t.Display, t.IsPlatformNotice, t.RequestText))
                 .ToList();
 
             Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
             return turns;
         }
+    }
+
+    /// <summary>
+    /// 上次会话最后一次请求使用的窗口轮数（0 表示没有记录）。
+    /// 重启后按同一轮数恢复历史窗口，第一次请求才能和上次请求的前缀对上、继续命中服务端缓存；
+    /// 若固定按最大窗口恢复，首轮请求会把窗口裁短、前缀全变，缓存直接失效。
+    /// </summary>
+    public int WindowTurns => _windowTurns;
+
+    /// <summary>记录当前请求窗口的轮数（每次对话结束时写盘；窗口只在收到新提问 / 裁剪时变化）。</summary>
+    public void SaveWindowTurns(int turns)
+    {
+        if (turns <= 0 || turns == _windowTurns) return;
+
+        _windowTurns = turns;
+        try
+        {
+            File.WriteAllText(_windowPath, JsonSerializer.Serialize(new WindowState { Turns = turns }, JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "save window state failed");
+        }
+    }
+
+    private void LoadWindow()
+    {
+        try
+        {
+            if (!File.Exists(_windowPath)) return;
+            var state = JsonSerializer.Deserialize<WindowState>(File.ReadAllText(_windowPath), JsonOptions);
+            if (state is { Turns: > 0 }) _windowTurns = state.Turns;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "load window state failed");
+        }
+    }
+
+    /// <summary>window.json 的落盘结构。</summary>
+    private sealed class WindowState
+    {
+        public int Turns { get; set; }
     }
 
     /// <summary>写入/覆盖一条档案；value 为空等同于删除。</summary>
@@ -259,16 +311,11 @@ public sealed class ChatMemory
     }
 
     /// <summary>
-    /// 生成本轮要注入系统提示词的记忆块并追加到 builder：档案全量 + 与 query 相关的回忆，均不截断（保证内容完整）。
-    /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
-    /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
-    /// 关闭记忆或没有任何内容时不追加。
+    /// 把「用户档案」追加到系统提示词：内容只在 remember / forget 后变化，属于半静态内容，
+    /// 放在系统提示词里不会随每轮提问抖动，能保住前缀缓存。
+    /// 关闭记忆或档案为空时不追加。
     /// </summary>
-    public void BuildMemoryBlock(
-        string? query,
-        StringBuilder builder,
-        IReadOnlyCollection<string>? exclude = null,
-        IReadOnlyCollection<string>? excludeCallIds = null)
+    public void BuildProfileBlock(StringBuilder builder)
     {
         if (!Enabled) return;
 
@@ -283,37 +330,48 @@ public sealed class ChatMemory
             ];
         }
 
-        var snippets = string.IsNullOrWhiteSpace(query) ? [] : Search(query, exclude, excludeCallIds);
-
-        if (profileLines.Count == 0 && snippets.Count == 0) return;
+        if (profileLines.Count == 0) return;
 
         builder.AppendLine();
         builder.AppendLine("## 长期记忆");
         builder.AppendLine();
-        builder.AppendLine("以下是之前对话里保存下来的信息，回答时可以自然使用，不要生硬复述。");
-        if (profileLines.Count > 0)
+        builder.AppendLine("以下是之前对话里保存下来的用户信息，回答时可以自然使用，不要生硬复述。");
+        builder.AppendLine();
+        builder.AppendLine("### 用户档案：");
+        builder.AppendLine();
+        foreach (var line in profileLines) builder.AppendLine(line);
+    }
+
+    /// <summary>
+    /// 检索与 <paramref name="query" /> 相关的旧对话，返回逐行文本（每行一条回忆，正文压成单行）。
+    /// 这部分内容随每轮提问变化，由调用方追加到请求末尾（而不是系统提示词），
+    /// 否则每轮请求的前缀都不同，服务端的前缀缓存会整体失效。
+    /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
+    /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
+    /// 关闭记忆、没有提问或没有命中时返回空串。
+    /// </summary>
+    public string BuildRecallBlock(
+        string? query,
+        IReadOnlyCollection<string>? exclude = null,
+        IReadOnlyCollection<string>? excludeCallIds = null)
+    {
+        if (!Enabled || string.IsNullOrWhiteSpace(query)) return string.Empty;
+
+        var snippets = Search(query, exclude, excludeCallIds);
+        if (snippets.Count == 0) return string.Empty;
+
+        var builder = new StringBuilder();
+        foreach (var turn in snippets)
         {
-            builder.AppendLine();
-            builder.AppendLine("### 用户档案：");
-            builder.AppendLine();
-            foreach (var line in profileLines) builder.AppendLine(line);
+            builder.Append("- [")
+                .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
+                .Append("] ")
+                .Append(RoleLabel(turn.Role))
+                .Append('：')
+                .AppendLine(turn.Text.ReplaceLineEndings(" "));
         }
 
-        if (snippets.Count > 0)
-        {
-            builder.AppendLine();
-            builder.AppendLine("### 相关回忆：");
-            builder.AppendLine();
-            foreach (var turn in snippets)
-            {
-                builder.Append("- [")
-                    .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
-                    .Append("] ")
-                    .Append(RoleLabel(turn.Role))
-                    .Append('：')
-                    .AppendLine(turn.Text);
-            }
-        }
+        return builder.ToString().TrimEnd();
     }
 
     private List<MemoryTurn> Search(
@@ -541,6 +599,9 @@ public sealed class ChatMemory
         public string Role { get; set; } = "user";
 
         public string Text { get; set; } = string.Empty;
+
+        /// <summary>真正发给模型的正文（含时间 / 回忆等附加内容）；为空时回退到 <see cref="Text" />。</summary>
+        public string? RequestText { get; set; }
 
         /// <summary>工具调用的 id（仅 tool 记录）。</summary>
         public string? CallId { get; set; }

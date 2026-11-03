@@ -142,13 +142,19 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
         builder.AppendLine();
         builder.AppendLine("## 技能");
         builder.AppendLine();
-        builder.AppendLine("可用技能（使用 read_skill 读取完整说明）：");
+        builder.AppendLine("技能是一组可重复使用的特定任务指令。本次会话中可用的技能如下：");
+        builder.AppendLine();
         foreach (var skill in skills)
         {
             builder.Append($"- {skill.Name}");
             if (skill.HasDescription) builder.Append('：').Append(skill.Description);
             builder.Append('\n');
         }
+
+        builder.AppendLine("如果用户提到了一个技能，或者任务明显符合某个技能的描述，" +
+                           "先用准确的技能名称调用 `read_skill` 工具，然后再进行任务操作。" +
+                           "先加载所有相关技能，然后按照它们的完整说明操作。" +
+                           "这个目录只包含摘要；在技能被加载之前，不要推测或执行它的说明。");
     }
 
     public string ReadContent(SkillInfo skill)

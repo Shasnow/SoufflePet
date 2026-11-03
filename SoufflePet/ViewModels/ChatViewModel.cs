@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -41,8 +42,10 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>工具记录里结果的最大展示长度（超出截断，避免撑爆气泡）。</summary>
     private const int ToolResultMaxLength = 300;
 
-    /// <summary>发给模型的对话窗口：保留最近多少轮用户提问（含其后的回复与工具调用记录）。</summary>
-    private const int HistoryWindowTurns = 50;
+    // 历史窗口的高/低水位来自设置（SouffleSettings.HistoryWindowTurns / HistoryKeepTurns，见 SoufflePet.json）。
+    // 注意不要改成「每轮只丢最旧一轮」：服务端的前缀缓存按「从请求开头起的最长公共前缀」命中，
+    // 每轮换掉第一条历史消息，缓存就只剩系统提示词那 3k tokens（实测 12.7 万输入只命中 2%）。
+    // 两个水位的差值决定裁剪频率：差值越大，裁剪越少、缓存越稳定。
 
     /// <summary>平台提醒合成消息的前缀。</summary>
     private const string PlatformNoticePrefix = "[平台提醒]";
@@ -957,9 +960,13 @@ public partial class ChatViewModel : ViewModelBase
         string? displayText = null,
         bool isPlatformNotice = false)
     {
-        // 这轮提问先落历史；路径随消息一起保存，后续轮次无需重复添加附件
-        _history.Add(new ChatMessage(ChatRole.User, messageText));
-        _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText, isPlatformNotice: isPlatformNotice);
+        // 这轮提问先落历史；路径随消息一起保存，后续轮次无需重复添加附件。
+        // 与长期记忆同样去空白：重启后按 conversations.jsonl 重建的消息才能和这次请求逐字节一致。
+        messageText = messageText.Trim();
+        var requestText = BuildUserRequestText(messageText);
+        _history.Add(new ChatMessage(ChatRole.User, requestText));
+        _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText, isPlatformNotice: isPlatformNotice,
+            requestText: requestText);
         TrimHistory();
 
         // 占位气泡：收到第一段内容时整体替换，避免出现空气泡
@@ -972,6 +979,7 @@ public partial class ChatViewModel : ViewModelBase
         IsGenerating = true;
 
         var segment = string.Empty;  // 当前气泡里的文本；工具调用时截断重开
+        string? _pendingToolText = null; // 工具调用前刚输出、尚未写进请求历史的正文（与调用合并成一条助手消息）
         var roundReasoning = new StringBuilder(); // 当前轮的思考内容，随本轮最后一条助手消息落库
         Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
         Models.ChatMessage? answered = null; // 本轮最后一段正文所在的气泡，用量挂在它下方
@@ -989,22 +997,39 @@ public partial class ChatViewModel : ViewModelBase
         // 把当前气泡里的正文作为独立的一轮落库：工具调用会截断气泡，
         // 只有在这里立刻保存，「回答 → 工具调用 → 回答」的先后顺序才能完整保留。
         // withReasoning 仅在本轮没有工具调用（即最终回复）时为 true，思考内容随这条消息一起保存。
-        void CommitSegment(bool withReasoning)
+        // pendingForToolCall 表示这段正文其实属于紧随其后的工具调用消息：先只落记忆，
+        // 请求历史等工具结果回来时与调用合并成一条消息（见 AddToolHistory）。
+        void CommitSegment(bool withReasoning, bool pendingForToolCall = false)
         {
             // 正文去空白后（纯空白视作无正文）为空但存在思考内容时同样落库：这条回复仍有思考内容，长期记忆不能丢
             var hasReasoning = withReasoning && roundReasoning.Length > 0;
             var content = segment.Trim();
             if (content.Length == 0 && !hasReasoning) return;
 
+            if (pendingForToolCall)
+            {
+                // 与真正发出去的请求保持同构：模型是在同一条助手消息里先输出正文再发起调用，
+                // 历史里若拆成两条，下一轮请求从这一条起就接不上前缀，整轮工具消息都会重算。
+                _pendingToolText = content;
+                _memory.AddTurn(ChatMemory.AssistantRole, content);
+                TrimHistory();
+                segment = string.Empty;
+                return;
+            }
+
             List<AIContent> contents = [];
             string? reasoning = null;
             if (hasReasoning)
             {
-                reasoning = roundReasoning.ToString();
+                // 与落盘一致地去掉首尾空白：conversations.jsonl 里的内容也是去空白后的，
+                // 重启重建才能和上次请求完全相同（思考内容会作为 reasoning_content 回传）
+                reasoning = roundReasoning.ToString().Trim();
                 contents.Add(new TextReasoningContent(reasoning));
                 roundReasoning.Clear();
             }
 
+            // 请求历史与落盘记录保持同一份文本（都去空白），重启后按 conversations.jsonl
+            // 重建出的消息才能和上次请求逐字节一致，第一次请求继续命中前缀缓存。
             contents.Add(new TextContent(content));
             _history.Add(new ChatMessage(ChatRole.Assistant, contents));
             _memory.AddTurn(ChatMemory.AssistantRole, content, reasoning: reasoning);
@@ -1028,7 +1053,7 @@ public partial class ChatViewModel : ViewModelBase
                 return;
             }
 
-            CommitSegment(withReasoning: false);
+            CommitSegment(withReasoning: false, pendingForToolCall: true);
             Messages.Insert(index + 1, message);
             reply = new Models.ChatMessage(ToolCallingText, isUser: false);
             _reply = reply;
@@ -1104,12 +1129,19 @@ public partial class ChatViewModel : ViewModelBase
                         }
 
                         // 工具调用记录既写入长期记忆（重启后恢复），也按标准结构进入请求历史；
-                        // 本轮思考内容随第一条工具记录保存，推理模型在工具循环里要求回传 reasoning_content
-                        var toolReasoning = roundReasoning.Length > 0 ? roundReasoning.ToString() : null;
+                        // 本轮思考内容随第一条工具记录保存，推理模型在工具循环里要求回传 reasoning_content。
+                        // 与落盘一致地去空白，重启重建的消息才能和上次请求逐字节相同。
+                        var toolReasoning = roundReasoning.ToString().Trim() is { Length: > 0 } trimmedReasoning
+                            ? trimmedReasoning
+                            : null;
                         roundReasoning.Clear();
+                        // 调用前输出的正文（如果有）与这条调用属于同一条助手消息，合并进请求历史
+                        var assistantText = _pendingToolText;
+                        _pendingToolText = null;
                         _memory.AddTurn(ChatMemory.ToolRole, display, call.CallId, call.Name, call.Arguments, call.Result,
                             toolReasoning);
-                        AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, display, toolReasoning);
+                        AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, display, toolReasoning,
+                            assistantText);
                         TrimHistory();
                         break;
                 }
@@ -1145,8 +1177,26 @@ public partial class ChatViewModel : ViewModelBase
                     : "（已中断）";
             }
 
+            // 工具调用被打断时，调用前的正文还没并进历史：把「思考 + 正文」作为一条普通助手消息补上，
+            // 避免请求历史与落盘记录不一致（下次重建时会在这一轮多出这条消息）。
+            // 必须放在 CommitSegment 之前，否则思考内容会先被它消费掉。
+            if (_pendingToolText is { Length: > 0 } pendingText)
+            {
+                _pendingToolText = null;
+                var pendingReasoning = roundReasoning.ToString().Trim();
+                roundReasoning.Clear();
+                List<AIContent> pendingContents = [];
+                if (pendingReasoning.Length > 0) pendingContents.Add(new TextReasoningContent(pendingReasoning));
+                pendingContents.Add(new TextContent(pendingText));
+                _history.Add(new ChatMessage(ChatRole.Assistant, pendingContents));
+                TrimHistory();
+            }
+
             // 只有真正生成出的内容才写回历史；停止时保留已收到的最后一段
             CommitSegment(withReasoning: true);
+
+            // 记住本次请求实际使用的窗口轮数：重启后按同一窗口恢复，第一次请求才能接上前缀缓存
+            _memory.SaveWindowTurns(CountHistoryUserTurns());
 
             // 用量统计：气泡底部显示本轮明细，同时累加进设置里的历史总额
             if (usage != null) RecordUsage(usage, answered);
@@ -1200,6 +1250,7 @@ public partial class ChatViewModel : ViewModelBase
 
     /// <summary>
     /// 按标准结构把一次工具调用写进请求历史：助手消息携带 FunctionCallContent，紧跟 ChatRole.Tool 的结果消息。
+    /// assistantText 是调用前刚输出的正文，与调用、思考同属一条助手消息（与实际请求一致）。
     /// 旧记录缺少 CallId / 工具名时无法配对，只能退化成助手文本，避免出现没有对应调用的 tool 消息。
     /// </summary>
     private void AddToolHistory(
@@ -1208,16 +1259,19 @@ public partial class ChatViewModel : ViewModelBase
         string? arguments,
         string? result,
         string fallbackText,
-        string? reasoning = null)
+        string? reasoning = null,
+        string? assistantText = null)
     {
         if (string.IsNullOrEmpty(callId) || string.IsNullOrEmpty(name) || result is null)
         {
+            if (!string.IsNullOrEmpty(assistantText)) _history.Add(new ChatMessage(ChatRole.Assistant, assistantText));
             _history.Add(new ChatMessage(ChatRole.Assistant, fallbackText));
             return;
         }
 
         List<AIContent> contents = [];
         if (!string.IsNullOrEmpty(reasoning)) contents.Add(new TextReasoningContent(reasoning));
+        if (!string.IsNullOrEmpty(assistantText)) contents.Add(new TextContent(assistantText));
         contents.Add(new FunctionCallContent(callId, name, ParseArguments(arguments)));
         _history.Add(new ChatMessage(ChatRole.Assistant, contents));
         _history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
@@ -1253,10 +1307,21 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>气泡展示文本：落库的原始内容只有空白字符时替换为空白提示，避免出现空气泡。</summary>
     private static string DisplayText(string text) => text.Trim().Length == 0 ? BlankText : text;
 
+    /// <summary>
+    /// 启动时恢复上次会话最后使用的窗口轮数：窗口在两次裁剪之间只增不减，
+    /// 恢复成同一轮数后第一次请求的前缀与上次会话一致，仍能命中缓存；
+    /// 若固定恢复最大窗口，首轮又会裁到低水位、前缀全变（等于每次重启都白丢一次缓存）。
+    /// </summary>
+    private int RestoreWindowTurns()
+    {
+        var saved = _memory.WindowTurns;
+        return saved > 0 && saved <= _settings.HistoryWindowTurns ? saved : _settings.HistoryWindowTurns;
+    }
+
     /// <summary>启动时把最近几轮对话（含工具调用记录）恢复到界面与请求历史里（有历史时替换掉问候语）。</summary>
     private void LoadRecentHistory()
     {
-        var recent = _memory.RecentTurns(HistoryWindowTurns, includeTools: true);
+        var recent = _memory.RecentTurns(RestoreWindowTurns(), includeTools: true);
         if (recent.Count == 0) return;
 
         Messages.Clear();
@@ -1268,12 +1333,19 @@ public partial class ChatViewModel : ViewModelBase
             Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true, isExpanded: false));
         }
 
-        foreach (var turn in recent)
+        // 落盘时「工具调用前的正文」是单独一行；重建请求历史时要并回紧随其后的那条工具调用消息，
+        // 否则重启后的第一次请求会在这一条断开，整轮工具消息都按未命中计费。
+        string? pendingAssistantText = null;
+
+        for (var i = 0; i < recent.Count; i++)
         {
+            var turn = recent[i];
             if (string.Equals(turn.Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase))
             {
                 // 工具记录按标准结构重建进请求历史，界面上按工具气泡展示（展示时截断）
-                AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text, turn.Reasoning);
+                AddToolHistory(turn.CallId, turn.ToolName, turn.Arguments, turn.Result, turn.Text, turn.Reasoning,
+                    pendingAssistantText);
+                pendingAssistantText = null;
                 AddReasoningBubble(turn.Reasoning);
                 Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true, isExpanded: false)
                 {
@@ -1289,7 +1361,18 @@ public partial class ChatViewModel : ViewModelBase
             // 是否提醒只看显式标记，展示文本存在与否不代表消息类型。
             var isPlatformNotice = isUser && turn.IsPlatformNotice;
             var bubbleText = turn.Display ?? turn.Text;
-            if (!isUser && !string.IsNullOrEmpty(turn.Reasoning))
+
+            // 这条正文后面紧跟工具调用：它和调用原本属于同一条助手消息，历史留到 tool 行合并
+            var mergesIntoNextTool = !isUser
+                && string.IsNullOrEmpty(turn.Reasoning)
+                && i + 1 < recent.Count
+                && string.Equals(recent[i + 1].Role, ChatMemory.ToolRole, StringComparison.OrdinalIgnoreCase);
+
+            if (mergesIntoNextTool)
+            {
+                pendingAssistantText = turn.Text;
+            }
+            else if (!isUser && !string.IsNullOrEmpty(turn.Reasoning))
             {
                 _history.Add(new ChatMessage(ChatRole.Assistant,
                     [new TextReasoningContent(turn.Reasoning), new TextContent(turn.Text)]));
@@ -1297,7 +1380,10 @@ public partial class ChatViewModel : ViewModelBase
             }
             else
             {
-                _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
+                // 用户消息恢复成「实际发给模型」的版本（含时间 / 回忆），下一轮请求才能接上前缀缓存；
+                // 界面气泡仍用 turn.Text / turn.Display 的干净正文。
+                var historyText = isUser ? turn.RequestText ?? turn.Text : turn.Text;
+                _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, historyText));
             }
 
             Messages.Add(new Models.ChatMessage(
@@ -1308,28 +1394,107 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 把发给模型的历史裁到最近 <see cref="HistoryWindowTurns"/> 轮。以用户提问作为轮的边界，
-    /// 每轮包含该提问及其后的助手回复、全部工具调用记录；窗口内不会再出现半截工具链。
+    /// 组装真正发给模型的用户消息：正文 + 本轮的时间与相关回忆。
+    /// 这些附加内容会随消息一起进入请求历史（并写入 conversations.jsonl），
+    /// 下一轮请求的前缀才能和上一轮完全一致；否则上一轮（尤其是工具调用产生的大量消息）
+    /// 都会因为「历史里是干净正文、请求里是多了一段上下文」而整体按未命中计费。
+    /// 界面气泡展示的仍是干净正文（Text），两者分开保存。
+    /// </summary>
+    private string BuildUserRequestText(string messageText)
+    {
+        var historyTexts = _history
+            .Select(message => StripTurnContext(message.Text).Trim())
+            .Where(text => text.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        var historyCallIds = _history
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .Select(call => call.CallId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var recall = _memory.BuildRecallBlock(messageText, historyTexts, historyCallIds);
+
+        var context = new StringBuilder();
+        if (recall.Length > 0)
+        {
+            context.AppendLine("[系统消息] 以下是与本轮提问相关的旧对话（来自长期记忆，仅供参考，不属于用户输入）：");
+            context.AppendLine(recall);
+        }
+
+        if (_settings.TimeAwarenessEnabled)
+        {
+            var now = DateTimeOffset.Now;
+            context.Append("[系统消息] 当前时间 ")
+                .Append(now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN")))
+                .Append(" UTC").Append(now.ToString("zzz"))
+                .Append(' ').Append(TimeZoneInfo.Local.Id);
+        }
+
+        return context.Length == 0 ? messageText : $"{messageText}\n\n{context.ToString().TrimEnd()}";
+    }
+
+    /// <summary>去掉注入在用户消息末尾的上下文，用于长期记忆检索的去重比对。</summary>
+    private static string StripTurnContext(string text)
+    {
+        var index = text.IndexOf("\n\n" + SystemPrefix, StringComparison.Ordinal);
+        return index < 0 ? text : text[..index];
+    }
+
+    /// <summary>当前请求历史里的用户提问轮数（即窗口轮数，重启后按它恢复同一窗口）。</summary>
+    private int CountHistoryUserTurns()
+    {
+        var turns = 0;
+        foreach (var message in _history)
+        {
+            if (message.Role == ChatRole.User) turns++;
+        }
+
+        return turns;
+    }
+
+    /// <summary>
+    /// 把发给模型的历史裁到最近若干轮。以用户提问作为轮的边界，每轮包含该提问及其后的助手回复、
+    /// 全部工具调用记录；窗口内不会再出现半截工具链。
+    /// 用户轮数超过设置里的 <see cref="SouffleSettings.HistoryWindowTurns" /> 时，
+    /// 一次裁到 <see cref="SouffleSettings.HistoryKeepTurns" />：
+    /// 前缀缓存按请求开头起的最长公共前缀命中，每轮只丢最旧一轮等于每轮都让缓存从头失效，
+    /// 批量裁剪把这次失效分摊到之后的几十轮里。
     /// </summary>
     private void TrimHistory()
     {
         var before = _history.Count;
 
-        // 从后往前数到第 N 个用户发言，窗口就从这里开始；不足 N 轮时从头保留
-        var keepFrom = 0;
         var userTurns = 0;
+        foreach (var message in _history)
+        {
+            if (message.Role == ChatRole.User) userTurns++;
+        }
+
+        var windowTurns = _settings.HistoryWindowTurns;
+        var keepTurns = _settings.HistoryKeepTurns;
+        if (userTurns <= windowTurns) return;
+
+        // 从后往前数到第 keepTurns 个用户发言，窗口就从这里开始
+        var keepFrom = 0;
+        var kept = 0;
         for (var i = _history.Count - 1; i >= 0; i--)
         {
             if (_history[i].Role != ChatRole.User) continue;
-            if (++userTurns != HistoryWindowTurns) continue;
+            if (++kept != keepTurns) continue;
             keepFrom = i;
             break;
         }
 
-        if (keepFrom > 0) _history.RemoveRange(0, keepFrom);
+        if (keepFrom > 0)
+        {
+            _history.RemoveRange(0, keepFrom);
+            // 裁剪后立刻落盘：万一这次对话没跑完就退出，重启时也不会按裁剪前的旧轮数恢复
+            _memory.SaveWindowTurns(keepTurns);
+        }
 
         if (before != _history.Count)
-            Logger.Debug("history trimmed before={Before} after={After} turns={Turns}", before, _history.Count, userTurns);
+            Logger.Debug("history trimmed before={Before} after={After} turns={Turns} keep={Keep}",
+                before, _history.Count, userTurns, keepTurns);
     }
 
     private bool CanSend() => !IsGenerating && (!string.IsNullOrWhiteSpace(Draft) || Attachments.Count > 0);

@@ -4,10 +4,10 @@
 using System;
 using System.ClientModel;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -149,7 +149,14 @@ public sealed class LlmChatService(
         using var chatClient = openAiClient.AsIChatClient();
 
         // 系统提示词只作为本次请求的首条消息，不进入界面历史。
-        // 全部系统块（人设/工作区/记忆/技能/平台）合并成一条，避免多段 System 消息分散模型注意力。
+        // 全部系统块合并成一条，避免多段 System 消息分散模型注意力。
+        //
+        // 缓存友好：系统提示词处在整个请求的最前面，任何一处变化都会让服务端的前缀缓存
+        // 从变化处起全部失效。因此各块按「变化频率从低到高」排列——
+        // 人设 → 工作区（AGENTS.md）→ 技能清单 → 消息平台 → 用户档案；
+        // 随每轮提问变化的「相关回忆」与「当前时间」不写进系统提示词，改由 ChatViewModel
+        // 追加到本轮用户消息末尾并随消息进入历史，让「系统提示词 + 历史对话」这段前缀
+        // 逐字节稳定，后续提问可以持续命中缓存。调整顺序前请先读这段注释。
         var messages = new List<ChatMessage>(history.Count + 3);
         var systemPrompt = new StringBuilder();
         systemPrompt.AppendLine("## 人设\n");
@@ -157,40 +164,27 @@ public sealed class LlmChatService(
 
         // 工作区信息：工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
         BuildWorkspaceBlock(systemPrompt);
-
-        // 长期记忆：用户档案 + 与本次提问相关的旧对话片段（关闭记忆时为空串）。
-        // 本次请求已带上的历史对话要排除，否则刚发的消息会作为「相关回忆」重复注入；
-        // 工具消息的结构化内容不在 Text 里，需要额外按 CallId 排除。
-        var historyTexts = history
-            .Select(m => m.Text.Trim())
-            .Where(t => t.Length > 0)
-            .ToHashSet(StringComparer.Ordinal);
-        var historyCallIds = history
-            .SelectMany(m => m.Contents)
-            .OfType<FunctionCallContent>()
-            .Select(c => c.CallId)
-            .ToHashSet(StringComparer.Ordinal);
-        memory.BuildMemoryBlock(
-            history.LastOrDefault(m => m.Role == ChatRole.User)?.Text,
-            systemPrompt,
-            historyTexts,
-            historyCallIds);
         // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
         skills.BuildCatalog(systemPrompt);
         // 消息平台：只有真的接入了平台才注入使用说明，没有平台时提示词里不出现这类内容
         BuildPlatformBlock(systemPrompt);
+        // 长期记忆里的用户档案：只在 remember / forget 后变化，放在系统提示词最末位，尽量少影响前缀
+        memory.BuildProfileBlock(systemPrompt);
 
         var stringSystemPrompt = systemPrompt.ToString();
+        // 记录哈希：两次请求的哈希相同，说明系统提示词这段前缀没变、缓存仍有效，
+        // 排查「命中率突然掉到 0」时先看这里有没有每轮都变。
+        Logger.Debug("System prompt hash={Hash} chars={Length}",
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(stringSystemPrompt)))[..16],
+            stringSystemPrompt.Length);
         await File.WriteAllTextAsync(
             Path.Combine(AppContext.BaseDirectory, "logs", "latest_system_prompt.md"), 
             stringSystemPrompt, cancellationToken);
         messages.Add(new ChatMessage(ChatRole.System, stringSystemPrompt));
 
-        var historyStart = messages.Count;
+        // 历史里已经包含本轮用户消息（以及附加的时间 / 相关回忆，由 ChatViewModel 组装并写入历史）：
+        // 附加内容随消息进入请求历史，下一轮请求的前缀才能与上一轮逐字节一致。
         messages.AddRange(history);
-
-        // 时间感知（设置里可关）：当前时间随本轮用户消息一起下发，模型不必再调用工具查询
-        if (settings.TimeAwarenessEnabled) InjectCurrentTime(messages, historyStart);
 
         // 本地工具 + MCP 工具：MCP 服务器在首次对话时连接，失败只记日志、不影响本地工具
         var tools = await chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
@@ -369,30 +363,12 @@ public sealed class LlmChatService(
 
         // 用量整体产出一个事件：界面据此在助手气泡下方与底部统计里展示
         if (inputTokens > 0 || outputTokens > 0)
-            yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
-    }
-
-    /// <summary>
-    /// 时间感知：把当前本地时间追加到本轮用户消息末尾（含星期、UTC 偏移与时区）。
-    /// 只替换本次请求列表里的这一个元素（新建实例），界面历史与长期记忆里的原文保持干净：
-    /// 若就地改写，恢复历史时气泡会带时间戳，且同一实例每轮都会再叠一次时间。
-    /// </summary>
-    private static void InjectCurrentTime(List<ChatMessage> messages, int historyStart)
-    {
-        for (var i = messages.Count - 1; i >= historyStart; i--)
         {
-            if (messages[i].Role != ChatRole.User) continue;
-
-            var original = messages[i];
-            var now = DateTimeOffset.Now;
-            var stamp = $"[系统消息] 当前时间 {now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN"))}"
-                + $" UTC{now:zzz} {TimeZoneInfo.Local.Id}";
-            messages[i] = new ChatMessage(ChatRole.User, original.Text is { Length: > 0 } text ? $"{text}\n\n{stamp}" : stamp)
-            {
-                AuthorName = original.AuthorName,
-                MessageId = original.MessageId,
-            };
-            return;
+            // 命中率是 prompt 结构是否稳定的直接指标：缓存命中的部分按缓存价计费
+            Logger.Debug("LLM usage input={Input} output={Output} cached={Cached} hit={Hit:P0}",
+                inputTokens, outputTokens, cachedInputTokens,
+                inputTokens > 0 ? (double)cachedInputTokens / inputTokens : 0d);
+            yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
         }
     }
 
@@ -569,15 +545,19 @@ public sealed class LlmChatService(
     /// <summary>
     /// 把本轮流式增量合并成一条助手消息：思考在前、正文居中、工具调用在最后。
     /// 上游可能把回复拆成大量碎片甚至空分片，直接 AddMessages(response) 会让历史迅速膨胀。
+    /// 正文与思考统一去首尾空白，与落盘 / 重建请求历史用的文本一致，下一轮请求才能接上前缀缓存。
     /// </summary>
     private static ChatMessage BuildAssistantMessage(
         StringBuilder text,
         StringBuilder reasoning,
         List<FunctionCallContent> calls)
     {
+        var thinking = reasoning.ToString().Trim();
+        var body = text.ToString().Trim();
         var contents = new List<AIContent>(calls.Count + 2);
-        if (reasoning.Length > 0) contents.Add(new TextReasoningContent(reasoning.ToString()));
-        if (text.Length > 0) contents.Add(new TextContent(text.ToString()));
+        if (thinking.Length > 0) contents.Add(new TextReasoningContent(thinking));
+        // 有工具调用且没有正文时不再塞空 TextContent：落盘记录里也不会有独立正文行
+        if (body.Length > 0 || calls.Count == 0) contents.Add(new TextContent(body));
         contents.AddRange(calls);
         return new ChatMessage(ChatRole.Assistant, contents);
     }
@@ -796,6 +776,8 @@ public sealed class LlmChatService(
             .Select(group => (
                 Id: group.Key,
                 Role: group.Select(platform => platform.RolePrompt).FirstOrDefault(role => !string.IsNullOrWhiteSpace(role))))
+            // 平台由插件注册，枚举顺序可能变化；固定成按 id 排序，保证这段系统提示词逐字节稳定
+            .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (entries.Count == 0) return;
 

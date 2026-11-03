@@ -81,15 +81,14 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
             _state.TotalRunSeconds, UsageText, _state.PokeCount, _state.HeadPatCount, _state.ConversationCount);
     }
 
-    public long TotalRunSeconds => _state.TotalRunSeconds + (long)_session.Elapsed.TotalSeconds;
+    private long TotalRunSeconds => _state.TotalRunSeconds + (long)_session.Elapsed.TotalSeconds;
 
     private static string FormatRunTimeSeconds(long seconds)
     {
         var total = TimeSpan.FromSeconds(seconds);
         if (total.TotalMinutes < 1) return $"{Math.Max(0, (int)total.TotalSeconds)} 秒";
         if (total.TotalHours < 1) return $"{(int)total.TotalMinutes} 分钟";
-        if (total.TotalDays < 1) return $"{(int)total.TotalHours} 小时 {total.Minutes} 分钟";
-        return $"{(int)total.TotalDays} 天 {total.Hours} 小时";
+        return $"{(int)total.TotalHours} 小时 {total.Minutes} 分钟";
     }
 
     public string UsageText
