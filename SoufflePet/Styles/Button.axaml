@@ -16,6 +16,21 @@
         <Setter Property="Background" Value="#1AFFFFFF" />
     </Style>
 
+    <!-- 气泡底部：本轮用量 + 时间的小胶囊（在气泡外侧下方） -->
+    <Style Selector="Button.usagePill">
+        <Setter Property="Background" Value="#14FFFFFF" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="7,2" />
+        <Setter Property="Margin" Value="2,6,0,0" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.usagePill:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#24FFFFFF" />
+    </Style>
+
     <!-- 文件卡片（show_file 展示的非图片附件）：独立卡片样式，与聊天气泡明显区分 -->
     <Style Selector="Button.fileCard">
         <Setter Property="Background" Value="#12FFFFFF" />

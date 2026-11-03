@@ -247,8 +247,8 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ChatMessage">
+                              <StackPanel Margin="0,0,0,10">
                                 <Border Classes="bubble"
-                                        Margin="0,0,0,10"
                                         Classes.user="{Binding IsUser}"
                                         Classes.tool="{Binding IsTool}"
                                         Classes.thinking="{Binding IsReasoning}"
@@ -333,13 +333,7 @@
                                             </ContentControl.ContentTemplate>
                                         </ContentControl>
 
-                                        <!-- 本轮 token 用量：助手消息结束后显示在气泡底部 -->
-                                        <TextBlock Text="{Binding UsageText}"
-                                                   IsVisible="{Binding HasUsage}"
-                                                   FontSize="10.5"
-                                                   LineHeight="16"
-                                                   Foreground="#59FFFFFF" />
-
+                                        
                                         <!-- 手动审批：等待用户决定时才显示按钮 -->
                                         <StackPanel Orientation="Horizontal"
                                                     Spacing="7"
@@ -353,6 +347,147 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>
+
+
+<!-- 本轮用量 + 时间：点击胶囊弹出本轮用量浮窗 -->
+                                        <Button Name="UsagePill"
+                                                Classes="usagePill"
+                                                IsVisible="{Binding HasUsage}"
+                                                ToolTip.Tip="点击查看本轮用量"
+                                                ToolTip.Placement="Top"
+                                                ToolTip.VerticalOffset="-6"
+                                                Command="{Binding ToggleUsageCommand}">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                                      Width="11"
+                                                      Height="11"
+                                                      Stretch="Uniform"
+                                                      Stroke="#8CFFFFFF"
+                                                      StrokeThickness="1.2"
+                                                      StrokeLineCap="Round"
+                                                      StrokeJoin="Round"
+                                                      VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding UsageCompactText}"
+                                                           FontSize="10.5"
+                                                           Foreground="#8CFFFFFF"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding TimeText}"
+                                                           FontSize="10.5"
+                                                           Foreground="#59FFFFFF"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <!-- 本轮用量浮窗：标题（总用量）+ 提供方/模型 + 明细 -->
+                                        <Popup IsOpen="{Binding IsUsageOpen, Mode=TwoWay}"
+                                               PlacementTarget="{Binding #UsagePill}"
+                                               Placement="TopEdgeAlignedLeft"
+                                               VerticalOffset="-4"
+                                               IsLightDismissEnabled="True">
+                                            <Border Width="300"
+                                                    Padding="14,12"
+                                                    Background="#F21B1C22"
+                                                    BorderBrush="#26FFFFFF"
+                                                    BorderThickness="1"
+                                                    CornerRadius="12"
+                                                    BoxShadow="0 10 28 0 #80000000">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                                        <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                                              Width="15"
+                                                              Height="15"
+                                                              Stretch="Uniform"
+                                                              Stroke="#B3FFFFFF"
+                                                              StrokeThickness="1.2"
+                                                              StrokeLineCap="Round"
+                                                              StrokeJoin="Round"
+                                                              VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="本轮用量"
+                                                                   Margin="8,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="13"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#F2FFFFFF" />
+                                                        <TextBlock Grid.Column="2"
+                                                                   Text="{Binding UsageTotalText}"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="12.5"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#F2FFFFFF" />
+                                                    </Grid>
+
+                                                    <Border Height="1" Background="#1AFFFFFF" />
+
+                                                    <Grid ColumnDefinitions="Auto,*"
+                                                          Margin="0,0,0,1"
+                                                          IsVisible="{Binding HasModelLabel}">
+                                                        <TextBlock Text="提供方 / 模型"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding ModelLabel}"
+                                                                   MaxWidth="190"
+                                                                   HorizontalAlignment="Right"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="缓存命中"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding UsageCacheHitText}"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="未缓存输入"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding UsageUncachedText}"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="缓存读取"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding UsageCachedText}"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="缓存写入"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <!-- OpenAI 兼容接口不单独上报缓存写入；DeepSeek 等服务按 0 计 -->
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="0 tok"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="输出"
+                                                                   FontSize="12"
+                                                                   Foreground="#8CFFFFFF" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding UsageOutputText}"
+                                                                   FontSize="12"
+                                                                   Foreground="#E6FFFFFF" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
+                              </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -710,10 +845,19 @@
                                 Spacing="10"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center">
-                        <TextBlock Text="{Binding UsageSummaryText}"
-                                   VerticalAlignment="Center"
-                                   FontSize="10.5"
-                                   Foreground="#59FFFFFF" />
+                        <!-- 点击底部用量信息：弹出完整用量明细（缓存命中率 / 缓存读取 / 未缓存输入 / 输出） -->
+                        <Button Name="UsageButton"
+                                Classes="ghost"
+                                Padding="6,2"
+                                ToolTip.Tip="点击查看完整用量"
+                                ToolTip.Placement="Top"
+                                ToolTip.VerticalOffset="-6"
+                                Command="{Binding ToggleUsageDetailsCommand}">
+                            <TextBlock Text="{Binding UsageSummaryText}"
+                                       VerticalAlignment="Center"
+                                       FontSize="10.5"
+                                       Foreground="#59FFFFFF" />
+                        </Button>
                     </StackPanel>
 
                     <!-- 工作区选择浮层：历史工作区列表 + 固定在底部的「选择工作区」入口 -->
@@ -851,6 +995,67 @@
                                     </StackPanel>
                                 </Border>
                             </Panel>
+                        </Border>
+                    </Popup>
+
+                    <!-- 完整用量浮层：点击底部用量信息展开，缓存命中率保留 1 位小数 -->
+                    <Popup Grid.Column="1" IsOpen="{Binding IsUsageDetailsOpen, Mode=TwoWay}"
+                           PlacementTarget="{Binding #UsageButton}"
+                           Placement="TopEdgeAlignedRight"
+                           VerticalOffset="-4"
+                           IsLightDismissEnabled="True">
+                        <Border Width="300"
+                                Padding="14,12"
+                                Background="#F21B1C22"
+                                BorderBrush="#26FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                BoxShadow="0 10 28 0 #80000000">
+                            <StackPanel Spacing="8">
+                                <!-- 标题行：数据库图标 + 累计总用量 -->
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                          Width="15"
+                                          Height="15"
+                                          Stretch="Uniform"
+                                          Stroke="#B3FFFFFF"
+                                          StrokeThickness="1.2"
+                                          StrokeLineCap="Round"
+                                          StrokeJoin="Round"
+                                          VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="Token 用量"
+                                               Margin="8,0,0,0"
+                                               VerticalAlignment="Center"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               Foreground="#F2FFFFFF" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding UsageTotalText}"
+                                               VerticalAlignment="Center"
+                                               FontSize="12.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="#F2FFFFFF" />
+                                </Grid>
+
+                                <Border Height="1" Background="#1AFFFFFF" />
+
+                                <ItemsControl ItemsSource="{Binding UsageDetails}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:UsageDetail">
+                                            <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                                                <TextBlock Text="{Binding Label}"
+                                                           FontSize="12"
+                                                           Foreground="#8CFFFFFF" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Value}"
+                                                           FontSize="12"
+                                                           Foreground="#E6FFFFFF" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </Border>
                     </Popup>
                 </Grid>

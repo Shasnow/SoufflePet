@@ -27,7 +27,11 @@ public readonly record struct MemoryTurn(
     string? Reasoning = null,
     string? Display = null,
     bool IsPlatformNotice = false,
-    string? RequestText = null);
+    string? RequestText = null,
+    long? InputTokens = null,
+    long? OutputTokens = null,
+    long? CachedInputTokens = null,
+    string? Model = null);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -109,6 +113,8 @@ public sealed class ChatMemory
     /// tool 记录额外保存调用信息（CallId、工具名、参数、完整结果），供启动时重建请求上下文。
     /// requestText 是真正发给模型的正文（含时间 / 回忆等附加内容）；与展示用的 text 分开保存，
     /// 重启后按它重建请求历史，第一次请求才能接上上一轮的前缀缓存。
+    /// inputTokens / outputTokens / cachedInputTokens 是本轮 token 用量（只记在最后一条助手消息上），
+    /// 重启后据此恢复气泡底部的用量文案。
     /// </summary>
     public void AddTurn(
         string role,
@@ -120,7 +126,11 @@ public sealed class ChatMemory
         string? reasoning = null,
         string? display = null,
         bool isPlatformNotice = false,
-        string? requestText = null)
+        string? requestText = null,
+        long? inputTokens = null,
+        long? outputTokens = null,
+        long? cachedInputTokens = null,
+        string? model = null)
     {
         // 正文统一去空白：纯空白视作无正文，只有存在思考内容时才继续落库
         text = text.Trim();
@@ -138,7 +148,11 @@ public sealed class ChatMemory
             Result = result,
             Reasoning = string.IsNullOrWhiteSpace(reasoning) ? null : reasoning.Trim(),
             Display = string.IsNullOrWhiteSpace(display) ? null : display.Trim(),
-            IsPlatformNotice = isPlatformNotice
+            IsPlatformNotice = isPlatformNotice,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens,
+            CachedInputTokens = cachedInputTokens,
+            Model = string.IsNullOrWhiteSpace(model) ? null : model
         };
         lock (_gate)
         {
@@ -182,7 +196,8 @@ public sealed class ChatMemory
             var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
                 .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result,
-                    t.Reasoning, t.Display, t.IsPlatformNotice, t.RequestText))
+                    t.Reasoning, t.Display, t.IsPlatformNotice, t.RequestText,
+                    t.InputTokens, t.OutputTokens, t.CachedInputTokens, t.Model))
                 .ToList();
 
             Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
@@ -602,6 +617,18 @@ public sealed class ChatMemory
 
         /// <summary>真正发给模型的正文（含时间 / 回忆等附加内容）；为空时回退到 <see cref="Text" />。</summary>
         public string? RequestText { get; set; }
+
+        /// <summary>本轮 token 用量：输入（仅记录在本轮最后一条助手消息上，用于重启后恢复气泡底部的用量文案）。</summary>
+        public long? InputTokens { get; set; }
+
+        /// <summary>本轮 token 用量：输出。</summary>
+        public long? OutputTokens { get; set; }
+
+        /// <summary>本轮 token 用量：缓存命中。</summary>
+        public long? CachedInputTokens { get; set; }
+
+        /// <summary>本轮使用的模型（提供方/模型），供气泡的用量浮窗恢复。</summary>
+        public string? Model { get; set; }
 
         /// <summary>工具调用的 id（仅 tool 记录）。</summary>
         public string? CallId { get; set; }

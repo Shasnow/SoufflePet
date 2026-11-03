@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
+using System;
 using System.Diagnostics;
 using System.IO;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SoufflePet.Utils;
 
 namespace SoufflePet.Models;
 
@@ -22,7 +24,7 @@ public sealed partial class ChatMessage : ObservableObject
 
     public ChatMessage(string text, bool isUser, bool isTool = false, bool isReasoning = false,
         ToolApprovalRequest? approval = null, bool isExpanded = true, bool isPlatformNotice = false,
-        ChatDisplayAttachment? displayAttachment = null)
+        ChatDisplayAttachment? displayAttachment = null, DateTimeOffset? timestamp = null)
     {
         Text = text;
         _baseText = text;
@@ -33,6 +35,7 @@ public sealed partial class ChatMessage : ObservableObject
         IsExpanded = isExpanded;
         IsPlatformNotice = isPlatformNotice;
         DisplayAttachment = displayAttachment;
+        Timestamp = timestamp ?? DateTimeOffset.Now;
         // 初始就是收起状态的思考气泡（从历史恢复）已经结束，标题直接显示「已完成」
         IsReasoningDone = !isExpanded;
 
@@ -47,12 +50,74 @@ public sealed partial class ChatMessage : ObservableObject
     [ObservableProperty]
     public partial string Text { get; set; }
 
-    /// <summary>本轮回复的 token 用量（结束后显示在气泡底部）；空串表示不显示。</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasUsage))]
-    public partial string UsageText { get; set; } = string.Empty;
+    /// <summary>消息时间：气泡底部的用量胶囊里显示 HH:mm；恢复历史时用落盘时间。</summary>
+    public DateTimeOffset Timestamp { get; }
 
-    public bool HasUsage => UsageText.Length > 0;
+    /// <summary>气泡底部展示的本地时间（HH:mm）。</summary>
+    public string TimeText => Timestamp.ToLocalTime().ToString("HH:mm");
+
+    /// <summary>本轮 token 用量：输入（含命中缓存的部分）。</summary>
+    public long InputTokens { get; private set; }
+
+    /// <summary>本轮 token 用量：输出。</summary>
+    public long OutputTokens { get; private set; }
+
+    /// <summary>本轮 token 用量：命中缓存的输入部分。</summary>
+    public long CachedInputTokens { get; private set; }
+
+    /// <summary>本轮使用的模型（提供方/模型），显示在用量浮窗里；为空时不显示该行。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasModelLabel))]
+    public partial string ModelLabel { get; set; } = string.Empty;
+
+    public bool HasModelLabel => ModelLabel.Length > 0;
+
+    /// <summary>是否记录了本轮用量（助手消息结束后显示底部胶囊）。</summary>
+    public bool HasUsage => InputTokens > 0 || OutputTokens > 0;
+
+    /// <summary>气泡底部的紧凑用量文案：用量 2.5M tok。</summary>
+    public string UsageCompactText => $"用量 {TokenDisplay.Compact(InputTokens + OutputTokens)} tok";
+
+    /// <summary>用量浮窗标题右侧的总量（完整数字）：2,481,299 tok。</summary>
+    public string UsageTotalText => TokenDisplay.Tokens(InputTokens + OutputTokens);
+
+    /// <summary>缓存命中率（保留 1 位小数）。</summary>
+    public string UsageCacheHitText =>
+        InputTokens > 0 ? TokenDisplay.Percent((double)CachedInputTokens / InputTokens) : "—";
+
+    /// <summary>未命中缓存的输入 tokens。</summary>
+    public string UsageUncachedText => TokenDisplay.Tokens(Math.Max(0, InputTokens - CachedInputTokens));
+
+    /// <summary>从缓存读取的输入 tokens。</summary>
+    public string UsageCachedText => TokenDisplay.Tokens(CachedInputTokens);
+
+    /// <summary>输出 tokens。</summary>
+    public string UsageOutputText => TokenDisplay.Tokens(OutputTokens);
+
+    /// <summary>本轮用量浮窗是否展开（每条消息各自独立）。</summary>
+    [ObservableProperty]
+    public partial bool IsUsageOpen { get; set; }
+
+    /// <summary>点击气泡底部的用量胶囊：展开 / 收起本轮用量浮窗。</summary>
+    [RelayCommand]
+    private void ToggleUsage() => IsUsageOpen = !IsUsageOpen;
+
+    /// <summary>记录本轮用量（轮末或恢复历史时调用），同时刷新胶囊与浮窗里的所有文案。</summary>
+    public void SetUsage(long inputTokens, long outputTokens, long cachedInputTokens, string? modelLabel = null)
+    {
+        InputTokens = inputTokens;
+        OutputTokens = outputTokens;
+        CachedInputTokens = cachedInputTokens;
+        if (!string.IsNullOrWhiteSpace(modelLabel)) ModelLabel = modelLabel;
+
+        OnPropertyChanged(nameof(HasUsage));
+        OnPropertyChanged(nameof(UsageCompactText));
+        OnPropertyChanged(nameof(UsageTotalText));
+        OnPropertyChanged(nameof(UsageCacheHitText));
+        OnPropertyChanged(nameof(UsageUncachedText));
+        OnPropertyChanged(nameof(UsageCachedText));
+        OnPropertyChanged(nameof(UsageOutputText));
+    }
 
     public bool IsUser { get; }
 

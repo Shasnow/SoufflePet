@@ -8,6 +8,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using Serilog;
+using SoufflePet.Utils;
 
 namespace SoufflePet.Services;
 
@@ -18,6 +19,22 @@ namespace SoufflePet.Services;
 public sealed record StatisticItem(string Key, string Label, string Value);
 
 /// <summary>
+/// 累计 token 用量的原始数字快照：界面展开明细时据此计算未缓存输入与缓存命中率，
+/// 避免让界面去解析展示用的文案。
+/// </summary>
+/// <param name="InputTokens">累计输入 tokens（含命中缓存的部分）。</param>
+/// <param name="OutputTokens">累计输出 tokens。</param>
+/// <param name="CachedInputTokens">累计命中缓存的输入 tokens。</param>
+public readonly record struct UsageSnapshot(long InputTokens, long OutputTokens, long CachedInputTokens)
+{
+    /// <summary>未命中缓存、按原价计费的输入 tokens。</summary>
+    public long UncachedInputTokens => Math.Max(0, InputTokens - CachedInputTokens);
+
+    /// <summary>缓存命中率（0–1）；还没有输入时为 0。</summary>
+    public double CacheHitRate => InputTokens > 0 ? (double)CachedInputTokens / InputTokens : 0;
+}
+
+/// <summary>
 /// 桌宠的运行统计（陪伴时长、对话 token 用量……），
 /// 统一供界面底部信息栏与桌宠工具读取；新增统计项时在本接口与实现里各补一处即可。
 /// </summary>
@@ -25,6 +42,9 @@ public interface IStatisticsService
 {
     /// <summary>累计 token 用量的简洁文案（界面底部信息栏）。</summary>
     string UsageText { get; }
+
+    /// <summary>累计 token 用量的原始数字（界面展开完整用量明细时使用）。</summary>
+    UsageSnapshot Usage { get; }
 
     /// <summary>累加一轮对话的 token 用量，并立即落盘。</summary>
     void AddUsage(long inputTokens, long outputTokens, long cachedInputTokens);
@@ -99,9 +119,20 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
             {
                 var input = _state.InputTokens;
                 var total = input + _state.OutputTokens;
-                var cacheRate = input > 0 ? $"{(double)_state.CachedInputTokens / input:P0}" : "—";
-                return $"累计 {total:N0} tokens · 缓存命中 {cacheRate}";
+                // 底部信息栏空间有限：总量用 1 位小数的紧凑单位（98.1M tok），命中率同样保留 1 位小数
+                var cacheRate = input > 0 ? TokenDisplay.Percent((double)_state.CachedInputTokens / input) : "—";
+                return $"{TokenDisplay.Compact(total)} tok · 缓存命中 {cacheRate}";
             }
+        }
+    }
+
+    /// <summary>累计 token 用量的原始数字快照（界面展开明细时用；与展示文案同源，不会出现两份口径）。</summary>
+    public UsageSnapshot Usage
+    {
+        get
+        {
+            lock (_gate)
+                return new UsageSnapshot(_state.InputTokens, _state.OutputTokens, _state.CachedInputTokens);
         }
     }
 

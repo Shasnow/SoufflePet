@@ -173,6 +173,50 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>输入区下方的常驻统计：有史以来的 token 总量与缓存命中率。</summary>
     public string UsageSummaryText => _statistics.UsageText;
 
+    /// <summary>完整用量明细弹层是否展开（点击底部用量信息切换）。</summary>
+    [ObservableProperty]
+    public partial bool IsUsageDetailsOpen { get; set; }
+
+    /// <summary>弹层标题右侧的累计总用量（输入 + 输出）。</summary>
+    public string UsageTotalText
+    {
+        get
+        {
+            var usage = _statistics.Usage;
+            return $"{usage.InputTokens + usage.OutputTokens:N0} tok";
+        }
+    }
+
+    /// <summary>
+    /// 完整用量明细：缓存命中（率，保留 1 位小数）、未缓存输入、缓存读取、输出。
+    /// 数值来自 <see cref="IStatisticsService.Usage" /> 的累计快照，与底部文案同源。
+    /// </summary>
+    public IReadOnlyList<UsageDetail> UsageDetails
+    {
+        get
+        {
+            var usage = _statistics.Usage;
+            return
+            [
+                new UsageDetail("缓存命中", usage.InputTokens > 0 ? $"{usage.CacheHitRate:P1}" : "—"),
+                new UsageDetail("未缓存输入", $"{usage.UncachedInputTokens:N0} tok"),
+                new UsageDetail("缓存读取", $"{usage.CachedInputTokens:N0} tok"),
+                new UsageDetail("输出", $"{usage.OutputTokens:N0} tok")
+            ];
+        }
+    }
+
+    /// <summary>点击底部用量信息：展开/收起完整用量明细（打开时刷新一次数值）。</summary>
+    [RelayCommand]
+    private void ToggleUsageDetails()
+    {
+        IsUsageDetailsOpen = !IsUsageDetailsOpen;
+        if (!IsUsageDetailsOpen) return;
+
+        OnPropertyChanged(nameof(UsageTotalText));
+        OnPropertyChanged(nameof(UsageDetails));
+    }
+
     /// <summary>输入框内容（与 TextBox 双向绑定）。</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
@@ -1032,7 +1076,13 @@ public partial class ChatViewModel : ViewModelBase
             // 重建出的消息才能和上次请求逐字节一致，第一次请求继续命中前缀缓存。
             contents.Add(new TextContent(content));
             _history.Add(new ChatMessage(ChatRole.Assistant, contents));
-            _memory.AddTurn(ChatMemory.AssistantRole, content, reasoning: reasoning);
+            // 本轮 token 用量随最后一条助手消息落盘（工具循环中途提交时 usage 还是 null）；
+            // 重启后据此恢复气泡底部的用量文案。
+            _memory.AddTurn(ChatMemory.AssistantRole, content, reasoning: reasoning,
+                inputTokens: usage?.InputTokens,
+                outputTokens: usage?.OutputTokens,
+                cachedInputTokens: usage?.CachedInputTokens,
+                model: FormatModelLabel(model));
             TrimHistory();
             segment = string.Empty;
         }
@@ -1198,8 +1248,8 @@ public partial class ChatViewModel : ViewModelBase
             // 记住本次请求实际使用的窗口轮数：重启后按同一窗口恢复，第一次请求才能接上前缀缓存
             _memory.SaveWindowTurns(CountHistoryUserTurns());
 
-            // 用量统计：气泡底部显示本轮明细，同时累加进设置里的历史总额
-            if (usage != null) RecordUsage(usage, answered);
+            // 用量统计：气泡底部胶囊显示本轮用量，同时累加进设置里的历史总额
+            if (usage != null) RecordUsage(model, usage, answered);
 
             _cts = null;
             _reply = null;
@@ -1213,23 +1263,23 @@ public partial class ChatViewModel : ViewModelBase
     [RelayCommand]
     private void Stop() => _cts?.Cancel();
 
-    /// <summary>记录一轮用量：气泡底部显示明细，累计值写进统计并落盘。</summary>
-    private void RecordUsage(LlmUsageEvent usage, Models.ChatMessage? bubble)
+    /// <summary>记录一轮用量：气泡底部胶囊显示紧凑用量，点击后浮窗展示完整明细；累计值写进统计并落盘。</summary>
+    private void RecordUsage(ChatModelConfig model, LlmUsageEvent usage, Models.ChatMessage? bubble)
     {
-        bubble?.UsageText = FormatUsage(usage);
+        bubble?.SetUsage(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, FormatModelLabel(model));
 
         _statistics.AddUsage(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens);
         OnPropertyChanged(nameof(UsageSummaryText));
+        // 明细弹层可能正开着：累计值变了要同步刷新
+        OnPropertyChanged(nameof(UsageTotalText));
+        OnPropertyChanged(nameof(UsageDetails));
     }
 
-    /// <summary>本轮用量文案：输入/输出 token，有缓存命中时补上命中数量。</summary>
-    private static string FormatUsage(LlmUsageEvent usage)
-    {
-        var text = $"输入 {usage.InputTokens:N0} · 输出 {usage.OutputTokens:N0} tokens";
-        return usage.CachedInputTokens > 0
-            ? $"{text} · 缓存命中 {usage.CachedInputTokens:N0}"
-            : text;
-    }
+    /// <summary>用量浮窗里的「提供方 / 模型」文案；没有配置提供方时只显示模型标识。</summary>
+    private static string FormatModelLabel(ChatModelConfig model) =>
+        string.IsNullOrWhiteSpace(model.Provider)
+            ? model.ModelId
+            : $"{model.Provider.Trim()}/{model.ModelId}";
 
     /// <summary>工具开始执行时的展示文本：先给出反馈，结果回来后原地替换成完整记录。</summary>
     private static string FormatToolStarted(LlmToolCallStartedEvent call)
@@ -1386,10 +1436,15 @@ public partial class ChatViewModel : ViewModelBase
                 _history.Add(new ChatMessage(isUser ? ChatRole.User : ChatRole.Assistant, historyText));
             }
 
-            Messages.Add(new Models.ChatMessage(
+            var bubble = new Models.ChatMessage(
                 DisplayText(bubbleText),
                 isUser && !isPlatformNotice,
-                isPlatformNotice: isPlatformNotice));
+                isPlatformNotice: isPlatformNotice,
+                timestamp: turn.Time);
+            // 助手消息恢复本轮用量与时间（旧记录没有这些字段时保持不显示胶囊）
+            if (!isUser && turn.InputTokens is { } inputTokens)
+                bubble.SetUsage(inputTokens, turn.OutputTokens ?? 0, turn.CachedInputTokens ?? 0, turn.Model);
+            Messages.Add(bubble);
         }
     }
 
@@ -1499,6 +1554,9 @@ public partial class ChatViewModel : ViewModelBase
 
     private bool CanSend() => !IsGenerating && (!string.IsNullOrWhiteSpace(Draft) || Attachments.Count > 0);
 }
+
+/// <summary>完整用量弹层里的一行：标签 + 已格式化的数值文本。</summary>
+public sealed record UsageDetail(string Label, string Value);
 
 /// <summary>工作区列表项：展示目录名与完整路径，当前激活项高亮。</summary>
 public sealed partial class WorkspaceItem : ObservableObject
