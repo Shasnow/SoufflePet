@@ -31,6 +31,9 @@ public sealed class MarkdownTextBlock : StackPanel
     private static readonly IBrush QuoteBorder = new SolidColorBrush(Color.Parse("#40E8879B"));
     private static readonly IBrush RuleBrush = new SolidColorBrush(Color.Parse("#26FFFFFF"));
 
+    /// <summary>链接强调色：气泡只有助手消息会渲染 Markdown（深色底），用主题粉即可。</summary>
+    private static readonly IBrush LinkForeground = new SolidColorBrush(Color.Parse("#F2A9B8"));
+
     /// <summary>列表每级缩进的宽度。</summary>
     private const double IndentWidth = 13;
 
@@ -531,7 +534,12 @@ public sealed class MarkdownTextBlock : StackPanel
                         break;
                     case MarkdownLink link:
                         var label = link.Text.Length > 0 ? link.Text : link.Url;
-                        target.Add(new Run(label) { TextDecorations = TextDecorations.Underline });
+                        // 强调色 + 下划线：深色气泡里链接要一眼能认出来（Markdown 只用于助手气泡）
+                        target.Add(new Run(label)
+                        {
+                            Foreground = LinkForeground,
+                            TextDecorations = TextDecorations.Underline
+                        });
                         _links.Add(new LinkRange(offset, label.Length, link.Url));
                         offset += label.Length;
                         break;
