@@ -59,9 +59,6 @@ public sealed class ChatMemory
     /// <summary>一次检索最多注入几条回忆。</summary>
     private const int SearchTopK = 3;
 
-    /// <summary>对话文件超过该大小时重写成最近若干轮，避免无限增长。</summary>
-    private const long MaxConversationFileBytes = 5 * 1024 * 1024;
-
     private const double Bm25K1 = 1.2;
     private const double Bm25B = 0.75;
 
@@ -164,11 +161,59 @@ public sealed class ChatMemory
             {
                 File.AppendAllText(_conversationsPath,
                     JsonSerializer.Serialize(turn, LineJsonOptions) + Environment.NewLine);
-                if (_turns.Count % 50 == 0) TrimConversationFile();
             }
             catch (Exception ex)
             {
                 Logger.Warning(ex, "append conversation failed");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把本轮用量补记到本轮最近一条助手记录上：本轮只以工具调用收尾、没有正文可落库时使用，
+    /// 避免已经花掉的 token 在对话记录里留空（重启后气泡下方的用量胶囊也据此恢复）。
+    /// since 是本轮开始时间，用来把范围限定在本轮；本轮没有助手正文（只有工具记录）时退而记在本轮最后一条记录上。
+    /// </summary>
+    public void AttachUsageToLastTurn(
+        DateTimeOffset since, long inputTokens, long outputTokens, long cachedInputTokens, string? model)
+    {
+        lock (_gate)
+        {
+            // 记录按时间顺序追加：本轮第一条记录的下标
+            var first = _turns.FindLastIndex(turn => turn.Time < since) + 1;
+            if (first >= _turns.Count) return;
+
+            // 优先挂到最近一条助手正文（用量胶囊就在它下方），只有工具记录时退而挂到本轮最后一条
+            var index = -1;
+            for (var i = _turns.Count - 1; i >= first; i--)
+            {
+                if (IsUserRole(_turns[i].Role) || IsToolRole(_turns[i].Role)) continue;
+                index = i;
+                break;
+            }
+
+            if (index < 0) index = _turns.Count - 1;
+
+            var turn = _turns[index];
+            turn.InputTokens = inputTokens;
+            turn.OutputTokens = outputTokens;
+            turn.CachedInputTokens = cachedInputTokens;
+            turn.Model = string.IsNullOrWhiteSpace(model) ? null : model;
+
+            try
+            {
+                if (!File.Exists(_conversationsPath)) return;
+                // conversations.jsonl 是追加写的，内存里的 _turns 对应文件末尾若干行：
+                // 定位到这一条改写后原样写回（只在个别收尾场景补记，不会频繁发生）。
+                var lines = File.ReadAllLines(_conversationsPath);
+                var fileIndex = lines.Length - (_turns.Count - index);
+                if (fileIndex < 0 || fileIndex >= lines.Length) return;
+                lines[fileIndex] = JsonSerializer.Serialize(turn, LineJsonOptions);
+                File.WriteAllLines(_conversationsPath, lines);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "attach usage to conversation failed");
             }
         }
     }
@@ -483,7 +528,6 @@ public sealed class ChatMemory
                 }
             }
 
-            TrimConversationFile();
             Logger.Debug("conversation loaded turns={Count}", _turns.Count);
         }
         catch (Exception ex)
@@ -524,24 +568,6 @@ public sealed class ChatMemory
         catch (Exception ex)
         {
             Logger.Warning(ex, "save profile failed");
-        }
-    }
-
-    /// <summary>文件过大时重写成内存里的最近若干轮。</summary>
-    private void TrimConversationFile()
-    {
-        try
-        {
-            if (!File.Exists(_conversationsPath)) return;
-            if (new FileInfo(_conversationsPath).Length <= MaxConversationFileBytes) return;
-
-            var lines = _turns.Select(turn => JsonSerializer.Serialize(turn, LineJsonOptions)).ToArray();
-            File.WriteAllLines(_conversationsPath, lines);
-            Logger.Information("conversations trimmed to {Count} turns", lines.Length);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "trim conversations failed");
         }
     }
 

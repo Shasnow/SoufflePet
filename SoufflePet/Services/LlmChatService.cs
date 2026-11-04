@@ -41,7 +41,10 @@ public sealed record LlmToolCallStartedEvent(string CallId, string Name, string 
 /// <summary>一次工具调用已执行结束（CallId 与 Started 事件对应），附带参数与结果。</summary>
 public sealed record LlmToolCallEvent(string CallId, string Name, string Arguments, string Result) : LlmStreamEvent;
 
-/// <summary>本次回复的 token 用量（含多轮工具调用的总和），在流结束后产出。</summary>
+/// <summary>
+/// 本次回复为止累计的 token 用量（含多轮工具调用的总和）。每完成一轮就产出一份累计值，
+/// 这样中途取消 / 出错时，已完成轮次已经花掉的用量不会因为拿不到「结束事件」而丢失。
+/// </summary>
 public sealed record LlmUsageEvent(long InputTokens, long OutputTokens, long CachedInputTokens) : LlmStreamEvent;
 
 /// <summary>LLM 对话服务：通过 Microsoft.Extensions.AI 的 IChatClient 流式请求回复。</summary>
@@ -293,6 +296,13 @@ public sealed class LlmChatService(
                 inputTokens += usage.InputTokenCount ?? 0;
                 outputTokens += usage.OutputTokenCount ?? 0;
                 cachedInputTokens += usage.CachedInputTokenCount ?? 0;
+
+                // 每完成一轮就产出一次累计用量：后续轮次可能被取消或抛错，届时已经花掉的 token 就再也报不出去了。
+                // 命中率是 prompt 结构是否稳定的直接指标：缓存命中的部分按缓存价计费。
+                Logger.Debug("LLM usage input={Input} output={Output} cached={Cached} hit={Hit:P0}",
+                    inputTokens, outputTokens, cachedInputTokens,
+                    inputTokens > 0 ? (double)cachedInputTokens / inputTokens : 0d);
+                yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
             }
 
             var calls = response.Messages
@@ -359,16 +369,6 @@ public sealed class LlmChatService(
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
                 yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, FormatResult(result));
             }
-        }
-
-        // 用量整体产出一个事件：界面据此在助手气泡下方与底部统计里展示
-        if (inputTokens > 0 || outputTokens > 0)
-        {
-            // 命中率是 prompt 结构是否稳定的直接指标：缓存命中的部分按缓存价计费
-            Logger.Debug("LLM usage input={Input} output={Output} cached={Cached} hit={Hit:P0}",
-                inputTokens, outputTokens, cachedInputTokens,
-                inputTokens > 0 ? (double)cachedInputTokens / inputTokens : 0d);
-            yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
         }
     }
 

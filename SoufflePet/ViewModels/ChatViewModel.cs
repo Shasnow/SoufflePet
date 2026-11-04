@@ -1004,6 +1004,9 @@ public partial class ChatViewModel : ViewModelBase
         string? displayText = null,
         bool isPlatformNotice = false)
     {
+        // 本轮开始时间：只以工具调用收尾时用量要补记到本轮已写入的记录上，用它把范围限定在本轮
+        var turnStartedAt = DateTimeOffset.Now;
+
         // 这轮提问先落历史；路径随消息一起保存，后续轮次无需重复添加附件。
         // 与长期记忆同样去空白：重启后按 conversations.jsonl 重建的消息才能和这次请求逐字节一致。
         messageText = messageText.Trim();
@@ -1027,7 +1030,7 @@ public partial class ChatViewModel : ViewModelBase
         var roundReasoning = new StringBuilder(); // 当前轮的思考内容，随本轮最后一条助手消息落库
         Models.ChatMessage? thinking = null; // 当前轮次的思考气泡；工具调用后另起一个
         Models.ChatMessage? answered = null; // 本轮最后一段正文所在的气泡，用量挂在它下方
-        LlmUsageEvent? usage = null;         // 本轮 token 用量（流结束时产出）
+        LlmUsageEvent? usage = null;         // 本轮累计 token 用量（服务每完成一轮产出一份累计值，取消时也能拿到已完成轮次的）
         var toolBubbles = new Dictionary<string, Models.ChatMessage>(StringComparer.Ordinal); // CallId → 进行中的工具气泡
 
         // 思考阶段结束（开始输出正文或开始调用工具）时自动折叠思考气泡
@@ -1043,12 +1046,13 @@ public partial class ChatViewModel : ViewModelBase
         // withReasoning 仅在本轮没有工具调用（即最终回复）时为 true，思考内容随这条消息一起保存。
         // pendingForToolCall 表示这段正文其实属于紧随其后的工具调用消息：先只落记忆，
         // 请求历史等工具结果回来时与调用合并成一条消息（见 AddToolHistory）。
-        void CommitSegment(bool withReasoning, bool pendingForToolCall = false)
+        // 返回是否真的写了一条记录：false 表示没有正文也没有思考内容，调用方需要自行处理用量。
+        bool CommitSegment(bool withReasoning, bool pendingForToolCall = false)
         {
             // 正文去空白后（纯空白视作无正文）为空但存在思考内容时同样落库：这条回复仍有思考内容，长期记忆不能丢
             var hasReasoning = withReasoning && roundReasoning.Length > 0;
             var content = segment.Trim();
-            if (content.Length == 0 && !hasReasoning) return;
+            if (content.Length == 0 && !hasReasoning) return false;
 
             if (pendingForToolCall)
             {
@@ -1058,7 +1062,7 @@ public partial class ChatViewModel : ViewModelBase
                 _memory.AddTurn(ChatMemory.AssistantRole, content);
                 TrimHistory();
                 segment = string.Empty;
-                return;
+                return true;
             }
 
             List<AIContent> contents = [];
@@ -1076,8 +1080,8 @@ public partial class ChatViewModel : ViewModelBase
             // 重建出的消息才能和上次请求逐字节一致，第一次请求继续命中前缀缓存。
             contents.Add(new TextContent(content));
             _history.Add(new ChatMessage(ChatRole.Assistant, contents));
-            // 本轮 token 用量随最后一条助手消息落盘（工具循环中途提交时 usage 还是 null）；
-            // 重启后据此恢复气泡底部的用量文案。
+            // 本轮累计 token 用量随最后一条助手消息落盘（服务每完成一轮就产出一份累计值，
+            // 所以中途取消时这里也拿得到已完成轮次的用量）；重启后据此恢复气泡底部的用量文案。
             _memory.AddTurn(ChatMemory.AssistantRole, content, reasoning: reasoning,
                 inputTokens: usage?.InputTokens,
                 outputTokens: usage?.OutputTokens,
@@ -1085,6 +1089,7 @@ public partial class ChatViewModel : ViewModelBase
                 model: FormatModelLabel(model));
             TrimHistory();
             segment = string.Empty;
+            return true;
         }
 
         // 插入一条工具记录：没有正文时直接插在回复气泡前；已有正文则截断并为后续回复新开气泡
@@ -1139,8 +1144,8 @@ public partial class ChatViewModel : ViewModelBase
                         answered = reply;
                         break;
 
-                    case LlmUsageEvent roundUsage:
-                        usage = roundUsage;
+                    case LlmUsageEvent cumulativeUsage:
+                        usage = cumulativeUsage;
                         break;
 
                     case LlmToolCallStartedEvent started:
@@ -1243,13 +1248,24 @@ public partial class ChatViewModel : ViewModelBase
             }
 
             // 只有真正生成出的内容才写回历史；停止时保留已收到的最后一段
-            CommitSegment(withReasoning: true);
+            var committed = CommitSegment(withReasoning: true);
 
             // 记住本次请求实际使用的窗口轮数：重启后按同一窗口恢复，第一次请求才能接上前缀缓存
             _memory.SaveWindowTurns(CountHistoryUserTurns());
 
             // 用量统计：气泡底部胶囊显示本轮用量，同时累加进设置里的历史总额
-            if (usage != null) RecordUsage(model, usage, answered);
+            if (usage != null)
+            {
+                // 本轮只以工具调用收尾、没有正文可落库时 CommitSegment 不会写记录，用量就挂不到任何一条记录上；
+                // 补记到本轮最近一条助手记录，别让已经花掉的 token 在对话记录里留空。
+                if (!committed)
+                {
+                    _memory.AttachUsageToLastTurn(turnStartedAt, usage.InputTokens, usage.OutputTokens,
+                        usage.CachedInputTokens, FormatModelLabel(model));
+                }
+
+                RecordUsage(model, usage, answered);
+            }
 
             _cts = null;
             _reply = null;
@@ -1397,12 +1413,17 @@ public partial class ChatViewModel : ViewModelBase
                     pendingAssistantText);
                 pendingAssistantText = null;
                 AddReasoningBubble(turn.Reasoning);
-                Messages.Add(new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true, isExpanded: false)
+                var toolBubble = new Models.ChatMessage(TruncateToolText(turn.Text), isUser: false, isTool: true,
+                    isExpanded: false, timestamp: turn.Time)
                 {
                     ToolName = turn.ToolName ?? string.Empty,
                     ToolArguments = turn.Arguments ?? string.Empty,
                     ToolResult = turn.Result ?? string.Empty
-                });
+                };
+                // 本轮只以工具调用收尾时用量挂在工具记录上，这里同样还原胶囊（否则只体现在累计统计里）
+                if (turn.InputTokens is { } toolInputTokens)
+                    toolBubble.SetUsage(toolInputTokens, turn.OutputTokens ?? 0, turn.CachedInputTokens ?? 0, turn.Model);
+                Messages.Add(toolBubble);
                 continue;
             }
 
