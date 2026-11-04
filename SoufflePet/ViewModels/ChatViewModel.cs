@@ -1131,7 +1131,9 @@ public partial class ChatViewModel : ViewModelBase
                         if (segment.Length == 0 && reply.Text == ToolCallingText) reply.Text = ThinkingText;
                         if (thinking is null)
                         {
-                            thinking = new Models.ChatMessage(string.Empty, isUser: false, isReasoning: true);
+                            // 思考气泡默认收起：只露出最后一行（随流式追加刷新），不占满消息区
+                            thinking = new Models.ChatMessage(string.Empty, isUser: false, isReasoning: true,
+                                isExpanded: false);
                             Messages.Insert(Messages.IndexOf(reply), thinking);
                         }
 
@@ -1399,11 +1401,15 @@ public partial class ChatViewModel : ViewModelBase
 
         Messages.Clear();
 
-        // 思考气泡：与生成时一致，排在本条正文（或工具记录）气泡之前
+        // 思考气泡：与生成时一致（默认收起），排在本条正文（或工具记录）气泡之前；
+        // 恢复出来的思考早已结束，标题不再显示「思考中」
         void AddReasoningBubble(string? reasoning)
         {
             if (string.IsNullOrEmpty(reasoning)) return;
-            Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true, isExpanded: false));
+            Messages.Add(new Models.ChatMessage(reasoning, isUser: false, isReasoning: true, isExpanded: false)
+            {
+                IsReasoningDone = true
+            });
         }
 
         // 落盘时「工具调用前的正文」是单独一行；重建请求历史时要并回紧随其后的那条工具调用消息，

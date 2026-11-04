@@ -257,18 +257,25 @@
                                             Classes.attachment="{Binding HasDisplayAttachment}"
                                             Classes.notice="{Binding IsPlatformNotice}">
                                         <StackPanel Spacing="7">
-                                            <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看。
-                                             用 ContentControl 承载：Content 为 null（非思考消息）时不实例化模板，
-                                             避免每条普通气泡都创建一个用不到的折叠面板 -->
+                                            <!-- 思考过程：折叠面板，默认收起，收起时标题显示「思考 · 一行思考内容」
+                                                 （思考中是最新一行，结束后固定为第一行），点标题可展开看全文。
+                                                 用 ContentControl 承载：Content 为 null（非思考消息）
+                                                 时不实例化模板，避免每条普通气泡都创建一个用不到的折叠面板 -->
                                             <ContentControl Content="{Binding ReasoningPanel}"
                                                             IsVisible="{Binding IsReasoning}">
                                                 <ContentControl.ContentTemplate>
                                                     <DataTemplate x:DataType="models:ChatMessage">
                                                         <Expander Theme="{StaticResource ToolExpander}"
-                                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
-                                                                  Header="{Binding ReasoningHeader}">
+                                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                                            <Expander.Header>
+                                                                <!-- 单行截断：思考的最新一行常常整段没有换行，收起时不该把气泡撑高。
+                                                                     TextWrapping 必须显式 NoWrap，否则会被气泡样式里的 Wrap 覆盖成多行 -->
+                                                                <TextBlock Text="{Binding ReasoningHeader}"
+                                                                           TextWrapping="NoWrap"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                            </Expander.Header>
                                                             <SelectableTextBlock Text="{Binding Text}"
-                                                                    TextWrapping="Wrap" />
+                                                                                 TextWrapping="Wrap" />
                                                         </Expander>
                                                     </DataTemplate>
                                                 </ContentControl.ContentTemplate>

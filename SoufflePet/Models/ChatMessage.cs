@@ -36,8 +36,6 @@ public sealed partial class ChatMessage : ObservableObject
         IsPlatformNotice = isPlatformNotice;
         DisplayAttachment = displayAttachment;
         Timestamp = timestamp ?? DateTimeOffset.Now;
-        // 初始就是收起状态的思考气泡（从历史恢复）已经结束，标题直接显示「已完成」
-        IsReasoningDone = !isExpanded;
 
         if (approval is null) return;
 
@@ -48,6 +46,7 @@ public sealed partial class ChatMessage : ObservableObject
     }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReasoningHeader))]
     public partial string Text { get; set; }
 
     /// <summary>消息时间：气泡底部的用量胶囊里显示 HH:mm；恢复历史时用落盘时间。</summary>
@@ -153,17 +152,60 @@ public sealed partial class ChatMessage : ObservableObject
 
     public bool HasDisplayAttachment => DisplayAttachment is not null;
 
-    /// <summary>折叠面板的展开状态（思考过程与工具调用共用）：思考结束后自动收起，用户可手动切换。</summary>
+    /// <summary>折叠面板的展开状态（思考过程与工具调用共用）：思考气泡默认收起，用户可手动展开查看全文。</summary>
     [ObservableProperty]
     public partial bool IsExpanded { get; set; }
 
-    /// <summary>思考阶段是否已结束（结束时自动折叠），与用户手动展开/收起无关。</summary>
+    /// <summary>思考阶段是否已结束（结束时收起面板），与用户手动展开/收起无关。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ReasoningHeader))]
     public partial bool IsReasoningDone { get; set; }
 
-    /// <summary>折叠面板的标题：只反映思考是否结束，手动展开不会变回「思考中」。</summary>
-    public string ReasoningHeader => IsReasoningDone ? "思考过程（已完成）" : "思考过程（思考中…）";
+    /// <summary>
+    /// 折叠面板的标题：思考气泡默认收起，收起时显示「思考 · 」加一行思考内容。
+    /// 思考进行中取最后一行（跟着模型当前的想法滚动），思考结束后取第一行（整段思考的开头，标题不再跳动）；
+    /// 没有内容时才只显示「思考」这个标签。
+    /// </summary>
+    public string ReasoningHeader
+    {
+        get
+        {
+            var line = IsReasoningDone ? FirstLine(Text) : LatestLine(Text);
+            if (line is not null) return $"思考 · {line}";
+            return IsReasoningDone ? "思考" : "思考中…";
+        }
+    }
+
+    /// <summary>取文本里第一个非空行的内容；整段都是空白时返回 null。</summary>
+    private static string? FirstLine(string text)
+    {
+        var start = 0;
+        while (start < text.Length)
+        {
+            var end = text.IndexOf('\n', start);
+            if (end < 0) end = text.Length;
+            var line = text[start..end].Trim();
+            if (line.Length > 0) return line;
+            start = end + 1;
+        }
+
+        return null;
+    }
+
+    /// <summary>取文本里最后一个非空行的内容；整段都是空白时返回 null。</summary>
+    private static string? LatestLine(string text)
+    {
+        var end = text.Length;
+        while (end > 0)
+        {
+            var start = text.LastIndexOf('\n', end - 1) + 1;
+            var line = text[start..end].Trim();
+            if (line.Length > 0) return line;
+            end = start > 0 ? start - 1 : 0;
+        }
+
+        return null;
+    }
 
     /// <summary>工具名（仅工具记录）：折叠标题只显示它。</summary>
     [ObservableProperty]
