@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -68,6 +69,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IMcpConfigStore _mcpConfig;
     private readonly ISkillsWindowService _skillsWindow;
     private readonly ILive2DModelsWindowService _live2DModelsWindow;
+    private readonly ILlmModelsWindowService _llmModelsWindow;
     private readonly IPluginsWindowService _pluginsWindow;
     private readonly IScheduledTasksWindowService _scheduledTasksWindow;
     private readonly IStatisticsService _statistics;
@@ -104,6 +106,7 @@ public partial class ChatViewModel : ViewModelBase
         IMcpConfigStore mcpConfig,
         ISkillsWindowService skillsWindow,
         ILive2DModelsWindowService live2DModelsWindow,
+        ILlmModelsWindowService llmModelsWindow,
         IPluginsWindowService pluginsWindow,
         IScheduledTasksWindowService scheduledTasksWindow,
         PlatformService platforms,
@@ -121,6 +124,7 @@ public partial class ChatViewModel : ViewModelBase
         _mcpConfig = mcpConfig;
         _skillsWindow = skillsWindow;
         _live2DModelsWindow = live2DModelsWindow;
+        _llmModelsWindow = llmModelsWindow;
         _pluginsWindow = pluginsWindow;
         _scheduledTasksWindow = scheduledTasksWindow;
         _statistics = statistics;
@@ -138,10 +142,10 @@ public partial class ChatViewModel : ViewModelBase
             SendCommand.NotifyCanExecuteChanged();
         };
 
-        // 首次启动列表为空且没有已保存的模型名，此时保持未选中状态。
-        SelectedModel = settings.ChatModelName is { Length: > 0 } name
-            ? Models.FirstOrDefault(m => m.Name == name)
-            : null;
+        // 模型列表由提供商配置展开，这里按保存的键恢复选中项。
+        Models.CollectionChanged += OnModelListChanged;
+        SelectedModel = FindModel(settings.ChatModelKey);
+        RefreshModelGroups();
         _initialized = true;
 
         InitializeWorkspaces();
@@ -155,8 +159,65 @@ public partial class ChatViewModel : ViewModelBase
         new("今天想聊点什么呀？", isUser: false)
     ];
 
-    /// <summary>可选的对话模型（与设置共享同一集合，添加后直接持久化）。</summary>
+    /// <summary>
+    /// 可选的对话模型（与设置共享同一集合）：由提供商配置里已启用的模型展开而来，
+    /// 增删由对话模型管理面板负责，对话窗口只读。
+    /// </summary>
     public ObservableCollection<ChatModelConfig> Models => _settings.ChatModels;
+
+    /// <summary>模型选择浮层的内容：按提供商分组，组内只包含已启用的模型。</summary>
+    public ObservableCollection<ChatModelGroupViewModel> ModelGroups { get; } = [];
+
+    /// <summary>模型选择浮层是否有可选项（没有时显示「去管理模型」提示）。</summary>
+    public bool HasModelGroups => ModelGroups.Count > 0;
+
+    /// <summary>按提供商重建分组：同一提供商的模型排在一起，组内沿用配置里的顺序。</summary>
+    private void RefreshModelGroups()
+    {
+        ModelGroups.Clear();
+        foreach (var group in Models.GroupBy(model => model.Provider))
+        {
+            var viewModel = new ChatModelGroupViewModel(group.Key);
+            foreach (var model in group)
+                viewModel.Models.Add(new ChatModelPickerItem(model, this)
+                {
+                    IsActive = ReferenceEquals(model, SelectedModel)
+                });
+
+            ModelGroups.Add(viewModel);
+        }
+
+        OnPropertyChanged(nameof(HasModelGroups));
+    }
+
+    /// <summary>在模型选择浮层里点了一个模型：切换为当前模型并收起浮层（重复点当前模型也收起）。</summary>
+    public void SelectModel(ChatModelConfig model)
+    {
+        SelectedModel = model;
+        IsModelPickerOpen = false;
+    }
+
+    /// <summary>按「提供商/模型标识」键还原选中项。</summary>
+    private ChatModelConfig? FindModel(string key) =>
+        key.Length > 0 ? Models.FirstOrDefault(model => model.Key == key) : null;
+
+    /// <summary>
+    /// 模型是否可用于发起请求：模型标识与接口地址都要填，地址还得是合法的绝对地址。
+    /// 管理面板保存时已校验过地址，这里兜住手工改配置的情况——直接交给 SDK 会在 new Uri 处抛异常。
+    /// </summary>
+    private static bool IsUsable(ChatModelConfig model) =>
+        !string.IsNullOrWhiteSpace(model.ModelId)
+        && Uri.TryCreate(model.BaseUrl.Trim(), UriKind.Absolute, out _);
+
+    /// <summary>模型列表被管理面板重建：刷新分组，并让选中项跟上新实例（按保存的键重新定位）。</summary>
+    private void OnModelListChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshModelGroups();
+        if (SelectedModel is { } current && Models.Contains(current)) return;
+
+        var restored = FindModel(_settings.ChatModelKey);
+        if (!ReferenceEquals(restored, SelectedModel)) SelectedModel = restored;
+    }
 
     /// <summary>宠物称呼（设置项）。</summary>
     public string PetName => _settings.PetName;
@@ -519,14 +580,25 @@ public partial class ChatViewModel : ViewModelBase
     public partial ChatModelConfig? SelectedModel { get; set; }
 
     /// <summary>模型按钮上显示的文案。</summary>
-    public string ModelButtonText =>
-        SelectedModel is null ? "请选择模型" : $"{SelectedModel.Provider} · {SelectedModel.Name}";
+    public string ModelButtonText => SelectedModel switch
+    {
+        null => "请选择模型",
+        { Provider.Length: > 0 } model => $"{model.Provider} · {model.Name}",
+        var model => model.Name
+    };
 
     partial void OnSelectedModelChanged(ChatModelConfig? value)
     {
         OnPropertyChanged(nameof(ModelButtonText));
-        if (!_initialized || value is null) return;
-        _settings.ChatModelName = value.Name;
+        // 选中项变了：浮层里的高亮跟着换（列表为空时 value 为 null，只清高亮）
+        foreach (var group in ModelGroups)
+            foreach (var item in group.Models)
+                item.IsActive = ReferenceEquals(item.Config, value);
+
+        if (!_initialized) return;
+        // 键用于精确还原（同名模型可能存在于多个提供商下）；未选中时保留上一次的键，模型重新启用后还能回来
+        if (value is not null) _settings.ChatModelKey = value.Key;
+
         IsModelPickerOpen = false;
     }
 
@@ -644,44 +716,15 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsModelPickerOpen { get; set; }
 
+    [RelayCommand]
+    private void ToggleModelPicker() => IsModelPickerOpen = !IsModelPickerOpen;
+
     /// <summary>模型通过 ask_user 工具发起的提问面板；null 表示没有待回答的问题。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAsking))]
     public partial AskUserViewModel? AskUser { get; set; }
 
     public bool IsAsking => AskUser is not null;
-
-    /// <summary>「添加模型」表单是否显示。</summary>
-    [ObservableProperty]
-    public partial bool IsAddingModel { get; set; }
-
-    [ObservableProperty] public partial string NewModelProvider { get; set; } = string.Empty;
-
-    public string NewModelName
-    {
-        get;
-        set
-        {
-            field = value;
-            AddModelError = null;
-            OnPropertyChanged();
-        }
-    } = string.Empty;
-
-    [ObservableProperty] public partial string NewModelModelId { get; set; } = string.Empty;
-
-    [ObservableProperty] public partial string NewModelBaseUrl { get; set; } = string.Empty;
-
-    [ObservableProperty] public partial string NewModelApiKey { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasAddModelError))]
-    public partial string? AddModelError { get; set; }
-
-    public bool HasAddModelError => !string.IsNullOrEmpty(AddModelError);
-
-    [RelayCommand]
-    private void ToggleModelPicker() => IsModelPickerOpen = !IsModelPickerOpen;
 
     /// <summary>「更多操作」浮层是否展开。</summary>
     [ObservableProperty]
@@ -698,12 +741,21 @@ public partial class ChatViewModel : ViewModelBase
         _mcpSettings.Show();
     }
 
-    /// <summary>打开模型管理窗口（导入/移除/修改 Live2D 模型配置）。</summary>
+    /// <summary>打开 Live2D 模型管理窗口（导入/移除/切换桌面模型，与对话模型无关）。</summary>
     [RelayCommand]
     private void OpenLive2DModels()
     {
         IsMoreOpen = false;
         _live2DModelsWindow.Show();
+    }
+
+    /// <summary>打开对话模型管理窗口（按提供商配置接口/密钥，勾选要启用的模型）。</summary>
+    [RelayCommand]
+    private void OpenLlmModels()
+    {
+        IsMoreOpen = false;
+        IsModelPickerOpen = false;
+        _llmModelsWindow.Show();
     }
 
     /// <summary>打开技能管理窗口（每次打开前重新扫描技能目录）。</summary>
@@ -728,53 +780,6 @@ public partial class ChatViewModel : ViewModelBase
     {
         IsMoreOpen = false;
         _scheduledTasksWindow.Show();
-    }
-
-    [RelayCommand]
-    private void OpenAddModel()
-    {
-        IsModelPickerOpen = false;
-        NewModelProvider = string.Empty;
-        NewModelName = string.Empty;
-        NewModelModelId = string.Empty;
-        NewModelBaseUrl = string.Empty;
-        NewModelApiKey = string.Empty;
-        AddModelError = null;
-        IsAddingModel = true;
-    }
-
-    [RelayCommand]
-    private void CancelAddModel() => IsAddingModel = false;
-
-    [RelayCommand]
-    private void ConfirmAddModel()
-    {
-        var name = NewModelName.Trim();
-        if (name.Length == 0)
-        {
-            AddModelError = "请填写模型名称";
-            return;
-        }
-
-        if (Models.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            AddModelError = "已存在同名模型";
-            return;
-        }
-
-        var model = new ChatModelConfig
-        {
-            Provider = NewModelProvider.Trim(),
-            Name = name,
-            ModelId = NewModelModelId.Trim(),
-            BaseUrl = NewModelBaseUrl.Trim(),
-            ApiKey = NewModelApiKey.Trim()
-        };
-
-        Models.Add(model);
-        _settings.Save(); // 集合变化不会触发 PropertyChanged，这里直接落盘
-        IsAddingModel = false;
-        SelectedModel = model;
     }
 
     /// <summary>
@@ -874,9 +879,7 @@ public partial class ChatViewModel : ViewModelBase
     {
         Messages.Add(new Models.ChatMessage(turn.Display, isUser: false, isPlatformNotice: true));
 
-        if (SelectedModel is not { } model
-            || string.IsNullOrWhiteSpace(model.ModelId)
-            || string.IsNullOrWhiteSpace(model.BaseUrl))
+        if (SelectedModel is not { } model || !IsUsable(model))
         {
             Messages.Add(new Models.ChatMessage("当前没有可用的对话模型，无法执行这条提醒。", isUser: false));
             return;
@@ -907,14 +910,14 @@ public partial class ChatViewModel : ViewModelBase
 
         if (SelectedModel is not { } model)
         {
-            Messages.Add(new Models.ChatMessage("请先选择模型（点击下方「模型 · 请选择模型」）", isUser: false));
+            Messages.Add(new Models.ChatMessage("请先选择模型：点下方的模型按钮挑一个；没有可选模型时点「管理模型」添加。", isUser: false));
             IsModelPickerOpen = true;
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(model.ModelId) || string.IsNullOrWhiteSpace(model.BaseUrl))
+        if (!IsUsable(model))
         {
-            Messages.Add(new Models.ChatMessage("当前模型缺少模型标识或接口地址，请重新添加该模型", isUser: false));
+            Messages.Add(new Models.ChatMessage("当前模型的标识或接口地址无效，请在「管理模型」里检查该提供商的配置", isUser: false));
             return;
         }
 

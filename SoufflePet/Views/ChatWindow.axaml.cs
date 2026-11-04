@@ -159,12 +159,6 @@ public partial class ChatWindow : Window
     /// <summary>关闭按钮只是隐藏窗口，便于热键重新呼出（真正关闭由 CloseForShutdown 负责）。</summary>
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Hide();
 
-    /// <summary>点击列表项后收起浮层；重复点击当前模型时 SelectedItem 不变，也能正常关闭。</summary>
-    private void OnModelListPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (DataContext is ChatViewModel vm) vm.IsModelPickerOpen = false;
-    }
-
     /// <summary>点击历史工作区条目：立即切换过去并关闭浮层。</summary>
     private void OnWorkspaceItemClick(object? sender, RoutedEventArgs e)
     {

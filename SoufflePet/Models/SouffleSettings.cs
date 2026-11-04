@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -107,16 +108,24 @@ public partial class SouffleSettings : ObservableObject
     [Description("桌面宠物的称呼（聊天窗口标题、输入提示、记忆自称与默认人设；修改后重启生效）")]
     public partial string PetName { get; set; } = DefaultPetName;
 
-    [Description("可选的大语言模型列表（对话窗口的模型选择），首次启动为空")]
-    public ObservableCollection<ChatModelConfig> ChatModels { get; set; } = [];
+    [Description("大语言模型提供商列表（对话模型管理面板按提供商配置接口与密钥，并勾选可用模型）")]
+    public ObservableCollection<ChatProviderConfig> ChatProviders { get; set; } = [];
+
+    /// <summary>
+    /// 对话窗口的模型选择列表：由 <see cref="ChatProviders" /> 里已启用的模型展开而来，
+    /// 不单独落盘（唯一事实源是提供商配置），提供商配置变化后由 <see cref="RebuildChatModels" /> 重建。
+    /// </summary>
+    [JsonIgnore]
+    [Description("对话窗口的模型选择列表（由 ChatProviders 里已启用的模型生成，不写回配置文件）")]
+    public ObservableCollection<ChatModelConfig> ChatModels { get; } = [];
 
     [ObservableProperty]
     [Description("联网搜索用的百度千帆 API Key（web_search 工具）；留空时该工具会提示未配置")]
     public partial string WebSearchApiKey { get; set; } = string.Empty;
 
     [ObservableProperty]
-    [Description("当前选择的对话模型名称，首次启动为空表示未选择")]
-    public partial string ChatModelName { get; set; } = string.Empty;
+    [Description("当前选择的对话模型：提供商/模型标识，为空表示未选择")]
+    public partial string ChatModelKey { get; set; } = string.Empty;
 
     /// <summary>默认人设：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
     public static readonly string DefaultChatSystemPrompt = BuildDefaultChatSystemPrompt(DefaultPetName);
@@ -203,7 +212,61 @@ public partial class SouffleSettings : ObservableObject
         if (HistoryWindowTurns < 2) HistoryWindowTurns = 2;
         if (HistoryKeepTurns < 1) HistoryKeepTurns = 1;
         if (HistoryKeepTurns >= HistoryWindowTurns) HistoryKeepTurns = HistoryWindowTurns - 1;
+        // 对话模型：按提供商配置展开成对话窗口用的列表
+        RebuildChatModels();
     }
+
+    /// <summary>
+    /// 按「提供商 → 已启用模型」展开对话窗口的模型选择列表。
+    /// 会原地合并：键相同的条目复用原实例并改写字段，避免对话窗口里正在用的选中项被换掉。
+    /// </summary>
+    public void RebuildChatModels()
+    {
+        var desired = new List<ChatModelConfig>();
+        foreach (var provider in ChatProviders)
+        {
+            foreach (var model in provider.Models)
+            {
+                if (!model.IsActive || string.IsNullOrWhiteSpace(model.ModelId)) continue;
+
+                var key = ChatModelConfig.KeyOf(provider.Name, model.ModelId);
+                if (desired.Any(m => m.Key == key)) continue;
+
+                desired.Add(new ChatModelConfig
+                {
+                    Provider = provider.Name,
+                    Name = DisplayNameOf(model),
+                    ModelId = model.ModelId,
+                    BaseUrl = provider.BaseUrl,
+                    ApiKey = provider.ApiKey
+                });
+            }
+        }
+
+        for (var i = 0; i < desired.Count; i++)
+        {
+            var target = desired[i];
+            var existing = ChatModels.FirstOrDefault(m => m.Key == target.Key);
+            if (existing is null)
+            {
+                ChatModels.Insert(i, target);
+                continue;
+            }
+
+            var index = ChatModels.IndexOf(existing);
+            if (index != i) ChatModels.Move(index, i);
+            existing.Provider = target.Provider;
+            existing.Name = target.Name;
+            existing.BaseUrl = target.BaseUrl;
+            existing.ApiKey = target.ApiKey;
+        }
+
+        while (ChatModels.Count > desired.Count) ChatModels.RemoveAt(ChatModels.Count - 1);
+    }
+
+    /// <summary>模型在对话窗口里的显示名：优先取自定义名称，留空时用模型标识。</summary>
+    public static string DisplayNameOf(ChatProviderModel model) =>
+        string.IsNullOrWhiteSpace(model.Name) ? model.ModelId.Trim() : model.Name.Trim();
 
     public void Save()
     {

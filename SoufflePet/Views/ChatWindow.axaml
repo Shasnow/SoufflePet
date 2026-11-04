@@ -665,7 +665,7 @@
                                     IsVisible="{Binding IsGenerating}"
                                     Command="{Binding StopCommand}" />
 
-                            <!-- 模型选择浮层：列表底部固定一个「添加模型」入口 -->
+                            <!-- 模型选择浮层：按提供商分组列出已启用的模型，底部固定一个「管理模型」入口 -->
                             <Popup Grid.Column="0" IsOpen="{Binding IsModelPickerOpen, Mode=TwoWay}"
                                    PlacementTarget="{Binding #ModelButton}"
                                    Placement="TopEdgeAlignedLeft"
@@ -684,20 +684,44 @@
                                                    Foreground="#66FFFFFF"
                                                    Margin="8,4,8,2" />
 
-                                        <ListBox Name="ModelList"
-                                                 Classes="modelList"
-                                                 ItemsSource="{Binding Models}"
-                                                 SelectedItem="{Binding SelectedModel, Mode=TwoWay}"
-                                                 MaxHeight="190"
-                                                 PointerReleased="OnModelListPointerReleased">
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate x:DataType="models:ChatModelConfig">
-                                                    <TextBlock Text="{Binding Name}"
-                                                               FontSize="12.5"
-                                                               Foreground="#F2FFFFFF" />
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
+                                        <TextBlock Text="还没有启用的模型，点下方「管理模型」添加"
+                                                   IsVisible="{Binding !HasModelGroups}"
+                                                   FontSize="10.5"
+                                                   Foreground="#66FFFFFF"
+                                                   Margin="8,2,8,6"
+                                                   TextWrapping="Wrap" />
+
+                                        <ScrollViewer MaxHeight="230"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <!-- 分组由 ChatViewModel 按提供商建好，这里只做两层模板渲染 -->
+                                            <ItemsControl ItemsSource="{Binding ModelGroups}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:ChatModelGroupViewModel">
+                                                        <StackPanel Spacing="1" Margin="0,0,0,3">
+                                                            <TextBlock Text="{Binding Provider}"
+                                                                       FontSize="10.5"
+                                                                       Foreground="#59FFFFFF"
+                                                                       Margin="8,4,8,1" />
+                                                            <ItemsControl ItemsSource="{Binding Models}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate x:DataType="vm:ChatModelPickerItem">
+                                                                        <Button Classes="modeItem"
+                                                                                Classes.selected="{Binding IsActive}"
+                                                                                Command="{Binding SelectCommand}">
+                                                                            <TextBlock Text="{Binding Name}"
+                                                                                       FontSize="12.5"
+                                                                                       Foreground="#F2FFFFFF"
+                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                        </Button>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
 
                                         <Border Height="1" Background="#14FFFFFF" Margin="4,3" />
 
@@ -705,15 +729,15 @@
                                                 HorizontalAlignment="Stretch"
                                                 HorizontalContentAlignment="Left"
                                                 Padding="8,6"
-                                                Command="{Binding OpenAddModelCommand}">
+                                                Command="{Binding OpenLlmModelsCommand}">
                                             <StackPanel Orientation="Horizontal" Spacing="7"
                                                         VerticalAlignment="Center">
-                                                <Path Data="M0,6 L12,6 M6,0 L6,12"
+                                                <Path Data="M0,2 L11,2 M0,6 L11,6 M0,10 L11,10"
                                                       Stroke="#8CFFFFFF"
                                                       StrokeThickness="1.4"
                                                       StrokeLineCap="Round"
                                                       VerticalAlignment="Center" />
-                                                <TextBlock Text="添加模型" Classes="muted" />
+                                                <TextBlock Text="管理模型" Classes="muted" />
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>
@@ -758,9 +782,18 @@
                                             </StackPanel>
                                         </Button>
 
+                                        <Button Classes="modeItem" Command="{Binding OpenLlmModelsCommand}">
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="对话模型…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="按提供商配置接口与密钥，勾选要启用的模型"
+                                                           FontSize="10.5"
+                                                           Foreground="#66FFFFFF" />
+                                            </StackPanel>
+                                        </Button>
+
                                         <Button Classes="modeItem" Command="{Binding OpenLive2DModelsCommand}">
                                             <StackPanel Spacing="1">
-                                                <TextBlock Text="模型…" FontSize="12.5" Foreground="#F2FFFFFF" />
+                                                <TextBlock Text="Live2D 模型…" FontSize="12.5" Foreground="#F2FFFFFF" />
                                                 <TextBlock Text="导入、切换或移除 Live2D 模型"
                                                            FontSize="10.5"
                                                            Foreground="#66FFFFFF" />
@@ -1102,80 +1135,7 @@
                     </Popup>
                 </Grid>
 
-                <!-- 添加模型：覆盖整个面板的轻量表单，避免另开窗口 -->
-                <Grid Grid.Row="0" Grid.RowSpan="6"
-                      IsVisible="{Binding IsAddingModel}"
-                      Background="#A6000000">
-                    <Border Width="344"
-                            Padding="18"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="#F21B1C22"
-                            BorderBrush="#26FFFFFF"
-                            BorderThickness="1"
-                            CornerRadius="14"
-                            BoxShadow="0 14 34 0 #80000000">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="添加模型"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Foreground="#F2FFFFFF" />
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="提供商（可选）" FontSize="11" Foreground="#8CFFFFFF" />
-                                <TextBox Classes="field"
-                                         Text="{Binding NewModelProvider, Mode=TwoWay}"
-                                         PlaceholderText="例如：DeepSeek" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="名称" FontSize="11" Foreground="#8CFFFFFF" />
-                                <TextBox Classes="field"
-                                         Text="{Binding NewModelName, Mode=TwoWay}"
-                                         PlaceholderText="例如：DeepSeek" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="模型标识" FontSize="11" Foreground="#8CFFFFFF" />
-                                <TextBox Classes="field"
-                                         Text="{Binding NewModelModelId, Mode=TwoWay}"
-                                         PlaceholderText="例如：deepseek-chat" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="接口地址" FontSize="11" Foreground="#8CFFFFFF" />
-                                <TextBox Classes="field"
-                                         Text="{Binding NewModelBaseUrl, Mode=TwoWay}"
-                                         PlaceholderText="https://api.example.com/v1" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="API 密钥" FontSize="11" Foreground="#8CFFFFFF" />
-                                <TextBox Classes="field"
-                                         Text="{Binding NewModelApiKey, Mode=TwoWay}"
-                                         PasswordChar="●"
-                                         PlaceholderText="可留空" />
-                            </StackPanel>
-
-                            <TextBlock Text="{Binding AddModelError}"
-                                       IsVisible="{Binding HasAddModelError}"
-                                       FontSize="11"
-                                       Foreground="#FF9E9E" />
-
-                            <StackPanel Orientation="Horizontal"
-                                        HorizontalAlignment="Right"
-                                        Spacing="8"
-                                        Margin="0,2,0,0">
-                                <Button Classes="ghost"
-                                        Content="取消"
-                                        Command="{Binding CancelAddModelCommand}" />
-                                <Button Classes="primary"
-                                        Content="添加"
-                                        Command="{Binding ConfirmAddModelCommand}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </Grid>
+                <!-- 模型配置已迁到独立的「对话模型」管理窗口（与 Live2D 模型管理分开），窗口里不再有内嵌表单 -->
             </Grid>
         </Border>
     </Panel>

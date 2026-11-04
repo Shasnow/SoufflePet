@@ -118,6 +118,13 @@
     <Style Selector="Button.modeItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="#1AFFFFFF" />
     </Style>
+    <!-- 浮层里的当前选中项（如模型选择列表里正在使用的模型） -->
+    <Style Selector="Button.modeItem.selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#33E8879B" />
+    </Style>
+    <Style Selector="Button.modeItem.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="#40E8879B" />
+    </Style>
 
     <!-- 传输方式切换（单选标签） -->
     <Style Selector="Button.tab">

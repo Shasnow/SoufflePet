@@ -74,6 +74,7 @@ public class App : Application
             services.AddSingleton<IPluginService, PluginService>();
             services.AddSingleton<ChatTools>();
             services.AddSingleton<ILlmChatService, LlmChatService>();
+            services.AddSingleton<ILlmModelCatalog, LlmModelCatalog>(); // 对话模型管理：按提供商获取模型列表
             services.AddSingleton<IScheduledTaskService, ScheduledTaskService>(); // 定时任务调度：随设置持久化，启动时恢复
             services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
             services.AddSingleton<IChatWindowService, ChatWindowService>();
@@ -84,6 +85,8 @@ public class App : Application
             services.AddSingleton<ILive2DModelService, Live2DModelService>(); // 模型导入/移除/校验
             services.AddSingleton<Live2DModelsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的模型上
             services.AddSingleton<ILive2DModelsWindowService, Live2DModelsWindowService>();
+            services.AddSingleton<LlmModelsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的提供商上
+            services.AddSingleton<ILlmModelsWindowService, LlmModelsWindowService>();
             services.AddSingleton<PluginsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的插件上
             services.AddSingleton<IPluginsWindowService, PluginsWindowService>();
             services.AddSingleton<ScheduledTasksViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的任务上

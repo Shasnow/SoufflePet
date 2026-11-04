@@ -1,0 +1,316 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SoufflePet.ViewModels"
+             xmlns:models="using:SoufflePet.Models"
+             x:Class="SoufflePet.Views.LlmModelsView"
+             x:DataType="vm:LlmModelsViewModel"
+             x:CompileBindings="True">
+
+    <!-- 外观样式统一放在 Styles 文件夹，由 App.axaml 引入 -->
+
+    <Panel Margin="16">
+        <Border Background="#EA17181D"
+                BorderBrush="#22FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                ClipToBounds="True"
+                BoxShadow="0 16 40 0 #80000000">
+            <Grid RowDefinitions="Auto,Auto,*">
+
+                <!-- 标题栏：按住可拖动无边框窗口 -->
+                <Border Background="Transparent" PointerPressed="OnHeaderPointerPressed">
+                    <Grid Height="52" Margin="16,0,10,0" ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="32" Height="32" CornerRadius="16" VerticalAlignment="Center">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                                    <GradientStop Color="#F2A9B8" Offset="0" />
+                                    <GradientStop Color="#D97F9A" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="模"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#2A141B"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="对话模型" FontSize="14" FontWeight="SemiBold" Foreground="#F2FFFFFF" />
+                            <TextBlock Text="{Binding ToolHint}" FontSize="11" Foreground="#8CFFFFFF" />
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Classes="ghost"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                Click="OnCloseClick">
+                            <Path Data="M0,0 L9,9 M9,0 L0,9"
+                                  Stroke="#8CFFFFFF"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Height="1" Background="#14FFFFFF" />
+
+                <Grid Grid.Row="2" Margin="12,10,12,12" ColumnDefinitions="218,*">
+
+                    <!-- 左：提供商列表 -->
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <Grid ColumnDefinitions="*,Auto" Margin="4,0,4,2">
+                            <TextBlock Text="提供商" Classes="section" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="新增一个模型提供商（接口地址与密钥按提供商配置一次）"
+                                        Command="{Binding AddProviderCommand}">
+                                    <TextBlock Text="新建" Classes="muted" />
+                                </Button>
+                                <Button Classes="ghost"
+                                        Padding="7,3"
+                                        ToolTip.Tip="移除选中的提供商及其模型（会先确认）"
+                                        IsEnabled="{Binding HasSelection}"
+                                        Command="{Binding RequestRemoveProviderCommand}">
+                                    <TextBlock Text="移除" Classes="muted" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="1" Margin="4,0,4,6" Spacing="1">
+                            <TextBlock Text="{Binding Status}"
+                                       Classes="label"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <TextBlock Text="{Binding ResultMessage}"
+                                       IsVisible="{Binding HasResultMessage}"
+                                       FontSize="10.5"
+                                       Foreground="#8CFFFFFF"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <ListBox Grid.Row="2"
+                                 Classes="serverList"
+                                 ItemsSource="{Binding Providers}"
+                                 SelectedItem="{Binding SelectedProvider, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:ChatProviderConfig">
+                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="12.5"
+                                                   Foreground="#F2FFFFFF"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding BaseUrl}"
+                                                   FontSize="10.5"
+                                                   Foreground="#66FFFFFF"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Column="1" Width="1" Margin="4,0,12,0" Background="#14FFFFFF"
+                            HorizontalAlignment="Left" />
+
+                    <!-- 右：提供商配置与模型清单 -->
+                    <Grid Grid.Column="1" Margin="12,0,0,0" RowDefinitions="*,Auto">
+
+                        <StackPanel VerticalAlignment="Center"
+                                    Spacing="4"
+                                    IsVisible="{Binding !HasSelection}">
+                            <TextBlock Text="还没有选中提供商"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="点左上角「新建」添加提供商（如 DeepSeek、OpenAI），填好接口地址与密钥后获取模型列表"
+                                       FontSize="10.5"
+                                       Foreground="#66FFFFFF"
+                                       MaxWidth="320"
+                                       HorizontalAlignment="Center"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <ScrollViewer IsVisible="{Binding HasSelection}"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Spacing="10" Margin="0,2,8,0">
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="提供商名称" Classes="label" />
+                                    <TextBox Classes="field"
+                                             Text="{Binding EditorName, Mode=TwoWay}"
+                                             PlaceholderText="例如 DeepSeek（对话窗口按此分组）" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="接口地址" Classes="label" />
+                                    <TextBox Classes="field"
+                                             Text="{Binding EditorBaseUrl, Mode=TwoWay}"
+                                             PlaceholderText="https://api.example.com/v1" />
+                                    <TextBlock Text="OpenAI 兼容的 base url；填了完整 /chat/completions 路径也可以"
+                                               FontSize="10.5"
+                                               Foreground="#59FFFFFF"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="API 密钥" Classes="label" />
+                                    <TextBox Classes="field"
+                                             Text="{Binding EditorApiKey, Mode=TwoWay}"
+                                             PasswordChar="●"
+                                             PlaceholderText="可留空（本地 / 无鉴权的接口）" />
+                                    <TextBlock Text="该提供商下的模型共用这个密钥"
+                                               FontSize="10.5"
+                                               Foreground="#59FFFFFF"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="模型：勾选的会加入对话窗口的模型选择列表"
+                                                   Classes="label"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center" />
+                                        <Button Grid.Column="1"
+                                                Classes="ghost"
+                                                Padding="8,3"
+                                                ToolTip.Tip="按接口地址与密钥请求 GET /models，合并进下面的清单"
+                                                IsEnabled="{Binding !IsFetching}"
+                                                Command="{Binding FetchModelsCommand}">
+                                            <TextBlock Text="获取模型列表" Classes="muted" />
+                                        </Button>
+                                    </Grid>
+
+                                    <TextBlock Text="{Binding FetchStatus}"
+                                               IsVisible="{Binding HasFetchStatus}"
+                                               FontSize="10.5"
+                                               Foreground="#8CFFFFFF"
+                                               TextWrapping="Wrap" />
+
+                                    <Border Background="#0DFFFFFF"
+                                            BorderBrush="#14FFFFFF"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="4,4,4,2"
+                                            MinHeight="96"
+                                            MaxHeight="210">
+                                        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <StackPanel>
+                                                <ItemsControl ItemsSource="{Binding Models}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="vm:LlmProviderModelItem">
+                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                <CheckBox IsChecked="{Binding IsActive, Mode=TwoWay}"
+                                                                          Margin="2,0"
+                                                                          ToolTip.Tip="勾选后加入对话窗口的模型选择列表">
+                                                                    <TextBlock Text="{Binding ModelId}"
+                                                                               FontSize="12"
+                                                                               Foreground="#E6FFFFFF"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </CheckBox>
+                                                                <Button Grid.Column="1"
+                                                                        Classes="ghost"
+                                                                        Width="22"
+                                                                        Height="22"
+                                                                        Padding="0"
+                                                                        ToolTip.Tip="从清单里删除这个模型"
+                                                                        Command="{Binding RemoveCommand}">
+                                                                    <Path Data="M0,0 L7,7 M7,0 L0,7"
+                                                                          Stroke="#66FFFFFF"
+                                                                          StrokeThickness="1.2"
+                                                                          StrokeLineCap="Round"
+                                                                          HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center" />
+                                                                </Button>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <TextBlock Text="还没有模型：点上方「获取模型列表」，或在下面手动填写模型标识"
+                                                           IsVisible="{Binding !HasModels}"
+                                                           FontSize="10.5"
+                                                           Foreground="#59FFFFFF"
+                                                           Margin="4,8"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                        <TextBox Classes="field"
+                                                 Text="{Binding NewModelId, Mode=TwoWay}"
+                                                 PlaceholderText="手动添加模型标识，例如 deepseek-chat" />
+                                        <Button Grid.Column="1"
+                                                Classes="ghost"
+                                                Padding="8,3"
+                                                ToolTip.Tip="把填写的内容加进上面的清单（默认勾选）"
+                                                Command="{Binding AddModelCommand}">
+                                            <TextBlock Text="添加" Classes="muted" />
+                                        </Button>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <StackPanel Grid.Row="1"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Spacing="8"
+                                    Margin="0,10,0,0">
+                            <Button Classes="secondary"
+                                    Content="还原"
+                                    ToolTip.Tip="丢弃未保存的改动，按已保存的配置重新填写"
+                                    IsEnabled="{Binding HasSelection}"
+                                    Command="{Binding RevertCommand}" />
+                            <Button Classes="primary"
+                                    Content="保存配置"
+                                    IsEnabled="{Binding HasSelection}"
+                                    Command="{Binding SaveCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 移除二次确认：整块覆盖在面板上，确认后才删掉提供商、模型清单与密钥 -->
+        <Border IsVisible="{Binding IsConfirmingRemove}"
+                Background="#F21B1C22"
+                BorderBrush="#26FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16">
+            <StackPanel Width="340"
+                        Spacing="12"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center">
+                <TextBlock Text="移除提供商？"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#F2FFFFFF" />
+                <TextBlock Text="{Binding RemovePrompt}"
+                           FontSize="11"
+                           LineHeight="17"
+                           Foreground="#8CFFFFFF"
+                           TextWrapping="Wrap" />
+                <TextBlock Text="它的模型会同时从对话窗口的模型选择列表里消失，此操作不可撤销。"
+                           FontSize="10.5"
+                           Foreground="#66FFFFFF"
+                           TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Classes="secondary"
+                            Content="取消"
+                            Command="{Binding CancelRemoveProviderCommand}" />
+                    <Button Classes="primary"
+                            Content="移除"
+                            Command="{Binding ConfirmRemoveProviderCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Panel>
+</UserControl>

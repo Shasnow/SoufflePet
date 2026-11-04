@@ -138,7 +138,7 @@ public sealed class LlmChatService(
         IReadOnlyList<ChatMessage> history,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var endpoint = BuildEndpoint(model.BaseUrl);
+        var endpoint = OpenAiEndpoint.BaseUrl(model.BaseUrl);
         var options = new OpenAIClientOptions
         {
             Endpoint = new Uri(endpoint),
@@ -147,7 +147,7 @@ public sealed class LlmChatService(
         };
         var openAiClient = new ChatClient(
             model.ModelId,
-            new ApiKeyCredential(NormalizeApiKey(model.ApiKey)),
+            new ApiKeyCredential(OpenAiEndpoint.ApiKey(model.ApiKey)),
             options);
         using var chatClient = openAiClient.AsIChatClient();
 
@@ -830,20 +830,7 @@ public sealed class LlmChatService(
         }
     }
 
-    /// <summary>BaseUrl 视为 base 地址；如果用户填了完整接口路径，去掉 /chat/completions 再交给 SDK。</summary>
-    private static string BuildEndpoint(string baseUrl)
-    {
-        var url = baseUrl.Trim().TrimEnd('/');
-        const string suffix = "/chat/completions";
-        return url.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-            ? url[..^suffix.Length].TrimEnd('/')
-            : url;
-    }
-
-    /// <summary>SDK 不接受空密钥；本地/无鉴权的兼容服务照常发送一个占位值。</summary>
-    private static string NormalizeApiKey(string apiKey) =>
-        string.IsNullOrWhiteSpace(apiKey) ? "not-required" : apiKey.Trim();
-
+    /// <summary>截断过长的展示文本。</summary>
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";
 }
