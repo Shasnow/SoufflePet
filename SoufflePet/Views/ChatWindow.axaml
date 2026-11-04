@@ -239,8 +239,11 @@
                          每条气泡都带一整套控件树（Markdown 块、折叠面板、Popup），长会话全量实例化会到上万个 visual；
                          气泡高度差异大，VirtualizingStackPanel 的滚动范围是估算值，贴底逻辑见 ChatWindow.axaml.cs
                          的 OnMessageScrollChanged（估算高度补算后补滚一次，避免被反复拉回）。
+                         展开 / 收起折叠面板同样会改高度、把估算值带偏，偏移校正见 KeepBubbleInPlace
+                         （按锚点把被点的气泡钉在原处，估算把它甩出去时再用 ScrollIntoView 找回来）；
+                         正文流式变高时走 KeepViewportInPlace（按视口里其它气泡把偏移钉住）。
                          CacheLength 预实例化视口上下各半屏，减少滚动时的反复回收/重建 -->
-                    <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
+                    <ItemsControl Name="MessageItems" ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel CacheLength="0.5" />

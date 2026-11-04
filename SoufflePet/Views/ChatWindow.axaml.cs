@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
@@ -364,11 +365,192 @@ public partial class ChatWindow : Window
 
     private bool _scrollChangedAttached;
 
+    /// <summary>锚点校正最多看多少轮布局：偏移一变就会换一批实例化气泡，估算高度还会再变。</summary>
+    private const int MaxAnchorPasses = 12;
+
+    /// <summary>锚点校正的最长等待时间：估算值可能跨帧收敛，超过这个时间就不再追。</summary>
+    private static readonly TimeSpan AnchorSettleWindow = TimeSpan.FromMilliseconds(600);
+
+    /// <summary>正在做锚点校正：这期间由代码改的偏移不算用户滚动。</summary>
+    private bool _keepingAnchor;
+
+    /// <summary>
+    /// 当前这次锚点校正的编号：连续展开两个气泡时，旧的那次校正要立刻作废，
+    /// 否则两条校正链会互相拉扯。
+    /// </summary>
+    private int _anchorGeneration;
+
+    /// <summary>校正的兜底超时：万一没等到布局事件，也不让 _keepingAnchor 一直卡住。</summary>
+    private DateTime _anchorDeadline;
+
+    /// <summary>正在等布局的那次校正（挂在 LayoutUpdated 上），新的展开会先摘掉它。</summary>
+    private EventHandler? _anchorTick;
+
     /// <summary>判断消息区是否已贴底（内容不足一屏时也算贴底）。</summary>
     private bool IsAtBottom()
     {
         var remaining = MessageScroll.Extent.Height - MessageScroll.Viewport.Height - MessageScroll.Offset.Y;
         return remaining <= StickToBottomTolerance;
+    }
+
+    /// <summary>指定索引的气泡顶部相对消息区视口的位置；气泡没被实例化时返回 null。</summary>
+    private double? BubbleTopInViewport(int index)
+    {
+        if (MessageItems.ContainerFromIndex(index) is not Control container) return null;
+        return container.TranslatePoint(new Point(0, 0), MessageScroll)?.Y;
+    }
+
+
+    /// <summary>
+    /// 折叠面板展开 / 收起会改变气泡高度。消息区是虚拟化的，没实例化的气泡按已实测气泡的平均高度估算，
+    /// 展开一个大面板会把平均值拉高，同一个偏移就落到更早的气泡上——看起来像「跳回了之前的消息」。
+    /// 这里记住气泡在视口里的位置，每次布局跑完把偏移改正回来，效果就是被点的气泡固定在原处、向下展开。
+    /// </summary>
+    private void KeepBubbleInPlace(ChatMessage message)
+    {
+        var index = _viewModel?.Messages.IndexOf(message) ?? -1;
+        if (index < 0) return;
+
+        // 必须在布局更新前量，此时拿到的还是展开前的旧位置
+        if (BubbleTopInViewport(index) is not { } top) return;
+
+        BeginAnchorCorrection(index, top);
+    }
+
+    /// <summary>
+    /// 正文流式输出时气泡一直在长高，同样会把估算平均值带偏：用户没贴底（在回看历史）时
+    /// 整个列表会一起漂，越流越远。这里拿视口里的气泡当锚点，把偏移钉在它当前的位置上。
+    /// </summary>
+    private void KeepViewportInPlace(ChatMessage changing)
+    {
+        var changingIndex = _viewModel?.Messages.IndexOf(changing) ?? -1;
+
+        foreach (var container in MessageItems.GetRealizedContainers())
+        {
+            var index = MessageItems.IndexFromContainer(container);
+            if (index < 0 || index == changingIndex) continue;      // 正在变高的气泡不能当锚点
+            if (container.TranslatePoint(new Point(0, 0), MessageScroll)?.Y is not { } top) continue;
+
+            BeginAnchorCorrection(index, top);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// 按锚点校正消息区偏移：把 <paramref name="index" /> 这条气泡钉在原来的视口位置
+    /// <paramref name="targetTop" /> 上，差值收敛即收尾。
+    /// </summary>
+    private void BeginAnchorCorrection(int index, double targetTop)
+    {
+        var generation = ++_anchorGeneration;
+        if (_anchorTick is not null) MessageScroll.LayoutUpdated -= _anchorTick; // 旧的校正作废
+
+        _keepingAnchor = true;
+        _anchorDeadline = DateTime.UtcNow + AnchorSettleWindow;
+
+        // 内容坐标（视口位置 + 偏移）不随滚动变化：用它算漂移，用户自己滚动时不会被改回去，
+        // 也不会把 ScrollIntoView、被夹到边界的偏移误当成用户滚动。
+        var content = targetTop + MessageScroll.Offset.Y;
+        var passes = 0;
+        var stablePasses = 0;
+        var needRestore = false;
+        var needRebaseline = false;
+        var scrolledIntoView = 0;
+
+        void Finish()
+        {
+            if (generation != _anchorGeneration) return; // 已经有更新的一次校正接手
+            if (_anchorTick is not null)
+            {
+                MessageScroll.LayoutUpdated -= _anchorTick;
+                _anchorTick = null;
+            }
+
+            _keepingAnchor = false;
+            // 校正后用户已经不在底部（展开出来的内容顶出去了），新的流式输出不再自动跟随，
+            // 等他滚回底部再由 OnMessageScrollChanged 恢复
+            _stickToBottom = IsAtBottom();
+        }
+
+        /// <summary>把偏移改到目标值；已经到位或顶到列表边界时返回 false。</summary>
+        bool ApplyOffset(double desired)
+        {
+            var offset = MessageScroll.Offset;
+            var max = Math.Max(0, MessageScroll.Extent.Height - MessageScroll.Viewport.Height);
+            var next = Math.Clamp(desired, 0, max);
+            if (Math.Abs(next - offset.Y) < 0.5) return false;
+
+            MessageScroll.Offset = new Vector(offset.X, next);
+            return true;
+        }
+
+        // 布局跑完才量：展开导致的重新布局、偏移变化引起的再次实例化，都会先落定再判
+        void OnLayoutUpdated(object? sender, EventArgs e)
+        {
+            if (generation != _anchorGeneration) return;
+
+            if (++passes > MaxAnchorPasses || DateTime.UtcNow > _anchorDeadline)
+            {
+                Finish();
+                return;
+            }
+
+            if (BubbleTopInViewport(index) is not { } top)
+            {
+                // 估算值被一个大面板带偏时，同一个偏移会落到很多屏之外，锚点被回收了：
+                // 先把它滚回取景范围（ScrollIntoView 会实例化它），下一轮布局再按内容坐标复位。
+                if (scrolledIntoView >= 2)
+                {
+                    Finish();
+                    return;
+                }
+
+                scrolledIntoView++;
+                needRestore = true;
+                MessageItems.ScrollIntoView(index);
+                return;
+            }
+
+            var offset = MessageScroll.Offset.Y;
+
+            if (needRestore)
+            {
+                // 找回来之后做一次绝对复位：把它放回原来的视口位置（ScrollIntoView 只是借道实例化）
+                needRestore = false;
+                if (ApplyOffset(top + offset - targetTop)) needRebaseline = true;
+                else content = top + offset; // 没动偏移，基准就是现在
+                return;
+            }
+
+            if (needRebaseline)
+            {
+                // 偏移刚改过，位置要等下一轮布局才更新，这里才拿到与新偏移对应的基准
+                needRebaseline = false;
+                content = top + offset;
+                return;
+            }
+
+            // 漂移量：锚点在内容坐标里挪了多少（滚动不影响这个值）
+            var drift = top + offset - content;
+            if (Math.Abs(drift) < 0.5)
+            {
+                // 连续两轮都没变化才算稳定，避免估算值晚一拍才更新时提前收工
+                if (++stablePasses >= 2) Finish();
+                return;
+            }
+
+            stablePasses = 0;
+            if (!ApplyOffset(offset + drift))
+            {
+                Finish(); // 已经顶到列表边界，再改偏移也校正不了
+                return;
+            }
+
+            content += drift; // 记住它在内容坐标里的新位置，下一轮只在再漂移时才动
+        }
+
+        _anchorTick = OnLayoutUpdated;
+        MessageScroll.LayoutUpdated += OnLayoutUpdated;
     }
 
     /// <summary>
@@ -377,6 +559,13 @@ public partial class ChatWindow : Window
     /// </summary>
     private void OnMessageScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        // 锚点校正期间改偏移是代码行为，不是用户滚动；超时后自动放行，避免状态卡死
+        if (_keepingAnchor)
+        {
+            if (DateTime.UtcNow < _anchorDeadline) return;
+            _keepingAnchor = false;
+        }
+
         if (IsAtBottom())
         {
             _stickToBottom = true;
@@ -424,10 +613,23 @@ public partial class ChatWindow : Window
         if (_stickToBottom) ScrollToEnd();
     }
 
-    /// <summary>流式追加时，只有用户停留在底部才跟随滚动，避免正在回看时气泡被刷走。</summary>
+    /// <summary>
+    /// 流式追加时，只有用户停留在底部才跟随滚动，避免正在回看时气泡被刷走；
+    /// 没贴底时改为按锚点把视口钉住——正文把气泡撑高同样会带偏虚拟化的估算高度，任由它漂就是「跳回之前的消息」。
+    /// 展开 / 收起折叠面板时同理，只是锚点换成被点的那个气泡。
+    /// </summary>
     private void OnMessagePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChatMessage.Text) && _stickToBottom) ScrollToEnd();
+        if (sender is not ChatMessage message) return;
+
+        if (e.PropertyName == nameof(ChatMessage.Text))
+        {
+            if (_stickToBottom) ScrollToEnd();
+            else KeepViewportInPlace(message);
+            return;
+        }
+
+        if (e.PropertyName == nameof(ChatMessage.IsExpanded)) KeepBubbleInPlace(message);
     }
 
     /// <summary>等布局完成后再滚，否则新气泡（或虚拟化补算的高度）还没算进去。</summary>
