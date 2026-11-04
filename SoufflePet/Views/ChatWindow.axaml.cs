@@ -309,6 +309,7 @@ public partial class ChatWindow : Window
                     bitmap.Save(stream, PngBitmapEncoderOptions.Default);
                     vm.AddImageAttachment(stream.ToArray(), $"粘贴图片-{DateTime.Now:HHmmss}.png");
                 }
+
                 return;
             }
 

@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 桌宠长时间挂着：让 GC 更积极地压缩堆、把空闲段还给系统（0 关闭，9 最激进）。
+         构建后会写进 SoufflePet.runtimeconfig.json 的 configProperties。 -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />

@@ -30,6 +30,14 @@
 
 `Ctrl+Alt+Space`、左键单击桌宠或托盘菜单「对话窗口」呼出对话窗口（再次触发收起）。窗口为单例，隐藏后内容保留；停止按钮可中断当前一轮生成。
 
+### 消息气泡
+
+助手气泡的正文按 Markdown 渲染（[MarkdownTextBlock.cs](SoufflePet/Controls/MarkdownTextBlock.cs) + [MarkdownParser.cs](SoufflePet/Utils/MarkdownParser.cs)）：段落、标题、有序 / 无序 / 任务列表、引用、围栏代码块（带语言标注、等宽字体、长行折行）、表格、分割线，以及粗体 / 斜体 / 删除线 / 行内代码 / 链接（点击用默认浏览器打开）。用户发言、平台提醒与工具审批气泡按纯文本原样展示，`*`、`#`、`@路径` 这类字符不会被当成语法改写。
+
+每块都是可选中复制的文本；任务列表用原生 `CheckBox` 展示勾选状态（只做展示，状态取自消息原文，点击不会改写消息）。流式输出时只更新变化块的文字并复用已有控件，不重建整棵可视化树。思考过程与工具调用的折叠面板仍是纯文本展示。
+
+消息区用虚拟化面板（`VirtualizingStackPanel`），只实例化视口附近的气泡，长会话不再随消息数量线性吃内存；ViewModel 侧另保留最近 300 条（`ChatViewModel.MaxVisibleMessages`），更早的气泡会连同图片预览一起释放，请求历史由 `TrimHistory` 按轮单独维护、不受影响。用量胶囊与浮窗、思考 / 工具面板都按需实例化，不展开就不占控件树。
+
 ### 对话模型
 
 走 OpenAI 兼容接口。首次启动 `ChatModels` 为空，在对话窗口的模型菜单里点「添加模型」填写即可：
@@ -182,6 +190,7 @@ SoufflePet.sln
 │  │  ├─ WebViewPetWindow.cs    #   WebView 版窗口（纯代码，+ 本地静态服务器）
 │  │  └─ NativePetWindow.cs      #   原生版窗口（拖拽 / 穿透 / 全局光标）
 │  ├─ ViewModels/                # 对话、MCP、技能与提问面板的视图模型
+│  ├─ Controls/                  # 自定义控件（消息气泡的 Markdown 渲染等）
 │  ├─ Services/                  # LLM 对话、工具调用、MCP、技能、记忆、表情与检测
 │  ├─ Models/                    # 设置、消息、模型与 MCP 配置等数据模型
 │  ├─ Utils/                     # 截图等辅助代码

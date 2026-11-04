@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SoufflePet.ViewModels"
         xmlns:models="using:SoufflePet.Models"
+        xmlns:controls="using:SoufflePet.Controls"
         x:Class="SoufflePet.Views.ChatWindow"
         x:DataType="vm:ChatViewModel"
         x:CompileBindings="True"
@@ -234,260 +235,299 @@
                               VerticalScrollBarVisibility="Auto"
                               AllowAutoHide="True"
                               BringIntoViewOnFocusChange="False">
-                    <!-- 消息高度差异极大（折叠面板、图片、流式文本），VirtualizingStackPanel
-                         会按平均高度估算未实现项的总高度：流式输出时平均高度不断漂移，
-                         估算的滚动范围随之抖动，贴底滚动会被反复拉回。
-                         这里用普通 StackPanel，布局高度始终精确；恢复的历史只有最近 10 轮，
-                         气泡数量有限，不虚拟化的开销可以接受 -->
+                    <!-- 消息区用虚拟化面板：只实例化视口附近的气泡。
+                         每条气泡都带一整套控件树（Markdown 块、折叠面板、Popup），长会话全量实例化会到上万个 visual；
+                         气泡高度差异大，VirtualizingStackPanel 的滚动范围是估算值，贴底逻辑见 ChatWindow.axaml.cs
+                         的 OnMessageScrollChanged（估算高度补算后补滚一次，避免被反复拉回）。
+                         CacheLength 预实例化视口上下各半屏，减少滚动时的反复回收/重建 -->
                     <ItemsControl ItemsSource="{Binding Messages}" Margin="16,14,16,16">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel/>
+                                <VirtualizingStackPanel CacheLength="0.5" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ChatMessage">
-                              <StackPanel Margin="0,0,0,10">
-                                <Border Classes="bubble"
-                                        Classes.user="{Binding IsUser}"
-                                        Classes.tool="{Binding IsTool}"
-                                        Classes.thinking="{Binding IsReasoning}"
-                                        Classes.approval="{Binding IsApproval}"
-                                        Classes.attachment="{Binding HasDisplayAttachment}"
-                                        Classes.notice="{Binding IsPlatformNotice}">
-                                    <StackPanel Spacing="7">
-                                        <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看。
+                                <StackPanel Margin="0,0,0,10">
+                                    <Border Classes="bubble"
+                                            Classes.user="{Binding IsUser}"
+                                            Classes.tool="{Binding IsTool}"
+                                            Classes.thinking="{Binding IsReasoning}"
+                                            Classes.approval="{Binding IsApproval}"
+                                            Classes.attachment="{Binding HasDisplayAttachment}"
+                                            Classes.notice="{Binding IsPlatformNotice}">
+                                        <StackPanel Spacing="7">
+                                            <!-- 思考过程：折叠面板，思考结束自动收起，点标题可展开回看。
                                              用 ContentControl 承载：Content 为 null（非思考消息）时不实例化模板，
                                              避免每条普通气泡都创建一个用不到的折叠面板 -->
-                                        <ContentControl Content="{Binding ReasoningPanel}"
-                                                        IsVisible="{Binding IsReasoning}">
-                                            <ContentControl.ContentTemplate>
-                                                <DataTemplate x:DataType="models:ChatMessage">
-                                                    <Expander Theme="{StaticResource ToolExpander}"
-                                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
-                                                              Header="{Binding ReasoningHeader}">
-                                                        <SelectableTextBlock Text="{Binding Text}"
-                                                                             TextWrapping="Wrap" />
-                                                    </Expander>
-                                                </DataTemplate>
-                                            </ContentControl.ContentTemplate>
-                                        </ContentControl>
+                                            <ContentControl Content="{Binding ReasoningPanel}"
+                                                            IsVisible="{Binding IsReasoning}">
+                                                <ContentControl.ContentTemplate>
+                                                    <DataTemplate x:DataType="models:ChatMessage">
+                                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                                  Header="{Binding ReasoningHeader}">
+                                                            <SelectableTextBlock Text="{Binding Text}"
+                                                                    TextWrapping="Wrap" />
+                                                        </Expander>
+                                                    </DataTemplate>
+                                                </ContentControl.ContentTemplate>
+                                            </ContentControl>
 
-                                        <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果（同样按需实例化） -->
-                                        <ContentControl Content="{Binding ToolPanel}"
-                                                        IsVisible="{Binding IsToolPanel}">
-                                            <ContentControl.ContentTemplate>
-                                                <DataTemplate x:DataType="models:ChatMessage">
-                                                    <Expander Theme="{StaticResource ToolExpander}"
-                                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
-                                                        <Expander.Header>
-                                                            <TextBlock Text="{Binding ToolHeader}"
-                                                                       TextTrimming="CharacterEllipsis" />
-                                                        </Expander.Header>
-                                                        <SelectableTextBlock Text="{Binding ToolBody}"
-                                                                             TextWrapping="Wrap" />
-                                                    </Expander>
-                                                </DataTemplate>
-                                            </ContentControl.ContentTemplate>
-                                        </ContentControl>
+                                            <!-- 工具调用：折叠面板，标题是工具名与参数，展开后看执行结果（同样按需实例化） -->
+                                            <ContentControl Content="{Binding ToolPanel}"
+                                                            IsVisible="{Binding IsToolPanel}">
+                                                <ContentControl.ContentTemplate>
+                                                    <DataTemplate x:DataType="models:ChatMessage">
+                                                        <Expander Theme="{StaticResource ToolExpander}"
+                                                                  IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                                            <Expander.Header>
+                                                                <TextBlock Text="{Binding ToolHeader}"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                            </Expander.Header>
+                                                            <SelectableTextBlock Text="{Binding ToolBody}"
+                                                                    TextWrapping="Wrap" />
+                                                        </Expander>
+                                                    </DataTemplate>
+                                                </ContentControl.ContentTemplate>
+                                            </ContentControl>
 
-                                        <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsPlain}" />
+                                            <!-- 正文：助手消息按 Markdown 渲染（段落 / 列表 / 代码块 / 链接等），
+                                             每块都是可选中复制的文本；流式输出时只更新文字不重建控件。
+                                             用 ContentControl 承载：只有助手正文 PlainPanel 非空，
+                                             用户 / 思考过程 / 工具记录 / 附件气泡根本不会创建这个控件。
+                                             IsVisible 必须一起绑：Content 为 null 的 ContentControl 仍然算"可见的
+                                             零尺寸子元素"，气泡 StackPanel 会给它留一格 Spacing，顶部就多出空白 -->
+                                            <ContentControl Content="{Binding PlainPanel}"
+                                                            IsVisible="{Binding IsMarkdown}">
+                                                <ContentControl.ContentTemplate>
+                                                    <DataTemplate x:DataType="models:ChatMessage">
+                                                        <controls:MarkdownTextBlock Text="{Binding Text}" />
+                                                    </DataTemplate>
+                                                </ContentControl.ContentTemplate>
+                                            </ContentControl>
 
-                                        <!-- 本地附件：图片直接预览，其他文件显示为可点击打开的卡片。
+                                            <!-- 其余气泡的正文按纯文本展示（用户发言原样显示，不做 Markdown 解析） -->
+                                            <SelectableTextBlock Text="{Binding Text}"
+                                                                 IsVisible="{Binding IsPlainText}" />
+
+                                            <!-- 本地附件：图片直接预览，其他文件显示为可点击打开的卡片。
                                              用 ContentControl 承载：Content 为 null 时不实例化模板，
                                              避免对大多数普通消息绑定 DisplayAttachment 触发空值绑定错误 -->
-                                        <ContentControl Content="{Binding DisplayAttachment}"
-                                                        IsVisible="{Binding HasDisplayAttachment}">
-                                            <ContentControl.ContentTemplate>
-                                                <DataTemplate x:DataType="models:ChatDisplayAttachment">
-                                                    <StackPanel Spacing="6">
-                                                        <Button Classes="ghost"
-                                                                Padding="0"
-                                                                HorizontalAlignment="Left"
-                                                                IsVisible="{Binding HasImage}"
-                                                                Command="{Binding OpenCommand}"
-                                                                ToolTip.Tip="{Binding FilePath}"
-                                                                ToolTip.Placement="Top">
-                                                            <Image Source="{Binding Image}"
-                                                                   MaxWidth="260"
-                                                                   MaxHeight="240"
-                                                                   Stretch="Uniform" />
-                                                        </Button>
-                                                        <Button Classes="fileCard"
-                                                                HorizontalAlignment="Left"
-                                                                IsVisible="{Binding IsFileCard}"
-                                                                Command="{Binding OpenCommand}"
-                                                                ToolTip.Tip="{Binding FilePath}"
-                                                                ToolTip.Placement="Top">
-                                                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                                                <TextBlock Text="📄" FontSize="14" />
-                                                                <TextBlock Text="{Binding FileName}"
-                                                                           MaxWidth="220"
-                                                                           FontSize="12"
-                                                                           VerticalAlignment="Center"
-                                                                           TextTrimming="CharacterEllipsis" />
-                                                            </StackPanel>
-                                                        </Button>
-                                                    </StackPanel>
-                                                </DataTemplate>
-                                            </ContentControl.ContentTemplate>
-                                        </ContentControl>
-
-                                        
-                                        <!-- 手动审批：等待用户决定时才显示按钮 -->
-                                        <StackPanel Orientation="Horizontal"
-                                                    Spacing="7"
-                                                    IsVisible="{Binding IsPending}">
-                                            <Button Classes="approval accept"
-                                                    Content="允许"
-                                                    Command="{Binding ApproveCommand}" />
-                                            <Button Classes="approval reject"
-                                                    Content="拒绝"
-                                                    Command="{Binding RejectCommand}" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
+                                            <ContentControl Content="{Binding DisplayAttachment}"
+                                                            IsVisible="{Binding HasDisplayAttachment}">
+                                                <ContentControl.ContentTemplate>
+                                                    <DataTemplate x:DataType="models:ChatDisplayAttachment">
+                                                        <StackPanel Spacing="6">
+                                                            <Button Classes="ghost"
+                                                                    Padding="0"
+                                                                    HorizontalAlignment="Left"
+                                                                    IsVisible="{Binding HasImage}"
+                                                                    Command="{Binding OpenCommand}"
+                                                                    ToolTip.Tip="{Binding FilePath}"
+                                                                    ToolTip.Placement="Top">
+                                                                <Image Source="{Binding Image}"
+                                                                       MaxWidth="260"
+                                                                       MaxHeight="240"
+                                                                       Stretch="Uniform" />
+                                                            </Button>
+                                                            <Button Classes="fileCard"
+                                                                    HorizontalAlignment="Left"
+                                                                    IsVisible="{Binding IsFileCard}"
+                                                                    Command="{Binding OpenCommand}"
+                                                                    ToolTip.Tip="{Binding FilePath}"
+                                                                    ToolTip.Placement="Top">
+                                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                                    <TextBlock Text="📄" FontSize="14" />
+                                                                    <TextBlock Text="{Binding FileName}"
+                                                                               MaxWidth="220"
+                                                                               FontSize="12"
+                                                                               VerticalAlignment="Center"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </Button>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ContentControl.ContentTemplate>
+                                            </ContentControl>
 
 
-<!-- 本轮用量 + 时间：点击胶囊弹出本轮用量浮窗 -->
-                                        <Button Name="UsagePill"
-                                                Classes="usagePill"
-                                                IsVisible="{Binding HasUsage}"
-                                                ToolTip.Tip="点击查看本轮用量"
-                                                ToolTip.Placement="Top"
-                                                ToolTip.VerticalOffset="-6"
-                                                Command="{Binding ToggleUsageCommand}">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
-                                                      Width="11"
-                                                      Height="11"
-                                                      Stretch="Uniform"
-                                                      Stroke="#8CFFFFFF"
-                                                      StrokeThickness="1.2"
-                                                      StrokeLineCap="Round"
-                                                      StrokeJoin="Round"
-                                                      VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding UsageCompactText}"
-                                                           FontSize="10.5"
-                                                           Foreground="#8CFFFFFF"
-                                                           VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding TimeText}"
-                                                           FontSize="10.5"
-                                                           Foreground="#59FFFFFF"
-                                                           VerticalAlignment="Center" />
+                                            <!-- 手动审批：等待用户决定时才显示按钮 -->
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="7"
+                                                        IsVisible="{Binding IsPending}">
+                                                <Button Classes="approval accept"
+                                                        Content="允许"
+                                                        Command="{Binding ApproveCommand}" />
+                                                <Button Classes="approval reject"
+                                                        Content="拒绝"
+                                                        Command="{Binding RejectCommand}" />
                                             </StackPanel>
-                                        </Button>
+                                        </StackPanel>
+                                    </Border>
 
-                                        <!-- 本轮用量浮窗：标题（总用量）+ 提供方/模型 + 明细 -->
-                                        <Popup IsOpen="{Binding IsUsageOpen, Mode=TwoWay}"
-                                               PlacementTarget="{Binding #UsagePill}"
-                                               Placement="TopEdgeAlignedLeft"
-                                               VerticalOffset="-4"
-                                               IsLightDismissEnabled="True">
-                                            <Border Width="300"
-                                                    Padding="14,12"
-                                                    Background="#F21B1C22"
-                                                    BorderBrush="#26FFFFFF"
-                                                    BorderThickness="1"
-                                                    CornerRadius="12"
-                                                    BoxShadow="0 10 28 0 #80000000">
-                                                <StackPanel Spacing="8">
-                                                    <Grid ColumnDefinitions="Auto,*,Auto">
-                                                        <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
-                                                              Width="15"
-                                                              Height="15"
-                                                              Stretch="Uniform"
-                                                              Stroke="#B3FFFFFF"
-                                                              StrokeThickness="1.2"
-                                                              StrokeLineCap="Round"
-                                                              StrokeJoin="Round"
-                                                              VerticalAlignment="Center" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="本轮用量"
-                                                                   Margin="8,0,0,0"
-                                                                   VerticalAlignment="Center"
-                                                                   FontSize="13"
-                                                                   FontWeight="SemiBold"
-                                                                   Foreground="#F2FFFFFF" />
-                                                        <TextBlock Grid.Column="2"
-                                                                   Text="{Binding UsageTotalText}"
-                                                                   VerticalAlignment="Center"
-                                                                   FontSize="12.5"
-                                                                   FontWeight="SemiBold"
-                                                                   Foreground="#F2FFFFFF" />
-                                                    </Grid>
 
-                                                    <Border Height="1" Background="#1AFFFFFF" />
+                                    <!-- 本轮用量 + 时间：点击胶囊弹出本轮用量浮窗。
+                                             整块用 ContentControl 承载：没有用量的消息（用户发言、工具记录、思考过程）
+                                             UsageSection 为 null，胶囊与浮窗都不会被创建。
+                                             IsVisible 同步绑定，理由同上：空载体不该占气泡里的间距 -->
+                                    <ContentControl Content="{Binding UsageSection}"
+                                                    IsVisible="{Binding HasUsage}">
+                                        <ContentControl.ContentTemplate>
+                                            <DataTemplate x:DataType="models:ChatMessage">
+                                                <StackPanel>
+                                                    <Button Name="UsagePill"
+                                                            Classes="usagePill"
+                                                            IsVisible="{Binding HasUsage}"
+                                                            ToolTip.Tip="点击查看本轮用量"
+                                                            ToolTip.Placement="Top"
+                                                            ToolTip.VerticalOffset="-6"
+                                                            Command="{Binding ToggleUsageCommand}">
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <Path
+                                                                Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                                                Width="11"
+                                                                Height="11"
+                                                                Stretch="Uniform"
+                                                                Stroke="#8CFFFFFF"
+                                                                StrokeThickness="1.2"
+                                                                StrokeLineCap="Round"
+                                                                StrokeJoin="Round"
+                                                                VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding UsageCompactText}"
+                                                                       FontSize="10.5"
+                                                                       Foreground="#8CFFFFFF"
+                                                                       VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding TimeText}"
+                                                                       FontSize="10.5"
+                                                                       Foreground="#59FFFFFF"
+                                                                       VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
 
-                                                    <Grid ColumnDefinitions="Auto,*"
-                                                          Margin="0,0,0,1"
-                                                          IsVisible="{Binding HasModelLabel}">
-                                                        <TextBlock Text="提供方 / 模型"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding ModelLabel}"
-                                                                   MaxWidth="190"
-                                                                   HorizontalAlignment="Right"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                    <!-- 本轮用量浮窗：标题（总用量）+ 提供方/模型 + 明细。
+                                                     内容用 ContentControl 承载，收起时 UsagePanel 为 null，
+                                                     只在真正点开时才创建这棵浮窗子树 -->
+                                                    <Popup IsOpen="{Binding IsUsageOpen, Mode=TwoWay}"
+                                                           PlacementTarget="{Binding #UsagePill}"
+                                                           Placement="TopEdgeAlignedLeft"
+                                                           VerticalOffset="-4"
+                                                           IsLightDismissEnabled="True">
+                                                        <ContentControl Content="{Binding UsagePanel}">
+                                                            <ContentControl.ContentTemplate>
+                                                                <DataTemplate x:DataType="models:ChatMessage">
+                                                                    <Border Width="300"
+                                                                            Padding="14,12"
+                                                                            Background="#F21B1C22"
+                                                                            BorderBrush="#26FFFFFF"
+                                                                            BorderThickness="1"
+                                                                            CornerRadius="12"
+                                                                            BoxShadow="0 10 28 0 #80000000">
+                                                                        <StackPanel Spacing="8">
+                                                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                                                                <Path
+                                                                                    Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                                                                    Width="15"
+                                                                                    Height="15"
+                                                                                    Stretch="Uniform"
+                                                                                    Stroke="#B3FFFFFF"
+                                                                                    StrokeThickness="1.2"
+                                                                                    StrokeLineCap="Round"
+                                                                                    StrokeJoin="Round"
+                                                                                    VerticalAlignment="Center" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="本轮用量"
+                                                                                    Margin="8,0,0,0"
+                                                                                    VerticalAlignment="Center"
+                                                                                    FontSize="13"
+                                                                                    FontWeight="SemiBold"
+                                                                                    Foreground="#F2FFFFFF" />
+                                                                                <TextBlock Grid.Column="2"
+                                                                                    Text="{Binding UsageTotalText}"
+                                                                                    VerticalAlignment="Center"
+                                                                                    FontSize="12.5"
+                                                                                    FontWeight="SemiBold"
+                                                                                    Foreground="#F2FFFFFF" />
+                                                                            </Grid>
 
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="缓存命中"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding UsageCacheHitText}"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                                            <Border Height="1" Background="#1AFFFFFF" />
 
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="未缓存输入"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding UsageUncachedText}"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                                            <Grid ColumnDefinitions="Auto,*"
+                                                                                    Margin="0,0,0,1"
+                                                                                    IsVisible="{Binding HasModelLabel}">
+                                                                                <TextBlock Text="提供方 / 模型"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="{Binding ModelLabel}"
+                                                                                    MaxWidth="190"
+                                                                                    HorizontalAlignment="Right"
+                                                                                    TextTrimming="CharacterEllipsis"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
 
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="缓存读取"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding UsageCachedText}"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                                <TextBlock Text="缓存命中"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="{Binding UsageCacheHitText}"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
 
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="缓存写入"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <!-- OpenAI 兼容接口不单独上报缓存写入；DeepSeek 等服务按 0 计 -->
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="0 tok"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                                <TextBlock Text="未缓存输入"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="{Binding UsageUncachedText}"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
 
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="输出"
-                                                                   FontSize="12"
-                                                                   Foreground="#8CFFFFFF" />
-                                                        <TextBlock Grid.Column="1"
-                                                                   Text="{Binding UsageOutputText}"
-                                                                   FontSize="12"
-                                                                   Foreground="#E6FFFFFF" />
-                                                    </Grid>
+                                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                                <TextBlock Text="缓存读取"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="{Binding UsageCachedText}"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
+
+                                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                                <TextBlock Text="缓存写入"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <!-- OpenAI 兼容接口不单独上报缓存写入；DeepSeek 等服务按 0 计 -->
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="0 tok"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
+
+                                                                            <Grid ColumnDefinitions="*,Auto">
+                                                                                <TextBlock Text="输出"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#8CFFFFFF" />
+                                                                                <TextBlock Grid.Column="1"
+                                                                                    Text="{Binding UsageOutputText}"
+                                                                                    FontSize="12"
+                                                                                    Foreground="#E6FFFFFF" />
+                                                                            </Grid>
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ContentControl.ContentTemplate>
+                                                        </ContentControl>
+                                                    </Popup>
                                                 </StackPanel>
-                                            </Border>
-                                        </Popup>
-                              </StackPanel>
+                                            </DataTemplate>
+                                        </ContentControl.ContentTemplate>
+                                    </ContentControl>
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -923,13 +963,14 @@
                                                                     ToolTip.Placement="Top"
                                                                     ToolTip.VerticalOffset="-6"
                                                                     Click="OnDeleteWorkspaceClick">
-                                                                <Path Data="M2,3 L12,3 M5,3 L5,1.5 L9,1.5 L9,3 M3.5,3 L4.2,12 L9.8,12 L10.5,3"
-                                                                      Stroke="#8CFFFFFF"
-                                                                      StrokeThickness="1.2"
-                                                                      StrokeLineCap="Round"
-                                                                      StrokeJoin="Round"
-                                                                      HorizontalAlignment="Center"
-                                                                      VerticalAlignment="Center" />
+                                                                <Path
+                                                                    Data="M2,3 L12,3 M5,3 L5,1.5 L9,1.5 L9,3 M3.5,3 L4.2,12 L9.8,12 L10.5,3"
+                                                                    Stroke="#8CFFFFFF"
+                                                                    StrokeThickness="1.2"
+                                                                    StrokeLineCap="Round"
+                                                                    StrokeJoin="Round"
+                                                                    HorizontalAlignment="Center"
+                                                                    VerticalAlignment="Center" />
                                                             </Button>
                                                         </Grid>
                                                     </Border>
@@ -1014,15 +1055,16 @@
                             <StackPanel Spacing="8">
                                 <!-- 标题行：数据库图标 + 累计总用量 -->
                                 <Grid ColumnDefinitions="Auto,*,Auto">
-                                    <Path Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
-                                          Width="15"
-                                          Height="15"
-                                          Stretch="Uniform"
-                                          Stroke="#B3FFFFFF"
-                                          StrokeThickness="1.2"
-                                          StrokeLineCap="Round"
-                                          StrokeJoin="Round"
-                                          VerticalAlignment="Center" />
+                                    <Path
+                                        Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
+                                        Width="15"
+                                        Height="15"
+                                        Stretch="Uniform"
+                                        Stroke="#B3FFFFFF"
+                                        StrokeThickness="1.2"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"
+                                        VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
                                                Text="Token 用量"
                                                Margin="8,0,0,0"

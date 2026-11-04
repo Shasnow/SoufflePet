@@ -96,11 +96,28 @@ public sealed partial class ChatMessage : ObservableObject
 
     /// <summary>本轮用量浮窗是否展开（每条消息各自独立）。</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UsagePanel))]
     public partial bool IsUsageOpen { get; set; }
+
+    /// <summary>
+    /// 用量浮窗的内容载体：只有展开时才返回自身（收起为 null）。
+    /// 浮窗子树有十几个控件，Popup 收起时同样会被实例化；用 ContentControl 承载后，
+    /// 每条消息只在真正点开时才创建这棵树。
+    /// </summary>
+    public ChatMessage? UsagePanel => IsUsageOpen ? this : null;
+
+    /// <summary>
+    /// 气泡底部「用量胶囊 + 浮窗」整块的载体：没有用量的消息（用户发言、工具记录、思考过程）返回 null，
+    /// 连胶囊一起不创建。配合虚拟化，长会话里每条气泡的控件树尽量小。
+    /// </summary>
+    public ChatMessage? UsageSection => HasUsage ? this : null;
 
     /// <summary>点击气泡底部的用量胶囊：展开 / 收起本轮用量浮窗。</summary>
     [RelayCommand]
     private void ToggleUsage() => IsUsageOpen = !IsUsageOpen;
+
+    /// <summary>气泡被移出界面时调用：释放预览图占用的原生位图内存。</summary>
+    public void ReleaseGraphics() => DisplayAttachment?.ReleaseImage();
 
     /// <summary>记录本轮用量（轮末或恢复历史时调用），同时刷新胶囊与浮窗里的所有文案。</summary>
     public void SetUsage(long inputTokens, long outputTokens, long cachedInputTokens, string? modelLabel = null)
@@ -111,6 +128,7 @@ public sealed partial class ChatMessage : ObservableObject
         if (!string.IsNullOrWhiteSpace(modelLabel)) ModelLabel = modelLabel;
 
         OnPropertyChanged(nameof(HasUsage));
+        OnPropertyChanged(nameof(UsageSection));
         OnPropertyChanged(nameof(UsageCompactText));
         OnPropertyChanged(nameof(UsageTotalText));
         OnPropertyChanged(nameof(UsageCacheHitText));
@@ -183,6 +201,23 @@ public sealed partial class ChatMessage : ObservableObject
     public bool IsPlain => !IsReasoning && !IsToolPanel && !HasDisplayAttachment;
 
     /// <summary>
+    /// 正文按 Markdown 渲染的气泡：只有助手正文如此。
+    /// 用户发言按原样展示（`*`、`#`、`@路径` 这类字符不该被当成语法改写），
+    /// 平台提醒与工具审批气泡也是普通文本（命令原文更不能被 Markdown 吃掉格式）。
+    /// </summary>
+    public bool IsMarkdown => IsPlain && !IsUser && !IsPlatformNotice && Approval is null;
+
+    /// <summary>正文按纯文本展示的气泡：普通文本气泡里除助手正文以外的那些。</summary>
+    public bool IsPlainText => IsPlain && !IsMarkdown;
+
+    /// <summary>
+    /// 正文 Markdown 控件的载体（即本条消息自身）：只有需要 Markdown 的气泡返回自身。
+    /// ContentControl 在 Content 为 null 时不实例化模板，用户 / 思考过程 / 工具记录 / 附件气泡
+    /// 就不会创建 MarkdownTextBlock —— 它们流式追加正文时也不会再触发解析。
+    /// </summary>
+    public ChatMessage? PlainPanel => IsMarkdown ? this : null;
+
+    /// <summary>
     /// 思考气泡折叠面板的内容载体（即本条消息自身）：非思考消息为 null。
     /// ContentControl 在 Content 为 null 时不实例化模板，普通气泡就不会白白创建一份折叠面板。
     /// </summary>
@@ -226,8 +261,8 @@ public sealed partial class ChatMessage : ObservableObject
 /// </summary>
 public sealed partial class ChatDisplayAttachment : ObservableObject
 {
-    /// <summary>预览图解码后的最大宽度（像素）；超过时等比缩小，减少内存占用。</summary>
-    private const int PreviewMaxWidth = 720;
+    /// <summary>预览图解码后的最大宽度（像素）；气泡里最宽只显示 260，按 2 倍屏留够清晰度即可。</summary>
+    private const int PreviewMaxWidth = 520;
 
     public ChatDisplayAttachment(string filePath, string fileName, bool isImage)
     {
@@ -264,6 +299,14 @@ public sealed partial class ChatDisplayAttachment : ObservableObject
         {
             return null;
         }
+    }
+
+    /// <summary>释放已解码的预览图：消息被移出界面后位图不再需要，尽早归还内存。</summary>
+    public void ReleaseImage()
+    {
+        var image = Image;
+        Image = null;
+        image?.Dispose();
     }
 
     /// <summary>用系统默认程序打开文件；文件已删除等失败情况忽略，避免界面崩溃。</summary>

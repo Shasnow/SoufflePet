@@ -106,6 +106,7 @@ SoufflePet.sln
 | --- | --- |
 | 应用启动 / DI 注册 | [Program.cs](SoufflePet/Program.cs)、[App.axaml.cs](SoufflePet/App.axaml.cs) |
 | 对话与工具调用 | [LlmChatService.cs](SoufflePet/Services/LlmChatService.cs)、[ChatTools.cs](SoufflePet/Services/ChatTools.cs) |
+| 消息气泡 Markdown 渲染 | [MarkdownTextBlock.cs](SoufflePet/Controls/MarkdownTextBlock.cs)、[MarkdownParser.cs](SoufflePet/Utils/MarkdownParser.cs) |
 | 桌宠渲染窗口 | [NativePetWindow.cs](SoufflePet/Views/NativePetWindow.cs)、[WebViewPetWindow.cs](SoufflePet/Views/WebViewPetWindow.cs) |
 | 插件系统 | [PluginService.cs](SoufflePet/Services/Plugins/PluginService.cs)、[PluginBase.cs](SoufflePet.Plugin.Sdk/PluginBase.cs) |
 | MCP 集成 | [McpToolService.cs](SoufflePet/Services/McpToolService.cs) |

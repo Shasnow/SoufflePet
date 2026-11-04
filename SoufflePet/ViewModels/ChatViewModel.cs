@@ -146,6 +146,7 @@ public partial class ChatViewModel : ViewModelBase
 
         InitializeWorkspaces();
         LoadRecentHistory();
+        TrimMessages();
     }
 
     /// <summary>消息列表（首次打开即包含一条助手问候）。</summary>
@@ -1271,6 +1272,9 @@ public partial class ChatViewModel : ViewModelBase
             _reply = null;
             IsGenerating = false;
 
+            // 一轮结束后再裁剪界面气泡：生成过程中移除消息会和流式更新抢同一个列表
+            TrimMessages();
+
             // 本轮生成期间排队进来的待执行对话（平台提醒 / 定时任务），等回复结束后继续处理
             StartPendingTurns();
         }
@@ -1571,6 +1575,40 @@ public partial class ChatViewModel : ViewModelBase
         if (before != _history.Count)
             Logger.Debug("history trimmed before={Before} after={After} turns={Turns} keep={Keep}",
                 before, _history.Count, userTurns, keepTurns);
+    }
+
+    /// <summary>
+    /// 界面里保留的气泡上限。消息区已改成虚拟化（只实例化视口附近的几十条），
+    /// 这个上限现在约束的是 ViewModel 侧的数据：每条消息的正文、以及图片附件解码后的位图。
+    /// 请求历史由 <see cref="TrimHistory" /> 单独维护，这里只裁展示用列表，不影响模型上下文。
+    /// </summary>
+    private const int MaxVisibleMessages = 300;
+
+    /// <summary>休眠时按最近消息保留气泡，超出部分连同图片位图一起释放。</summary>
+    private void TrimMessages()
+    {
+        if (Messages.Count <= MaxVisibleMessages) return;
+
+        var removed = Messages.Count - MaxVisibleMessages;
+        var trimmed = 0;
+        for (var i = 0; i < removed; i++)
+        {
+            // 正在生成的气泡不该在这里被丢掉：生成期间不裁剪，这里只是兜底
+            var message = Messages[0];
+            if (ReferenceEquals(message, _reply)) break;
+
+            Messages.RemoveAt(0);
+            message.ReleaseGraphics();
+            trimmed++;
+        }
+
+        if (trimmed == 0) return;
+
+        // 不手动 GC：被裁掉的气泡不再可达，交给 GC 在后续回收时处理；
+        // 堆的收缩由 runtimeconfig 里的 System.GC.ConserveMemory=5 负责，
+        // 这里再叠一次 GC.Collect 既不能保证回收（Optimized 允许跳过、非阻塞不等完成），
+        // 强行 Forced + blocking 又会在每轮裁剪时卡住 UI，收益不划算。
+        Logger.Debug("visible messages trimmed removed={Removed} left={Left}", trimmed, Messages.Count);
     }
 
     private bool CanSend() => !IsGenerating && (!string.IsNullOrWhiteSpace(Draft) || Attachments.Count > 0);
