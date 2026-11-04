@@ -384,16 +384,6 @@
                                                             ToolTip.VerticalOffset="-6"
                                                             Command="{Binding ToggleUsageCommand}">
                                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <Path
-                                                                Data="M2,3.5 C2,2.1 4.7,1 8,1 C11.3,1 14,2.1 14,3.5 L14,12.5 C14,13.9 11.3,15 8,15 C4.7,15 2,13.9 2,12.5 Z M2,3.5 C2,4.9 4.7,6 8,6 C11.3,6 14,4.9 14,3.5 M2,8 C2,9.4 4.7,10.5 8,10.5 C11.3,10.5 14,9.4 14,8"
-                                                                Width="11"
-                                                                Height="11"
-                                                                Stretch="Uniform"
-                                                                Stroke="#8CFFFFFF"
-                                                                StrokeThickness="1.2"
-                                                                StrokeLineCap="Round"
-                                                                StrokeJoin="Round"
-                                                                VerticalAlignment="Center" />
                                                             <TextBlock Text="{Binding UsageCompactText}"
                                                                        FontSize="10.5"
                                                                        Foreground="#8CFFFFFF"
