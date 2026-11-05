@@ -27,7 +27,7 @@ public sealed class ChatSessionFactory(
 {
     internal ChatSession Create(SessionRecord record, ChatSessionStore store) => new(
         record.Id,
-        store.SessionDirectory(record.Id),
+        store.SessionDirectory(record.Id, record.WorkspacePath),
         store.ProfilePath,
         record.Title,
         record.WorkspacePath,
@@ -37,11 +37,13 @@ public sealed class ChatSessionFactory(
         toolAccess,
         questions,
         files,
-        statistics);
+        statistics,
+        // 会话换工作区时，目录跟着换到对应工作区分组
+        workspacePath => store.SessionDirectory(record.Id, workspacePath));
 }
 
 /// <summary>
-/// 多会话管理：sessions.json 索引、新建/打开/重命名/删除/搜索，并把所有会话的事件汇聚成一个出口。
+/// 多会话管理：按工作区分组的会话索引、新建/打开/重命名/删除/搜索，并把所有会话的事件汇聚成一个出口。
 /// 打开会话不阻塞 UI（读取历史放到线程池）；活动会话在构造时同步预载，保证首个快照就有内容。
 /// </summary>
 public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
@@ -57,7 +59,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// 草稿会话 id：已创建但还没有发出任何消息。它们留在 <see cref="_records" /> 里以便
-    /// 重命名/打开，但既不写 sessions.json，也不出现在侧栏列表，首条消息发出后才转正。
+    /// 重命名/打开，但既不写会话索引，也不出现在侧栏列表，首条消息发出后才转正。
     /// </summary>
     private readonly HashSet<string> _drafts = new(StringComparer.Ordinal);
 
@@ -145,7 +147,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     public event Action<ChatSessionListPayload>? SessionsChanged;
 
     /// <summary>
-    /// 新建会话：只在内存里开一个草稿，不写 sessions.json、不建会话目录。
+    /// 新建会话：只在内存里开一个草稿，不写会话索引、不建会话目录。
     /// 草稿在第一条消息发出后由 <see cref="OnSessionSummary" /> 转正并进入侧栏列表。
     /// 已经停在空白草稿上时直接复用它；其它遗留草稿会被丢弃，避免堆出多个隐形会话。
     /// </summary>
@@ -216,10 +218,10 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         var created = OpenCore(record.Id);
         created?.Activate();
 
-        foreach (var (id, draft) in discarded)
+        foreach (var (discardedRecord, draft) in discarded)
         {
             await draft.DisposeAsync().ConfigureAwait(false);
-            _store.DeleteDraft(id);
+            _store.DeleteDraft(discardedRecord.Id, discardedRecord.WorkspacePath);
         }
 
         Logger.Information("draft session created id={Id} workspace={Workspace}", record.Id, full);
@@ -227,18 +229,20 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// 清掉所有还没发过消息的草稿（含当前正在看的那个），返回需要释放的会话实例与其 id。
+    /// 清掉所有还没发过消息的草稿（含当前正在看的那个），返回需要释放的会话实例与其记录。
     /// 草稿没有内容可丢，连点「新会话」不会堆出多个隐形会话。
     /// </summary>
-    private List<(string Id, ChatSession Session)> RemoveDraftsLocked()
+    private List<(SessionRecord Record, ChatSession Session)> RemoveDraftsLocked()
     {
-        List<(string, ChatSession)> removed = [];
+        List<(SessionRecord, ChatSession)> removed = [];
         lock (_gate)
         {
             foreach (var id in _drafts.ToList())
             {
-                if (_open.Remove(id, out var session) && session is not null) removed.Add((id, session));
-                _records.RemoveAll(record => record.Id == id);
+                var record = _records.FirstOrDefault(item => item.Id == id);
+                if (record is null) continue;
+                if (_open.Remove(id, out var session) && session is not null) removed.Add((record, session));
+                _records.RemoveAll(item => item.Id == id);
                 _drafts.Remove(id);
                 if (string.Equals(_activeId, id, StringComparison.Ordinal)) _activeId = null;
             }
@@ -306,11 +310,12 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         ChatSession? session = null;
+        SessionRecord? record;
         bool draft;
         lock (_gate)
         {
-            if (!_records.Any(record => record.Id == sessionId))
-                throw new ChatSessionException("not_found", "会话不存在");
+            record = _records.FirstOrDefault(item => item.Id == sessionId);
+            if (record is null) throw new ChatSessionException("not_found", "会话不存在");
             draft = _drafts.Remove(sessionId);
             _open.Remove(sessionId, out session);
         }
@@ -324,9 +329,9 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         // 草稿从没落过盘：删掉可能残留的空目录即可，不进回收站
         if (draft)
         {
-            _store.DeleteDraft(sessionId);
+            _store.DeleteDraft(record.Id, record.WorkspacePath);
         }
-        else if (!_store.Delete(sessionId))
+        else if (!_store.Delete(record))
         {
             throw new ChatSessionException("io_error", "删除会话目录失败");
         }
@@ -445,6 +450,9 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
             Logger.Information("draft session persisted id={Id} title={Title}", sessionId, summary.Title);
         }
 
+        // 记下工作区分组：换工作区后会话目录会搬到新分组，重建索引时也要能还原分组
+        _store.EnsureGroup(summary.WorkspacePath);
+
         Save();
         RaiseSessionsChanged();
     }
@@ -491,18 +499,18 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     public async ValueTask DisposeAsync()
     {
         List<ChatSession> sessions;
-        List<string> drafts;
+        List<SessionRecord> draftRecords;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
             sessions = [.. _open.Values];
-            drafts = [.. _drafts];
+            draftRecords = _records.Where(record => _drafts.Contains(record.Id)).ToList();
             _open.Clear();
             // 草稿记录不能进索引：清掉标记的同时把记录从内存表里移除
             if (_activeId is not null && _drafts.Contains(_activeId)) _activeId = null;
             _drafts.Clear();
-            _records.RemoveAll(record => drafts.Contains(record.Id));
+            _records.RemoveAll(record => draftRecords.Any(draft => draft.Id == record.Id));
         }
 
         foreach (var session in sessions)
@@ -519,7 +527,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         }
 
         // 草稿没有写进索引：退出时把可能残留的目录一并清掉
-        foreach (var id in drafts) _store.DeleteDraft(id);
+        foreach (var record in draftRecords) _store.DeleteDraft(record.Id, record.WorkspacePath);
 
         Save();
     }

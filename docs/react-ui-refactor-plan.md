@@ -56,7 +56,7 @@
 - `NativePetWindow`、`NativePetControl`、Live2D SDK、OpenGL 渲染、口型/表情/手柄/目光/关屏停渲染、桌宠右键菜单。
 - 托盘 `NativeMenu`、`Ctrl+Alt+Space`、文件/目录选择器、系统消息框、窗口停靠/点击穿透。
 - 插件 SDK 契约与插件二进制接口。
-- 既有数据：`window.json`、`statistics.json`、`SoufflePet.json`、`~/.souffle/*`；`conversations.jsonl` 做迁移而非丢弃。
+- 既有数据：`window.json`、`statistics.json`、`SoufflePet.json`、`~/.souffle/*`；会话改为 `~/.souffle/sessions`，不做旧数据迁移。
 
 ### 3.4 明确不做
 
@@ -250,7 +250,7 @@ page actions  ──► bridge.invoke("session.open" | "chat.send" | ...) ──
 - 会话列表与消息都以宿主为准；页面只做乐观的“发送中”与本地输入草稿。
 - 切换会话：`session.open` 返回快照；旧会话事件停止应用（按 `sessionId` 过滤）。
 - 流式消息：`msg:text` 差量进当前会话 store；`MessageItem` 只订阅自己那条消息。
-- 新建会话：`session.new` 只创建内存草稿并路由到 `#/chat/<id>`；草稿不进侧栏/搜索结果、不写 `sessions.json` 与会话目录，首条用户消息发出后才落盘转正（标题同时生成，可重命名）。连点「新会话」复用当前空白草稿，不会堆出多个隐形会话。
+- 新建会话：`session.new` 只创建内存草稿并路由到 `#/chat/<id>`；草稿不进侧栏/搜索结果、不写会话索引与会话目录，首条用户消息发出后才落盘转正（标题同时生成，可重命名）。连点「新会话」复用当前空白草稿，不会堆出多个隐形会话。
 - 欢迎页 → 首条消息：发送后立即切到消息列表并显示“思考中”占位，滚动贴底。
 
 ### 6.5 色彩系统：OKLCH + 动态主题色
@@ -386,8 +386,8 @@ public sealed class ChatSessionManager : IAsyncDisposable
 }
 ```
 
-- 每个会话一个 `conversation.jsonl`（与现有格式兼容），索引 `sessions.json` 保存标题/工作区/时间/消息数。
-- 现有 `conversations.jsonl` 首次启动时迁移为默认会话，原文件保留只读备份。
+- 会话按工作区分组存在用户目录 `~/.souffle/sessions/<workspace-group>/<id>/`，每个会话一个 `conversation.jsonl`（与现有格式兼容），索引在 `sessions/index.json`，保存标题/工作区/时间/消息数。
+- 不迁移旧的 `conversations.jsonl` 与旧 `%AppData%\SoufflePet\sessions` 数据。
 - 标题默认取首条用户消息前 30 字；可手动重命名。
 - 删除二次确认；删除后若当前会话被删，自动切到最近会话，没有剩余会话时在内存里补一个草稿（不落盘）。
 - 新建会话先只存在于内存（草稿）：不写索引、不建目录、不进侧栏；首条用户消息发出后才落盘转正。这样连点「新会话」不会留下空会话。
@@ -435,7 +435,7 @@ public sealed class ChatSessionManager : IAsyncDisposable
 
 - `window.json`、`statistics.json`、`SoufflePet.json` 字段名不变；新增 `UiAccentColor`、`UiAccentFollowSystem`、`UiSidebarCollapsed`。
 - 旧 `ChatRenderer` 忽略；新增 `UiRenderer` 只影响宿主窗口选择（迁移期）。
-- `conversations.jsonl` 迁移为默认会话；迁移前备份 `conversations.jsonl.bak`。
+- `conversations.jsonl` 不再读写，也不做迁移；会话只走 `~/.souffle/sessions`。
 - 会话消息 DTO 只做展示投影，不写回历史文件。
 
 ### 7.7 组装根
@@ -450,7 +450,7 @@ public sealed class ChatSessionManager : IAsyncDisposable
 | **P0 契约** | v1 扩展：`session.*`、`nav.*`、`window.*`、`settings.*`、`host.theme`；DTO/事件模型；窗口角色 `app` | 契约评审通过；每个旧交互有对应方法 | 3 人日 |
 | **B1 Core 骨架** | 新建 Core + Tests；搬迁 Models/纯服务；`AddSouffleCore`；特征测试基线 | 旧 UI 行为不变；Core 无 Avalonia 引用 | 7 人日 |
 | **B2 ChatSession** | 重写 `ChatViewModel` → `ChatSession` + 事件；`ChatRpc`；`LegacyChatViewModel` 适配旧窗口 | 假模型流/工具/审批/Ask/取消通过；旧窗口可用 | 8 人日 |
-| **B3 会话管理** | `ChatSessionManager`、`sessions.json`、旧 `conversations.jsonl` 迁移、CRUD/搜索 | 新建/切换/重命名/删除/重启恢复；无数据丢失 | 5 人日 |
+| **B3 会话管理** | `ChatSessionManager`、`sessions/index.json`、按工作区分组的会话目录、CRUD/搜索 | 新建/切换/重命名/删除/重启恢复；无数据丢失 | 5 人日 |
 | **B4 设置 API** | 七面板 API（含外观）；删面板 VM；插件 schema | 七面板 CRUD + 校验 + 持久化 parity | 5 人日 |
 | **P1 应用壳** | Vite/React/TS/Tailwind；标题栏/侧栏/内容区/抽屉；容器查询；OKLCH token + 首帧注入；bridge client + mock host | 1416/1024/800/652/420 五档截图通过；拖/缩放/最小化/关闭正常 | 6 人日（可与 B1 并行） |
 | **P2 对话区** | 欢迎页、消息列表、输入卡、模型/审批/工作区/用量/AskUser/附件、会话列表与切换、快捷键 | 与旧窗口 parity；500 条消息 + 流式不卡；窄屏可用 | 9 人日 |
@@ -527,11 +527,11 @@ public sealed class ChatSessionManager : IAsyncDisposable
 ## 11. 验收
 
 - **布局**：1416 / 1024 / 800 / 652 / 420 五档宽度；侧栏常驻/收起/抽屉/遮罩；标题栏拖拽/双击最大化/三键；8 向缩放；记住尺寸/位置/开合。
-- **会话**：新会话、切换、重命名、删除、重启恢复、首条消息生成标题、旧 `conversations.jsonl` 迁移；搜索过滤。
+- **会话**：新会话、切换、重命名、删除、重启恢复、首条消息生成标题、工作区分组；搜索过滤。
 - **对话**：欢迎页/输入卡/发送/停止/流式 Markdown/表格/代码/KaTeX/Mermaid/推理/工具/审批/用量/模型/工作区/AskUser/附件/长会话滚动/复制。
 - **设置**：七面板 CRUD + 校验 + 持久化；插件动态表单；MCP 测试；Cron；模型导入/移除/切换。
 - **主题**：预设/自定义即时生效（<100 ms）；重启保持；“跟随系统”生效；对比度校验；首帧无闪烁；除 tokens.css 外无颜色字面量。
-- **后端**：Core 单测（会话状态机/管理/序列化/调度）；`conversations.jsonl` 回放；插件示例加载。
+- **后端**：Core 单测（会话状态机/管理/序列化/调度）；`conversation.jsonl` 回放；插件示例加载。
 - **回归**：Live2D 表情/动作/口型/手柄/目光/关屏/右键菜单；托盘/热键/停靠/点击穿透。
 - **性能**：隐藏 10 分钟工作集回落；首开 ≤1 s（骨架）；流式 30 tok/s 不卡。
 
@@ -622,15 +622,15 @@ public sealed class ChatSessionManager : IAsyncDisposable
 
 - Core 新增 `Chat/`：
   - `ChatSession`：单会话状态机（消息/草稿/附件/模型/审批/工作区/用量/Ask），串行生成队列，增量 `ChatOp` 事件；工具审批/Ask/展示文件按 `AsyncLocal` 当前轮次路由，多会话不会串台。
-  - `ChatSessionManager`：`sessions.json` 索引、新建/打开/重命名/删除/搜索，统一汇聚各会话事件；打开历史在线程池执行，首会话构造期预载保证首个快照非空。
-  - `ChatSessionStore`：`sessions/<id>/conversation.jsonl`、`window.json`、`sessions.json`；删除移入 `sessions/.deleted`；旧 `conversations.jsonl` 首次迁移为默认会话并保留只读 `.bak`；索引损坏按目录重建。
+  - `ChatSessionManager`：会话索引（`~/.souffle/sessions/index.json`）、新建/打开/重命名/删除/搜索，统一汇聚各会话事件；打开历史在线程池执行，首会话构造期预载保证首个快照非空。
+  - `ChatSessionStore`：`~/.souffle/sessions/<workspace-group>/<id>/conversation.jsonl`、`window.json`、根索引 `index.json`；删除移入 `sessions/.deleted`；索引损坏按目录重建；不做旧数据迁移。
   - `ChatTriggerRouter`：平台消息/定时任务/戳一戳/摸头路由到活动会话（仅 React UI 解析，旧窗口仍由 `ChatViewModel` 订阅）。
   - 会话内 `ChatMemory` 使用独立对话文件，`profile.json` 全局共享；保存档案时合并其他会话刚写入的条目。
 - 宿主新增 `Services/Web/ChatRpc.cs` 取代 `BootstrapRpc`：`session.*` / `chat.*` 全部接入 Core；Core `ChatOp` 投影为契约 JSON（含附件 `/local-file` 图片 URL）；`IAppWindowCommands` 增加文件/目录选择与剪贴板图片读取。
 - `ChatWindowService` 不再构造期解析 `ChatViewModel`：React 模式不创建旧视图模型，避免平台提醒/定时任务双消费。
 - 修复 M2 潜在问题：超过 256 KB 的 snapshot/event 经 `/state` 时只登记 payload（此前登记整个 envelope，页面拿到后丢字段导致大快照白屏）；`/local-file` token 延长到 12 小时，聊天记录滚动重渲染不会 404。
 - 前端：`Composer` 发送成功后清空本地草稿，与宿主清空一致。
-- 数据隔离：`SOUFFLEPET_DATA_DIR` 可指定应用数据根目录（验收/自动化测试用），`ChatMemory.DefaultRoot` 统一供会话、统计、调度日志、窗口几何使用。
+- 数据隔离：`SOUFFLEPET_DATA_DIR` 可指定应用数据根目录（验收/自动化测试用），`ChatMemory.DefaultRoot` 供统计、调度日志、窗口几何使用；会话走 `ChatMemory.SouffleHome` 下的 `sessions/`（默认 `~/.souffle/sessions`，设置环境变量时同样被隔离）。
 - 验证：
   - `dotnet build SoufflePet.sln`：**0 警告 / 0 错误**（含 web 构建）；`dotnet test SoufflePet.Core.Tests`：**20 用例全绿**（新增 11 个会话/管理器/序列化用例：流式落盘恢复、审批、多会话审批路由、Ask、停止、工具气泡、附件消费与 @ 路径、CRUD+迁移+回收站、活动会话删除回退、档案共享、op 判别字段）。
   - `pnpm --dir SoufflePet/web verify` 通过（typecheck + 颜色检查 + 24 Vitest + build）。

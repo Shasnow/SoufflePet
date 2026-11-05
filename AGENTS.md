@@ -119,8 +119,8 @@ SoufflePet.sln
   ```
 
   插件契约 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件**不要**自带副本。
-- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；长期记忆 `%AppData%\SoufflePet`（`sessions.json` + `sessions\<id>\conversation.jsonl`）；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
-- **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把应用数据根目录（会话、记忆、统计、调度日志、窗口几何）指到临时目录；不设置时仍为 `%AppData%\SoufflePet`。
+- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；会话 `~/.souffle/sessions`（`index.json` + 按工作区分组的 `<workspace-group>\<id>\conversation.jsonl`）；长期记忆/统计 `%AppData%\SoufflePet`；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
+- **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把应用数据根目录（会话、记忆、统计、调度日志、窗口几何）指到临时目录；不设置时会话在 `~/.souffle/sessions`，其余数据仍为 `%AppData%\SoufflePet`。
 - **UI 架构**：React SPA 是唯一对话/设置界面；桌宠只有 `NativePetWindow` 一个原生渲染窗口。WebView2 初始化失败会记录错误并弹一次系统提示，**不再回退旧 Avalonia 窗口**；`--legacy-ui`、`--react-ui`、`--webview` 等迁移期开关已删除。
 - 模型在**启动时**加载，`Live2DModels` / `ModelsDirectory` 改后需重启生效；运行中可从桌宠右键菜单切换模型。
 

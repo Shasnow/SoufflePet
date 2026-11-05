@@ -52,9 +52,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
         _questions = new UserQuestionService();
         _files = new ChatFileService();
         _statistics = new FakeStatistics();
-        _store = new ChatSessionStore(_root,
-            Path.Combine(_root, "profile.json"),
-            Path.Combine(_root, "conversations.jsonl"));
+        _store = new ChatSessionStore(SessionsRoot, Path.Combine(_root, "profile.json"));
 
         return Task.CompletedTask;
     }
@@ -235,29 +233,26 @@ public sealed class ChatSessionTests : IAsyncLifetime
     [Fact]
     public async Task ManagerCreatesRenamesSearchesAndDeletesWithRecycleBin()
     {
-        var legacy = Path.Combine(_root, "conversations.jsonl");
-        await File.WriteAllLinesAsync(legacy,
-        [
-            JsonSerializer.Serialize(new { Time = DateTimeOffset.Now, Role = "user", Text = "旧会话第一条" }),
-            JsonSerializer.Serialize(new { Time = DateTimeOffset.Now, Role = "assistant", Text = "旧回复" }),
-        ]);
-
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
-        var migrated = Assert.Single(manager.Sessions);
-        Assert.Equal("旧会话第一条", migrated.Title);
-        Assert.True(File.Exists(legacy + ".bak"));
+
+        // 先发一条消息，得到一个已落盘的会话（全新目录里只有一个内存草稿）
+        var firstDraft = manager.ActiveSession!;
+        await firstDraft.SendAsync("旧会话第一条", null, CancellationToken.None);
+        await firstDraft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var first = Assert.Single(manager.Sessions);
+        Assert.Equal("旧会话第一条", first.Title);
 
         // 新建只是内存草稿：不进列表、不建目录
         var created = await manager.CreateAsync(null, CancellationToken.None);
         Assert.DoesNotContain(manager.Sessions, record => record.Id == created.Id);
-        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, created.Id)));
+        Assert.False(Directory.Exists(_store.SessionDirectory(created.Id)));
 
         // 发出第一条消息才落盘并进入列表
         var draft = manager.ActiveSession!;
         await draft.SendAsync("第一条消息", null, CancellationToken.None);
         await draft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Contains(manager.Sessions, record => record.Id == created.Id);
-        Assert.True(Directory.Exists(Path.Combine(SessionsRoot, created.Id)));
+        Assert.True(Directory.Exists(_store.SessionDirectory(created.Id)));
 
         await manager.RenameAsync(created.Id, "改过的标题", CancellationToken.None);
         var search = await manager.SearchAsync("改过", CancellationToken.None);
@@ -265,12 +260,11 @@ public sealed class ChatSessionTests : IAsyncLifetime
 
         var payload = await manager.DeleteAsync(created.Id, CancellationToken.None);
         Assert.DoesNotContain(payload.Sessions, record => record.Id == created.Id);
-        Assert.Equal(migrated.Id, payload.ActiveId);
-        Assert.True(Directory.Exists(Path.Combine(SessionsRoot, ".deleted")));
+        Assert.Equal(first.Id, payload.ActiveId);
+        Assert.True(Directory.Exists(_store.TrashDirectory));
 
-        var opened = await manager.OpenAsync(migrated.Id, CancellationToken.None);
+        var opened = await manager.OpenAsync(first.Id, CancellationToken.None);
         Assert.Equal(2, opened.Snapshot.Messages.Count);
-        Assert.True(File.Exists(legacy));
     }
 
     [Fact]
@@ -282,8 +276,8 @@ public sealed class ChatSessionTests : IAsyncLifetime
         Assert.Empty(manager.Sessions);
         var draft = manager.ActiveSession;
         Assert.NotNull(draft);
-        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, draft!.Id)));
-        var indexJson = await File.ReadAllTextAsync(Path.Combine(_root, "sessions.json"));
+        Assert.False(Directory.Exists(_store.SessionDirectory(draft!.Id)));
+        var indexJson = await File.ReadAllTextAsync(_store.IndexPath);
         Assert.DoesNotContain(draft.Id, indexJson);
 
         await draft.SendAsync("草稿转正", null, CancellationToken.None);
@@ -292,8 +286,8 @@ public sealed class ChatSessionTests : IAsyncLifetime
         var record = Assert.Single(manager.Sessions);
         Assert.Equal(draft.Id, record.Id);
         Assert.Equal("草稿转正", record.Title);
-        Assert.True(File.Exists(Path.Combine(SessionsRoot, draft.Id, "conversation.jsonl")));
-        indexJson = await File.ReadAllTextAsync(Path.Combine(_root, "sessions.json"));
+        Assert.True(File.Exists(_store.ConversationPath(draft.Id)));
+        indexJson = await File.ReadAllTextAsync(_store.IndexPath);
         Assert.Contains(draft.Id, indexJson);
     }
 
@@ -309,8 +303,65 @@ public sealed class ChatSessionTests : IAsyncLifetime
         Assert.Equal(first.Id, second.Id);
         Assert.Equal(second.Id, manager.ActiveSessionId);
         Assert.Empty(manager.Sessions);
-        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, first.Id)));
-        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, second.Id)));
+        Assert.False(Directory.Exists(_store.SessionDirectory(first.Id)));
+        Assert.False(Directory.Exists(_store.SessionDirectory(second.Id)));
+    }
+
+    [Fact]
+    public async Task SessionsAreGroupedByWorkspaceAndMoveOnSwitch()
+    {
+        var workspaceA = Path.Combine(_root, "workspace-a");
+        var workspaceB = Path.Combine(_root, "workspace-b");
+        Directory.CreateDirectory(workspaceA);
+        Directory.CreateDirectory(workspaceB);
+
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+        var record = await manager.CreateAsync(workspaceA, CancellationToken.None);
+        var session = manager.ActiveSession!;
+        await session.SendAsync("工作区分组", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var directoryA = _store.SessionDirectory(record.Id, workspaceA);
+        Assert.True(File.Exists(Path.Combine(directoryA, "conversation.jsonl")));
+        Assert.True(directoryA.Contains(ChatSessionStore.WorkspaceGroupName(workspaceA), StringComparison.Ordinal));
+
+        await session.SwitchWorkspaceAsync(workspaceB);
+
+        var directoryB = _store.SessionDirectory(record.Id, workspaceB);
+        Assert.True(File.Exists(Path.Combine(directoryB, "conversation.jsonl")));
+        Assert.False(Directory.Exists(directoryA));
+        Assert.True(directoryB.Contains(ChatSessionStore.WorkspaceGroupName(workspaceB), StringComparison.Ordinal));
+        Assert.Equal(workspaceB, Assert.Single(manager.Sessions).WorkspacePath);
+
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(record.Id, CancellationToken.None);
+            Assert.Equal(2, opened.Snapshot.Messages.Count);
+            Assert.Equal(workspaceB, opened.Snapshot.Workspace?.Path);
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
+        }
+
+        // 索引丢失时也能从分组目录 + workspace.txt 重建，工作区分组不丢
+        File.Delete(_store.IndexPath);
+        var rebuilt = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var restored = Assert.Single(rebuilt.Sessions);
+            Assert.Equal(record.Id, restored.Id);
+            Assert.Equal(workspaceB, restored.WorkspacePath);
+            Assert.Equal(2, (await rebuilt.OpenAsync(record.Id, CancellationToken.None)).Snapshot.Messages.Count);
+        }
+        finally
+        {
+            await rebuilt.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -423,7 +474,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
         Assert.NotEqual(first.Id, afterFirst.ActiveId);
         Assert.Empty(afterFirst.Sessions); // 替代品是内存草稿
         Assert.NotNull(manager.ActiveSession);
-        Assert.True(Directory.Exists(Path.Combine(SessionsRoot, ".deleted")));
+        Assert.True(Directory.Exists(_store.TrashDirectory));
     }
 
     [Fact]

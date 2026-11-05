@@ -401,23 +401,28 @@ type ChatOp =
 ## 7. 存储与数据兼容
 
 ```
-%AppData%\SoufflePet\
-  sessions.json
-  sessions\<id>\conversation.jsonl
-  sessions\<id>\window.json
-  sessions\.deleted\<id>-<timestamp>\
+%USERPROFILE%\.souffle\
+  sessions\
+    index.json                       # 会话索引
+    <workspace-group>\<id>\conversation.jsonl
+    <workspace-group>\<id>\window.json
+    .deleted\<id>-<timestamp>\
+    <workspace-group>\workspace.txt  # 分组对应的工作区全路径（重建索引用）
+
+%AppData%\SoufflePet\                # 其余数据仍在应用数据根目录
   profile.json
   statistics.json
   scheduled-tasks.log
-  conversations.jsonl / conversations.jsonl.bak
   ui-window.json
 ```
 
-- `sessions.json` 见方案 §5.3；字段只增不改。
-- `conversation.jsonl` 行格式与旧文件相同（`Time/Role/Text/...`），旧文件可被新代码直接读。
+- 会话按工作区分组存放：目录名是「可读前缀 + 路径哈希」（无工作区为 `_default`），避免同名目录冲突；切换/移除工作区时会话目录随之搬到新分组。
+- `index.json` 见方案 §5.3；字段只增不改。
+- `conversation.jsonl` 行格式与旧文件相同（`Time/Role/Text/...`）。
 - `SoufflePet.json` 新增 `UiAccentColor`、`UiAccentFollowSystem`、`UiSidebarCollapsed`、`UiLastSessionId`；迁移期的 `UiRenderer` 已在 M7 删除（旧配置里的该键会被忽略）。
-- 迁移前写 `conversations.jsonl.bak`；删除会话进回收站；索引损坏时按目录重建。
-- 草稿会话只在内存里：`session.new` 不写 `sessions.json`、不建 `sessions/<id>/`，首条用户消息落盘后才有目录与索引记录（见 §13-21）。
+- 不做旧数据迁移：不导入旧 `conversations.jsonl`，也不自动搬 `%AppData%\SoufflePet\sessions`；需要旧记录时手工拷贝到 `~/.souffle/sessions/<workspace-group>/<id>/`。
+- 删除会话进回收站；索引损坏时按会话目录重建（工作区分组从 `workspace.txt` 还原）。
+- 草稿会话只在内存里：`session.new` 不写索引、不建会话目录，首条用户消息落盘后才有目录与索引记录（见 §13-21）。
 - `statistics.json`、`profile.json` 不迁移、不改字段。
 
 ## 8. 安全规则
@@ -501,3 +506,4 @@ type ChatOp =
 19. 桥并发/取消：写请求串行化，只读与窗口命令不占写锁；请求使用窗口生命周期 token。`event` envelope 增加顶层 `rev` 以支持非对象 payload；`payload` 不再被强制转成空对象。
 20. 设置落盘改为锁内序列化 + 临时文件原子替换；`/local-file` 按路径缓存 token 并每分钟清理过期项；`chat.file.open` 收窄到会话附件/工作区并拒绝可执行扩展名。
 21. 新建会话延迟落盘：`session.new` 先只在内存里开草稿（不写 `sessions.json`、不建会话目录、不进侧栏与搜索），首条用户消息发出后由宿主转正；连点「新会话」复用/收敛草稿。删除最后一个会话时同样只补草稿，不再立刻造出空的已保存会话。
+22. 会话存储迁到 `%USERPROFILE%\.souffle\sessions`：按工作区分组为 `<workspace-group>/<id>/`，索引改为根目录 `index.json`；不做旧 `%AppData%\SoufflePet` 会话与旧 `conversations.jsonl` 的自动迁移。其余数据（`profile.json`、统计、调度日志、窗口几何）仍在应用数据根目录。

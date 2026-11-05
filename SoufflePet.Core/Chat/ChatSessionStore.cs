@@ -13,8 +13,8 @@ using SoufflePet.Services;
 namespace SoufflePet.Core.Chat;
 
 /// <summary>
-/// 会话索引文件 sessions.json 的落盘结构。字段只增不改（契约 §7）：
-/// 页面/迁移都按可选字段读取，缺字段用默认值补。
+/// 会话索引文件 index.json 的落盘结构。字段只增不改（契约 §7）：
+/// 页面按可选字段读取，缺字段用默认值补。
 /// </summary>
 public sealed class ChatSessionIndex
 {
@@ -24,17 +24,19 @@ public sealed class ChatSessionIndex
 }
 
 /// <summary>
-/// 会话存储：应用数据根目录下的 sessions.json 索引 + sessions/&lt;id&gt;/（conversation.jsonl / window.json），
-/// 并提供旧 conversations.jsonl 的一次性迁移与索引损坏时的目录重建。
+/// 会话存储：<c>~/.souffle/sessions/</c> 下按工作区分组的会话目录
+/// （<c>&lt;工作区&gt;/&lt;id&gt;/conversation.jsonl</c>）+ 根目录的 <c>index.json</c> 索引。
+/// 索引损坏时按会话目录重建；不做任何旧数据迁移。
 /// </summary>
 public sealed class ChatSessionStore
 {
     private static readonly ILogger Logger = Log.ForContext<ChatSessionStore>();
 
-    private const string IndexFileName = "sessions.json";
-    private const string SessionsDirectoryName = "sessions";
+    private const string IndexFileName = "index.json";
     private const string ConversationFileName = "conversation.jsonl";
+    private const string GroupMarkerFileName = "workspace.txt";
     private const string DeletedDirectoryName = ".deleted";
+    private const string DefaultGroupName = "_default";
     private const string DefaultTitle = "新会话";
     private const int TitleLength = 30;
 
@@ -47,61 +49,79 @@ public sealed class ChatSessionStore
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>默认存储：%AppData%\SoufflePet（索引 sessions.json，会话目录 sessions\&lt;id&gt;）。</summary>
+    /// <summary>默认存储：用户目录 <c>~/.souffle/sessions</c>（按工作区分组）。</summary>
     public static ChatSessionStore CreateDefault() => new(
-        ChatMemory.DefaultRoot,
-        Path.Combine(ChatMemory.DefaultRoot, "profile.json"),
-        Path.Combine(ChatMemory.DefaultRoot, "conversations.jsonl"));
+        Path.Combine(ChatMemory.SouffleHome, "sessions"),
+        Path.Combine(ChatMemory.DefaultRoot, "profile.json"));
 
-    /// <param name="root">应用数据根目录；索引与会话目录都在其下。</param>
+    /// <param name="root">会话存储根目录（索引、按工作区分组的会话目录、回收站都在其下）。</param>
     /// <param name="profilePath">全局用户档案；会话之间共享。</param>
-    /// <param name="legacyConversationsPath">旧版 conversations.jsonl；仅首次迁移时读取。</param>
-    public ChatSessionStore(string root, string? profilePath = null, string? legacyConversationsPath = null)
+    public ChatSessionStore(string root, string? profilePath = null)
     {
         Root = Path.GetFullPath(root);
         ProfilePath = profilePath ?? Path.Combine(Root, "profile.json");
-        LegacyConversationsPath = legacyConversationsPath
-            ?? Path.Combine(Root, "conversations.jsonl");
     }
 
+    /// <summary>会话存储根目录。</summary>
     public string Root { get; }
 
     public string ProfilePath { get; }
 
-    public string LegacyConversationsPath { get; }
-
     public string IndexPath => Path.Combine(Root, IndexFileName);
 
-    /// <summary>所有会话目录的父目录（sessions/，删除回收站也在其下）。</summary>
-    public string SessionsRoot => Path.Combine(Root, SessionsDirectoryName);
+    /// <summary>回收站目录（会话删除后移入这里）。</summary>
+    public string TrashDirectory => Path.Combine(Root, DeletedDirectoryName);
 
-    public string SessionDirectory(string id) => Path.Combine(SessionsRoot, id);
+    /// <summary>工作区分组目录名：可读前缀 + 路径哈希，避免同名目录冲突。</summary>
+    public static string WorkspaceGroupName(string? workspacePath)
+    {
+        if (string.IsNullOrWhiteSpace(workspacePath)) return DefaultGroupName;
 
-    public string ConversationPath(string id) => Path.Combine(SessionDirectory(id), ConversationFileName);
+        string full;
+        try
+        {
+            full = Path.GetFullPath(workspacePath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            full = workspacePath;
+        }
+
+        full = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var leaf = Path.GetFileName(full);
+        if (string.IsNullOrEmpty(leaf)) leaf = full.Replace(':', '_');
+
+        var safe = new string(leaf.Select(ch =>
+            char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_').ToArray()).Trim('_');
+        if (safe.Length == 0) safe = "workspace";
+        if (safe.Length > 40) safe = safe[..40];
+
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8].ToLowerInvariant();
+        return $"{safe}-{hash}";
+    }
+
+    /// <summary>某个工作区对应的分组目录。</summary>
+    public string GroupDirectory(string? workspacePath) =>
+        Path.Combine(Root, WorkspaceGroupName(workspacePath));
+
+    public string SessionDirectory(string id, string? workspacePath = null) =>
+        Path.Combine(GroupDirectory(workspacePath), id);
+
+    public string ConversationPath(string id, string? workspacePath = null) =>
+        Path.Combine(SessionDirectory(id, workspacePath), ConversationFileName);
 
     public static string NewSessionId() => Guid.NewGuid().ToString("N");
 
     /// <summary>
-    /// 读取索引；不存在时先迁移旧 conversations.jsonl，再按目录重建，最后兜底新建一个空会话。
-    /// 索引损坏不会丢会话：直接按会话目录重建。
+    /// 读取索引；索引丢失时按会话目录重建。索引损坏不会丢会话。
     /// </summary>
     public ChatSessionIndex Load()
     {
         Directory.CreateDirectory(Root);
 
-        ChatSessionIndex? index = null;
-        if (File.Exists(IndexPath))
-        {
-            try
-            {
-                index = JsonSerializer.Deserialize<ChatSessionIndex>(File.ReadAllText(IndexPath), JsonOptions);
-            }
-            catch (Exception ex) when (ex is JsonException or IOException)
-            {
-                Logger.Warning(ex, "sessions.json corrupted; rebuilding from session directories");
-            }
-        }
-
+        var index = ReadIndex(IndexPath);
         var records = index?.Sessions?
             .Where(record => record is not null && IsSafeId(record.Id))
             .GroupBy(record => record.Id, StringComparer.Ordinal)
@@ -110,21 +130,17 @@ public sealed class ChatSessionStore
 
         if (records.Count == 0)
         {
-            // 索引丢失但会话目录还在：优先按目录重建，避免把旧对话再迁移一份造成重复会话。
-            var rebuilt = RebuildFromDirectories();
-            if (rebuilt.Count > 0) records.AddRange(rebuilt);
-            else if (MigrateLegacy() is { } migrated) records.Add(migrated);
+            // 索引丢失但会话目录还在：按目录重建
+            records.AddRange(RebuildFromDirectories());
         }
 
-        // 会话目录可能被手工删掉：索引里还在的条目按空会话补目录；目录没有对话文件时也补上。
+        // 会话目录可能被手工删掉/换过工作区：索引里还在的条目按工作区分组补齐或搬过去。
         var alive = new List<SessionRecord>(records.Count);
         foreach (var record in records)
         {
             try
             {
-                Directory.CreateDirectory(SessionDirectory(record.Id));
-                var path = ConversationPath(record.Id);
-                if (!File.Exists(path)) File.WriteAllText(path, string.Empty);
+                EnsureRecordDirectory(record);
                 alive.Add(record);
             }
             catch (Exception ex)
@@ -149,6 +165,121 @@ public sealed class ChatSessionStore
         return result;
     }
 
+    /// <summary>把索引里的会话目录放到它当前工作区对应的分组下（工作区被外部改过时搬过去）。</summary>
+    private void EnsureRecordDirectory(SessionRecord record)
+    {
+        var desired = SessionDirectory(record.Id, record.WorkspacePath);
+        if (!Directory.Exists(desired))
+        {
+            var found = FindSessionDirectory(record.Id);
+            if (found is not null && !SamePath(found, desired))
+            {
+                MoveDirectory(found, desired);
+            }
+            else
+            {
+                Directory.CreateDirectory(desired);
+            }
+        }
+
+        WriteGroupMarker(record.WorkspacePath);
+
+        var conversation = Path.Combine(desired, ConversationFileName);
+        if (!File.Exists(conversation)) File.WriteAllText(conversation, string.Empty);
+    }
+
+    /// <summary>在所有工作区分组里找某个会话的目录。</summary>
+    private string? FindSessionDirectory(string id)
+    {
+        foreach (var group in Directory.EnumerateDirectories(Root))
+        {
+            if (string.Equals(Path.GetFileName(group), DeletedDirectoryName, StringComparison.Ordinal)) continue;
+            var candidate = Path.Combine(group, id);
+            if (Directory.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
+    /// <summary>确保分组目录存在，并在里面记下工作区全路径（重建索引时用来还原分组）。</summary>
+    private void WriteGroupMarker(string? workspacePath)
+    {
+        try
+        {
+            var group = GroupDirectory(workspacePath);
+            Directory.CreateDirectory(group);
+            var marker = Path.Combine(group, GroupMarkerFileName);
+            if (File.Exists(marker)) return;
+            File.WriteAllText(marker, string.IsNullOrWhiteSpace(workspacePath)
+                ? string.Empty
+                : Path.GetFullPath(workspacePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "write workspace marker failed path={Path}", workspacePath);
+        }
+    }
+
+    /// <summary>确保工作区分组目录与标记存在（会话内容由 ChatMemory 按需写入）。</summary>
+    public void EnsureGroup(string? workspacePath) => WriteGroupMarker(workspacePath);
+
+    private static string? ReadGroupMarker(string group)
+    {
+        try
+        {
+            var marker = Path.Combine(group, GroupMarkerFileName);
+            if (!File.Exists(marker)) return null;
+            var text = File.ReadAllText(marker).Trim();
+            return text.Length == 0 ? null : text;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static ChatSessionIndex? ReadIndex(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<ChatSessionIndex>(File.ReadAllText(path), JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException)
+        {
+            Logger.Warning(ex, "session index corrupted path={Path}", path);
+            return null;
+        }
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+
+    private static void MoveDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        if (Directory.Exists(target)) target = Path.Combine(target, Path.GetFileName(source));
+        try
+        {
+            Directory.Move(source, target);
+        }
+        catch (IOException)
+        {
+            // 跨卷：复制后删除
+            CopyDirectory(source, target);
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+        foreach (var directory in Directory.EnumerateDirectories(source))
+            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+    }
+
     /// <summary>原子写入索引（先写临时文件再替换，避免断电留下半个 JSON）。</summary>
     public void Save(ChatSessionIndex index)
     {
@@ -161,7 +292,7 @@ public sealed class ChatSessionStore
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "save sessions.json failed");
+            Logger.Warning(ex, "save session index failed");
         }
     }
 
@@ -178,13 +309,14 @@ public sealed class ChatSessionStore
     /// 删除草稿会话的残留目录：草稿从未写入过索引/对话，直接删目录，不进回收站。
     /// 目录不存在时静默返回。
     /// </summary>
-    public void DeleteDraft(string id)
+    public void DeleteDraft(string id, string? workspacePath = null)
     {
         if (!IsSafeId(id)) return;
         try
         {
-            var directory = SessionDirectory(id);
-            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            var directory = SessionDirectory(id, workspacePath);
+            if (!Directory.Exists(directory)) directory = FindSessionDirectory(id);
+            if (directory is not null && Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         catch (Exception ex)
         {
@@ -192,29 +324,29 @@ public sealed class ChatSessionStore
         }
     }
 
-    /// <summary>删除会话：目录移入 sessions/.deleted/&lt;id&gt;-&lt;时间戳&gt;，可人工恢复。</summary>
-    public bool Delete(string id)
+    /// <summary>删除会话：目录移入 &lt;root&gt;/.deleted/&lt;id&gt;-&lt;时间戳&gt;，可人工恢复。</summary>
+    public bool Delete(SessionRecord record)
     {
-        if (!IsSafeId(id)) return false;
+        if (!IsSafeId(record.Id)) return false;
 
-        var source = SessionDirectory(id);
-        if (!Directory.Exists(source)) return false;
+        var source = SessionDirectory(record.Id, record.WorkspacePath);
+        if (!Directory.Exists(source)) source = FindSessionDirectory(record.Id);
+        if (source is null || !Directory.Exists(source)) return false;
 
         try
         {
-            var trash = Path.Combine(SessionsRoot, DeletedDirectoryName);
-            Directory.CreateDirectory(trash);
-            var target = Path.Combine(trash, $"{id}-{DateTime.Now:yyyyMMddHHmmssfff}");
+            Directory.CreateDirectory(TrashDirectory);
+            var target = Path.Combine(TrashDirectory, $"{record.Id}-{DateTime.Now:yyyyMMddHHmmssfff}");
             for (var suffix = 2; Directory.Exists(target); suffix++)
-                target = Path.Combine(trash, $"{id}-{DateTime.Now:yyyyMMddHHmmssfff}-{suffix}");
+                target = Path.Combine(TrashDirectory, $"{record.Id}-{DateTime.Now:yyyyMMddHHmmssfff}-{suffix}");
 
             Directory.Move(source, target);
-            Logger.Information("session moved to recycle bin id={Id} target={Target}", id, target);
+            Logger.Information("session moved to recycle bin id={Id} target={Target}", record.Id, target);
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Warning(ex, "delete session failed id={Id}", id);
+            Logger.Warning(ex, "delete session failed id={Id}", record.Id);
             return false;
         }
     }
@@ -223,84 +355,58 @@ public sealed class ChatSessionStore
     public IReadOnlyList<SessionRecord> RebuildFromDirectories()
     {
         var records = new List<SessionRecord>();
-        if (!Directory.Exists(SessionsRoot)) return records;
+        if (!Directory.Exists(Root)) return records;
 
-        foreach (var directory in Directory.EnumerateDirectories(SessionsRoot))
+        foreach (var group in Directory.EnumerateDirectories(Root))
         {
-            var id = Path.GetFileName(directory);
-            if (!IsSafeId(id)) continue;
+            var name = Path.GetFileName(group);
+            if (string.Equals(name, DeletedDirectoryName, StringComparison.Ordinal)) continue;
 
-            var conversation = Path.Combine(directory, ConversationFileName);
-            var lines = TryReadLines(conversation);
-            var firstUser = lines.FirstOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
-            var lastUser = lines.LastOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
-            var model = lines.LastOrDefault(line => line.Model is { Length: > 0 })?.Model;
-
-            DateTimeOffset created;
-            DateTimeOffset updated;
-            try
+            var workspace = ReadGroupMarker(group);
+            foreach (var directory in Directory.EnumerateDirectories(group))
             {
-                created = new DirectoryInfo(directory).CreationTimeUtc;
-                updated = File.Exists(conversation) ? File.GetLastWriteTimeUtc(conversation) : created;
+                var id = Path.GetFileName(directory);
+                if (!IsSafeId(id)) continue;
+                AddRecord(records, directory, id, workspace);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                created = updated = DateTimeOffset.Now;
-            }
-
-            records.Add(new SessionRecord(
-                id,
-                MakeTitle(firstUser?.Text) ?? DefaultTitle,
-                null,
-                created,
-                updated,
-                lines.Count,
-                lastUser?.Text,
-                model));
         }
 
         return records;
     }
 
-    /// <summary>首次启动时把旧 conversations.jsonl 复制成默认会话，旧文件保留只读备份。</summary>
-    private SessionRecord? MigrateLegacy()
+    private static void AddRecord(
+        List<SessionRecord> records,
+        string directory,
+        string id,
+        string? workspacePath)
     {
+        var conversation = Path.Combine(directory, ConversationFileName);
+        var lines = TryReadLines(conversation);
+        var firstUser = lines.FirstOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
+        var lastUser = lines.LastOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
+        var model = lines.LastOrDefault(line => line.Model is { Length: > 0 })?.Model;
+
+        DateTimeOffset created;
+        DateTimeOffset updated;
         try
         {
-            if (!File.Exists(LegacyConversationsPath)) return null;
-
-            var backup = LegacyConversationsPath + ".bak";
-            if (!File.Exists(backup)) File.Copy(LegacyConversationsPath, backup, overwrite: false);
-
-            var id = NewSessionId();
-            var directory = SessionDirectory(id);
-            Directory.CreateDirectory(directory);
-            var target = ConversationPath(id);
-            File.Copy(LegacyConversationsPath, target, overwrite: false);
-
-            var lines = TryReadLines(target);
-            var firstUser = lines.FirstOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
-            var lastUser = lines.LastOrDefault(line => IsUser(line.Role) && line.Text.Length > 0);
-            var model = lines.LastOrDefault(line => line.Model is { Length: > 0 })?.Model;
-            var now = DateTimeOffset.Now;
-            var updated = File.GetLastWriteTimeUtc(target);
-
-            Logger.Information("legacy conversations migrated id={Id} turns={Count}", id, lines.Count);
-            return new SessionRecord(
-                id,
-                MakeTitle(firstUser?.Text) ?? DefaultTitle,
-                null,
-                now,
-                updated == default ? now : updated,
-                lines.Count,
-                lastUser?.Text,
-                model);
+            created = new DirectoryInfo(directory).CreationTimeUtc;
+            updated = File.Exists(conversation) ? File.GetLastWriteTimeUtc(conversation) : created;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Warning(ex, "migrate legacy conversations failed");
-            return null;
+            created = updated = DateTimeOffset.Now;
         }
+
+        records.Add(new SessionRecord(
+            id,
+            MakeTitle(firstUser?.Text) ?? DefaultTitle,
+            workspacePath,
+            created,
+            updated,
+            lines.Count,
+            lastUser?.Text,
+            model));
     }
 
     private static List<ConversationLine> TryReadLines(string path)

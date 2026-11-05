@@ -141,14 +141,14 @@
 
 ### 长期记忆
 
-`ChatMemoryEnabled` 打开时对话落盘到 `%AppData%\SoufflePet`：
+`ChatMemoryEnabled` 打开时对话落盘到 `~/.souffle/sessions`（按工作区分组）：
 
-- `sessions.json`：会话索引（标题、更新时间、工作区、当前会话），侧栏历史列表据此恢复
-- `sessions/<id>/conversation.jsonl`：该会话每轮问答与工具调用记录（启动时据此重建请求上下文）
-- `sessions/<id>/window.json`：该会话上次请求实际使用的历史窗口轮数（重启后按同一窗口恢复，第一次请求才能继续命中服务端前缀缓存）
-- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等），所有会话共享
+- `index.json`：会话索引（标题、更新时间、工作区、当前会话），侧栏历史列表据此恢复
+- `<workspace-group>/<id>/conversation.jsonl`：该会话每轮问答与工具调用记录（启动时据此重建请求上下文）
+- `<workspace-group>/<id>/window.json`：该会话上次请求实际使用的历史窗口轮数（重启后按同一窗口恢复，第一次请求才能继续命中服务端前缀缓存）
+- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等），所有会话共享，仍在 `%AppData%\SoufflePet`
 
-旧版单文件 `conversations.jsonl` 会在首次启动时迁移为默认会话，并保留只读 `.bak`；删除的会话移到 `sessions/.deleted`。检索用中文 2-gram + BM25，不依赖分词库或向量服务。
+不迁移旧的 `conversations.jsonl` 与旧 `%AppData%\SoufflePet\sessions` 数据；删除的会话移到 `sessions/.deleted`。检索用中文 2-gram + BM25，不依赖分词库与向量服务。
 
 ### 统计信息
 

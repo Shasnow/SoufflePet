@@ -78,16 +78,16 @@ public sealed class ChatMemory
 
     private readonly Lock _gate = new();
     private readonly SouffleSettings _settings;
-    private readonly string _root;
-    private readonly string _conversationsPath;
-    private readonly string _profilePath;
-    private readonly string _windowPath;
+    private string _root;
+    private string _conversationsPath;
+    private string _profilePath;
+    private string _windowPath;
     private readonly List<Turn> _turns = [];
     private List<MemoryEntry> _profile = [];
     private int _windowTurns;
 
     /// <summary>
-    /// 应用数据根目录（长期档案、统计、会话、旧版对话文件都在这里）。
+    /// 应用数据根目录（长期档案、统计、旧版对话文件都在这里）。
     /// 可用环境变量 <c>SOUFFLEPET_DATA_DIR</c> 指向独立目录，供自动化验收/测试隔离用户数据。
     /// </summary>
     public static string DefaultRoot
@@ -99,6 +99,23 @@ public sealed class ChatMemory
                 ? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                     "SoufflePet")
+                : Path.GetFullPath(custom);
+        }
+    }
+
+    /// <summary>
+    /// 用户级配置目录：默认 <c>%USERPROFILE%\.souffle</c>，会话按工作区分组存在其下的 <c>sessions/</c>。
+    /// 设置 <c>SOUFFLEPET_DATA_DIR</c> 时直接用它，保持验收/测试隔离语义不变。
+    /// </summary>
+    public static string SouffleHome
+    {
+        get
+        {
+            var custom = Environment.GetEnvironmentVariable("SOUFFLEPET_DATA_DIR");
+            return string.IsNullOrWhiteSpace(custom)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".souffle")
                 : Path.GetFullPath(custom);
         }
     }
@@ -143,6 +160,61 @@ public sealed class ChatMemory
         catch (Exception ex)
         {
             Logger.Warning(ex, "create session directory failed path={Path}", _root);
+        }
+    }
+
+    /// <summary>
+    /// 会话换工作区时把落盘目录一起搬走（会话按工作区分组存放）。
+    /// 已写过的 conversation.jsonl / window.json 随之移动，之后继续写新位置。
+    /// </summary>
+    public void Rebase(string root)
+    {
+        string target;
+        try
+        {
+            target = Path.GetFullPath(root);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (string.Equals(_root, target, StringComparison.OrdinalIgnoreCase)) return;
+
+            var source = _root;
+            try
+            {
+                Directory.CreateDirectory(target);
+                MoveFileIfExists(_conversationsPath, Path.Combine(target, Path.GetFileName(_conversationsPath)));
+                MoveFileIfExists(_windowPath, Path.Combine(target, "window.json"));
+
+                // 旧目录空了就顺手删掉，避免工作区切换留下空壳
+                if (Directory.Exists(source) && !Directory.EnumerateFileSystemEntries(source).Any())
+                    Directory.Delete(source);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "rebase session directory failed from={From} to={To}", source, target);
+            }
+
+            _root = target;
+            _conversationsPath = Path.Combine(target, Path.GetFileName(_conversationsPath));
+            _windowPath = Path.Combine(target, "window.json");
+        }
+    }
+
+    private static void MoveFileIfExists(string from, string to)
+    {
+        if (!File.Exists(from) || string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            File.Move(from, to, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "move session file failed from={From} to={To}", from, to);
         }
     }
 

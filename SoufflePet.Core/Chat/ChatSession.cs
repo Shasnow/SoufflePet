@@ -86,6 +86,8 @@ public sealed class ChatSession : IAsyncDisposable
     private TaskCompletionSource? _idle;
     private Task? _turnTask;
     private Task? _pendingTask;
+    /// <summary>会话目录解析器：按当前工作区给出落盘目录（会话按工作区分组）。</summary>
+    private readonly Func<string?, string>? _directoryResolver;
 
     internal ChatSession(
         string id,
@@ -99,9 +101,11 @@ public sealed class ChatSession : IAsyncDisposable
         ChatToolAccess toolAccess,
         UserQuestionService questions,
         ChatFileService files,
-        IStatisticsService statistics)
+        IStatisticsService statistics,
+        Func<string?, string>? directoryResolver = null)
     {
         Id = id;
+        _directoryResolver = directoryResolver;
         _title = string.IsNullOrWhiteSpace(title) ? DefaultTitle : title;
         _workspacePath = workspacePath;
         _selectedModelKey = string.IsNullOrWhiteSpace(modelKey) ? settings.ChatModelKey : modelKey;
@@ -151,6 +155,20 @@ public sealed class ChatSession : IAsyncDisposable
     public void Activate()
     {
         if (!ApplyWorkingDirectory(_workspacePath)) _workspacePath = null;
+    }
+
+    /// <summary>把会话存储迁到当前工作区对应的分组目录（由工厂注入的解析器决定）。</summary>
+    private void RebaseStorage(string? workspacePath)
+    {
+        if (_directoryResolver is not { } resolver) return;
+        try
+        {
+            _memory.Rebase(resolver(workspacePath));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "rebase session storage failed id={Session}", Id);
+        }
     }
 
     internal void SetTitle(string title)
@@ -428,9 +446,11 @@ public sealed class ChatSession : IAsyncDisposable
 
         ChatWorkspaceState? workspace;
         IReadOnlyList<ChatWorkspaceState> workspaces;
+        string? newWorkspace;
         lock (_gate)
         {
             _workspacePath = full;
+            newWorkspace = _workspacePath;
             if (full is not null && !_settings.WorkspacePaths.Any(p =>
                     string.Equals(p, full, StringComparison.OrdinalIgnoreCase)))
                 _settings.WorkspacePaths = [.. _settings.WorkspacePaths, full];
@@ -441,6 +461,8 @@ public sealed class ChatSession : IAsyncDisposable
             EmitLocked(new ChatOpWorkspace(workspace, workspaces));
         }
 
+        // 会话目录跟着工作区分组走：历史文件一起搬到新分组
+        RebaseStorage(newWorkspace);
         RaiseSummary();
         return Task.FromResult(workspace);
     }
@@ -451,16 +473,17 @@ public sealed class ChatSession : IAsyncDisposable
         string? full = NormalizeDirectory(path);
         IReadOnlyList<ChatWorkspaceState> workspaces;
         ChatWorkspaceState? active;
+        var cleared = false;
         lock (_gate)
         {
             _settings.WorkspacePaths = _settings.WorkspacePaths
                 .Where(item => !string.Equals(item, full ?? path, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            var clearing = full is null
+            cleared = full is null
                 ? string.Equals(_workspacePath, path, StringComparison.OrdinalIgnoreCase)
                 : string.Equals(_workspacePath, full, StringComparison.OrdinalIgnoreCase);
-            if (clearing)
+            if (cleared)
             {
                 _workspacePath = null;
                 _settings.ActiveWorkspacePath = string.Empty;
@@ -473,6 +496,8 @@ public sealed class ChatSession : IAsyncDisposable
             EmitLocked(new ChatOpWorkspace(active, workspaces));
         }
 
+        // 工作区被移除后会话回到默认分组，历史文件一起搬走
+        if (cleared) RebaseStorage(null);
         RaiseSummary();
         return Task.FromResult(workspaces);
     }
