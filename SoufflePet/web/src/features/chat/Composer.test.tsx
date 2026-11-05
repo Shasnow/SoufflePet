@@ -83,6 +83,22 @@ describe('Composer', () => {
     expect(screen.getByLabelText('停止生成')).toBeInTheDocument()
   })
 
+  it('已绑定工作区的会话隐藏工作区切换入口', () => {
+    render(<Harness />)
+    expect(screen.queryByLabelText('工作区')).toBeNull()
+    expect(document.querySelector('.composer-context')).toBeNull()
+  })
+
+  it('未绑定工作区的会话仍可手动切换工作区', () => {
+    useChatStore.setState({
+      bySession: { s1: { ...snapshot, workspace: null, workspaces: [] } },
+      activeId: 's1',
+    })
+    render(<Harness />)
+    const chip = screen.getByLabelText('工作区')
+    expect(chip.textContent).toContain('选择工作区')
+  })
+
   it('把审批放在附件右侧、模型放在发送左侧，且都在输入框内', () => {
     render(<Harness />)
     const bar = document.querySelector('.composer-bar')

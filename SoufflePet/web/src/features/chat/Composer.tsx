@@ -104,15 +104,19 @@ export function Composer({ chat, hero = false }: ComposerProps) {
   }
 
   const canSend = chat.draft.trim().length > 0 || chat.attachments.length > 0 || chat.generating
+  // 已绑定工作区的会话不允许再改工作区，未绑定时才显示入口供手动切换
+  const canPickWorkspace = chat.workspace === null
 
   return (
     <div className="composer-wrap">
-      <div className="composer-context">
-        <WorkspacePicker chat={chat} />
-        {chat.generating ? (
-          <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>正在回复，可点右侧停止</span>
-        ) : null}
-      </div>
+      {canPickWorkspace || chat.generating ? (
+        <div className="composer-context">
+          {canPickWorkspace ? <WorkspacePicker chat={chat} /> : null}
+          {chat.generating ? (
+            <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>正在回复，可点右侧停止</span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={`composer ${chat.generating ? 'is-disabled' : ''}`}>
         {chat.attachments.length > 0 ? (

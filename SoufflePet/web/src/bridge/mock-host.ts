@@ -308,7 +308,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     }
   }
 
-  function emptyChat(id: string): ChatSnapshotDto {
+  function emptyChat(id: string, workspace: WorkspaceDto | null = WORKSPACE): ChatSnapshotDto {
     return {
       sessionId: id,
       messages: [],
@@ -318,7 +318,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       models: MODELS,
       selectedModelKey: MODELS[0].key,
       approvalMode: 'manual',
-      workspace: WORKSPACE,
+      workspace,
       workspaces: [WORKSPACE, NOTES_WORKSPACE],
       usage: null,
       ask: null,
@@ -737,10 +737,12 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
               return
             }
             const sessionId = newId('s')
-            const workspace = WORKSPACE
-            const chat = emptyChat(sessionId)
-            chat.workspace = workspace
-            draft = { summary: { ...summaryOf(sessionId, '新会话', workspace) }, chat }
+            // 从侧栏某个工作区新建时沿用该工作区，未指定则落在默认分组
+            const requestedPath = String(payload.workspacePath ?? '')
+            const workspace =
+              [WORKSPACE, NOTES_WORKSPACE].find((item) => item.path === requestedPath) ?? null
+            const chat = emptyChat(sessionId, workspace)
+            draft = { summary: summaryOf(sessionId, '新会话', workspace), chat }
             activeId = sessionId
             emitSessions()
             response(id, draft.summary)
@@ -933,6 +935,13 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             const path = String(payload.path ?? '')
             const workspace = chat.workspaces.find((item) => item.path === path) ?? null
             chat.workspace = workspace
+            // 与宿主一致：切换后会话归入新的工作区分组
+            for (const session of sessions) {
+              if (session.summary.id !== sessionId) continue
+              session.summary.workspacePath = workspace?.path
+              session.summary.workspaceName = workspace?.name
+            }
+            emitSessions()
             emitOps(sessionId!, [{ op: 'workspace', workspace, workspaces: chat.workspaces }])
             response(id, { workspace, workspaces: chat.workspaces })
             return
@@ -1325,12 +1334,12 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     },
   }
 
-  function summaryOf(id: string, title: string, workspace: WorkspaceDto): SessionSummaryDto {
+  function summaryOf(id: string, title: string, workspace: WorkspaceDto | null): SessionSummaryDto {
     return {
       id,
       title,
-      workspacePath: workspace.path,
-      workspaceName: workspace.name,
+      workspacePath: workspace?.path,
+      workspaceName: workspace?.name,
       createdAt: iso(),
       updatedAt: iso(),
       messageCount: 0,

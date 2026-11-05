@@ -86,9 +86,6 @@ export function Sidebar() {
 
   const filtered = useMemo(() => filterSessions(sessions, query), [sessions, query])
   const groups = useMemo(() => groupSessions(filtered), [filtered])
-  const activeWorkspace = useChatStore((state) =>
-    state.activeId ? state.bySession[state.activeId]?.workspace ?? null : null,
-  )
 
   const currentPanel = route.kind === 'settings' ? route.panel : null
   const moreActive = currentPanel !== null && MORE_ITEMS.some((item) => item.panel === currentPanel)
@@ -233,7 +230,7 @@ export function Sidebar() {
             type="button"
             className="nav-item nav-new"
             disabled={busy}
-            onClick={() => void createSession(activeWorkspace?.path)}
+            onClick={() => void createSession()}
           >
             <MessageSquarePlus size={17} className="nav-icon" />
             <span className="nav-label">新会话</span>
@@ -338,7 +335,7 @@ export function Sidebar() {
                   type="button"
                   className="icon-btn"
                   aria-label="新建会话"
-                  onClick={() => void createSession(activeWorkspace?.path)}
+                  onClick={() => void createSession()}
                 >
                   <Plus size={14} />
                 </button>
