@@ -507,3 +507,4 @@ type ChatOp =
 20. 设置落盘改为锁内序列化 + 临时文件原子替换；`/local-file` 按路径缓存 token 并每分钟清理过期项；`chat.file.open` 收窄到会话附件/工作区并拒绝可执行扩展名。
 21. 新建会话延迟落盘：`session.new` 先只在内存里开草稿（不写 `sessions.json`、不建会话目录、不进侧栏与搜索），首条用户消息发出后由宿主转正；连点「新会话」复用/收敛草稿。删除最后一个会话时同样只补草稿，不再立刻造出空的已保存会话。
 22. 会话存储迁到 `%USERPROFILE%\.souffle\sessions`：按工作区分组为 `<workspace-group>/<id>/`，索引改为根目录 `index.json`；不做旧 `%AppData%\SoufflePet` 会话与旧 `conversations.jsonl` 的自动迁移。其余数据（`profile.json`、统计、调度日志、窗口几何）仍在应用数据根目录。
+23. 输入卡底部工具条：附件 → 审批模式（都在输入框内左侧），模型选择靠右、紧邻发送按钮；工作区选择仍留在输入卡上方的上下文行。

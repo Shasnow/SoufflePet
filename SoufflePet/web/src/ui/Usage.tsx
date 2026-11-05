@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-import { ChevronDown, Gauge } from 'lucide-react'
+import { Gauge } from 'lucide-react'
 import type { GlobalUsageDto, UsageDto } from '@/bridge/contracts'
 import { Popover } from './Popover'
 import { formatCompactTokens, formatDuration, formatPercent, formatTokens } from './format'
@@ -69,17 +69,6 @@ export function GlobalUsageButton({ usage, compact = false }: { usage: GlobalUsa
       <UsageRow label="戳一戳" value={`${usage.pokeCount} 次`} />
       <UsageRow label="摸摸头" value={`${usage.headPatCount} 次`} />
       <UsageRow label="陪伴时长" value={formatDuration(usage.runSeconds)} />
-      <div className="menu-sep" />
-      <button
-        type="button"
-        className="menu-item"
-        onClick={() => {
-          window.location.hash = '#/settings/appearance'
-        }}
-      >
-        <ChevronDown size={14} style={{ transform: 'rotate(-90deg)' }} />
-        打开外观设置
-      </button>
     </Popover>
   )
 }

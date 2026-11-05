@@ -82,4 +82,16 @@ describe('Composer', () => {
     render(<Harness />)
     expect(screen.getByLabelText('停止生成')).toBeInTheDocument()
   })
+
+  it('把审批放在附件右侧、模型放在发送左侧，且都在输入框内', () => {
+    render(<Harness />)
+    const bar = document.querySelector('.composer-bar')
+    expect(bar).not.toBeNull()
+    const labels = [...bar!.children].map(
+      (node) => node.getAttribute('aria-label') ?? node.className,
+    )
+    expect(labels.slice(0, 2)).toEqual(['添加附件', '审批模式'])
+    expect(labels.slice(-2)).toEqual(['选择对话模型', '发送'])
+    expect(document.querySelector('.composer-context [aria-label="审批模式"]')).toBeNull()
+  })
 })

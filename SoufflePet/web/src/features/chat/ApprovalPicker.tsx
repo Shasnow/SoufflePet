@@ -43,9 +43,9 @@ export function ApprovalPicker({ mode }: { mode: ApprovalMode }) {
       side="top"
       align="start"
       trigger={
-        <button type="button" className="chip" aria-label="审批模式">
-          <Icon size={13} />
-          <span className="chip-label">{current.label}</span>
+        <button type="button" className="composer-tool" aria-label="审批模式">
+          <Icon size={14} />
+          <span className="tool-text">{current.label}</span>
           <ChevronDown size={12} />
         </button>
       }

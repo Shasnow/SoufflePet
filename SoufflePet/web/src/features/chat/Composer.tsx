@@ -109,7 +109,6 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     <div className="composer-wrap">
       <div className="composer-context">
         <WorkspacePicker chat={chat} />
-        <ApprovalPicker mode={chat.approvalMode} />
         {chat.generating ? (
           <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>正在回复，可点右侧停止</span>
         ) : null}
@@ -180,8 +179,9 @@ export function Composer({ chat, hero = false }: ComposerProps) {
           <button type="button" className="composer-tool" aria-label="添加附件" onClick={() => void attach('pick')}>
             <Paperclip size={15} />
           </button>
-          <ModelPicker chat={chat} />
+          <ApprovalPicker mode={chat.approvalMode} />
           <span className="spacer" />
+          <ModelPicker chat={chat} />
           <button
             type="button"
             className={`send-btn ${chat.generating ? 'is-stop' : ''}`}
