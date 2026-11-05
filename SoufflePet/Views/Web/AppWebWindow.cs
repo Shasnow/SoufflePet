@@ -12,7 +12,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Serilog;
@@ -173,7 +172,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (hwnd == IntPtr.Zero) return;
         ReleaseCapture();
-        SendMessage(hwnd, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
+        SendMessage(hwnd, WmNcLButtonDown, HtCaption, IntPtr.Zero);
     }
 
     public void BeginResize(string edge)
@@ -199,7 +198,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         if (!GetCursorPos(out var point)) return;
 
         ReleaseCapture();
-        SendMessage(hwnd, WmNcLButtonDown, (IntPtr)hit, MakeLParam(point.X, point.Y));
+        SendMessage(hwnd, WmNcLButtonDown, hit, MakeLParam(point.X, point.Y));
     }
 
     public void Minimize() => WindowState = WindowState.Minimized;
@@ -462,7 +461,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         _rpc.Dispose();
     }
 
-    private async System.Threading.Tasks.Task FocusComposerAsync()
+    private async Task FocusComposerAsync()
     {
         try
         {
@@ -543,7 +542,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     }
 
     private static IntPtr MakeLParam(int x, int y) =>
-        unchecked((IntPtr)((y << 16) | (x & 0xFFFF)));
+        (y << 16) | (x & 0xFFFF);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();

@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using Serilog;
 using SoufflePet.Core.Chat;
 using SoufflePet.Models;
-using SoufflePet.Services;
 
 namespace SoufflePet.Services.Web;
 
@@ -361,7 +360,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         if (attachment is null) return null;
 
         string? url = null;
-        if (attachment.IsImage && attachment.Path.Length > 0)
+        if (attachment is { IsImage: true, Path.Length: > 0 })
         {
             try
             {

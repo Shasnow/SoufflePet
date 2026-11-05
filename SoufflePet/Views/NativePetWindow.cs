@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;

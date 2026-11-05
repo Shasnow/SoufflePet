@@ -350,6 +350,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* 固定行高：收起态是 26px 图标 + 上下各 4px，展开态的搜索框必须同高，
+     否则切换时会把下面的会话列表顶下去。 */
+  height: 34px;
   padding: 4px 8px;
   color: var(--text-3);
   font-size: 11px;
@@ -359,6 +362,53 @@
 
 .sidebar-section-head .spacer {
   flex: 1;
+}
+
+/* 搜索展开态：整个操作区被输入框占满（含工作区标题行），高度与收起态一致 */
+.sidebar-section-head[data-searching='true'] {
+  padding: 4px 6px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  animation: fade-in 120ms ease;
+}
+
+.sidebar-search-icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.sidebar-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.sidebar-search .icon-btn {
+  width: 22px;
+  height: 22px;
+  flex: none;
 }
 
 .icon-btn {

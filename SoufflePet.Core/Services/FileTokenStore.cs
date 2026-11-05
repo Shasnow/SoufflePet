@@ -88,7 +88,7 @@ public sealed class FileTokenStore
     }
 
     /// <summary>读取 token 内容；不存在或已过期返回 null（过期项顺手移除）。</summary>
-    public FileTokenEntry? Take(string token)
+    public FileTokenEntry? Take(string? token)
     {
         if (string.IsNullOrEmpty(token)) return null;
         if (!_tokens.TryGetValue(token, out var entry)) return null;

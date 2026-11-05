@@ -149,7 +149,7 @@ public sealed class BrowserWindow : Window
 
     private void OnNavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
     {
-        _address.Text = View.Source?.ToString() ?? string.Empty;
+        _address.Text = View.Source.ToString();
         if (e.IsSuccess) HideStatus();
         else ShowStatus($"网页加载失败（{View.Source}），可以试试刷新或换个地址。");
     }

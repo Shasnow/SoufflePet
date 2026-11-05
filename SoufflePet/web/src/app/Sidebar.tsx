@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { SessionSummaryDto, WorkspaceDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
@@ -52,10 +52,21 @@ export function Sidebar() {
   const route = useRoute()
 
   const [moreOpen, setMoreOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [editing, setEditing] = useState<SessionSummaryDto | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [deleting, setDeleting] = useState<SessionSummaryDto | null>(null)
   const [busy, setBusy] = useState(false)
+  const searchButton = useRef<HTMLButtonElement | null>(null)
+
+  const openSearch = () => setSearchOpen(true)
+
+  const closeSearch = () => {
+    setSearchOpen(false)
+    setQuery('')
+    // 收起后搜索按钮才重新挂载，等一帧再还焦点，避免焦点掉到 body
+    window.setTimeout(() => searchButton.current?.focus(), 0)
+  }
 
   const filtered = useMemo(() => filterSessions(sessions, query), [sessions, query])
   const groups = useMemo(() => groupSessions(filtered), [filtered])
@@ -220,55 +231,59 @@ export function Sidebar() {
         </div>
 
         <section className="sidebar-section" aria-label="工作区与会话">
-          <div className="sidebar-section-head">
-            <span>工作区</span>
-            <span className="spacer" />
-            <button type="button" className="icon-btn" aria-label="选择工作区" onClick={() => void pickWorkspace()}>
-              <FolderOpen size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="新建会话"
-              onClick={() => void createSession(activeWorkspace?.path)}
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-
-          <div style={{ padding: '4px 6px 6px' }}>
-            <div style={{ position: 'relative' }}>
-              <Search
-                size={13}
-                style={{
-                  position: 'absolute',
-                  left: 9,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-3)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <input
-                className="input"
-                style={{ height: 30, paddingLeft: 28, fontSize: 12.5 }}
-                value={query}
-                placeholder="搜索会话…"
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label="搜索会话"
-              />
-              {query ? (
+          <div className="sidebar-section-head" data-searching={searchOpen ? 'true' : 'false'}>
+            {searchOpen ? (
+              <div className="sidebar-search">
+                <Search size={13} className="sidebar-search-icon" />
+                <input
+                  className="sidebar-search-input"
+                  value={query}
+                  placeholder="搜索会话名称"
+                  aria-label="搜索会话"
+                  autoFocus
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.stopPropagation()
+                      closeSearch()
+                    }
+                  }}
+                />
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="清除搜索"
-                  style={{ position: 'absolute', right: 3, top: 3 }}
-                  onClick={() => setQuery('')}
+                  aria-label="关闭搜索"
+                  onClick={() => closeSearch()}
                 >
                   <X size={13} />
                 </button>
-              ) : null}
-            </div>
+              </div>
+            ) : (
+              <>
+                <span>工作区</span>
+                <span className="spacer" />
+                <button
+                  ref={searchButton}
+                  type="button"
+                  className="icon-btn"
+                  aria-label="搜索会话"
+                  onClick={openSearch}
+                >
+                  <Search size={14} />
+                </button>
+                <button type="button" className="icon-btn" aria-label="选择工作区" onClick={() => void pickWorkspace()}>
+                  <FolderOpen size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="新建会话"
+                  onClick={() => void createSession(activeWorkspace?.path)}
+                >
+                  <Plus size={14} />
+                </button>
+              </>
+            )}
           </div>
 
           {groups.length === 0 ? (
