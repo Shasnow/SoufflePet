@@ -448,6 +448,79 @@
   text-overflow: ellipsis;
 }
 
+.workspace-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-toggle:hover .name {
+  color: var(--text-1);
+}
+
+/* 文件夹图标与折叠箭头共用同一槽位，hover / 键盘聚焦时切换为箭头 */
+.workspace-icon {
+  display: grid;
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.workspace-icon > svg {
+  grid-area: 1 / 1;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.workspace-chevron {
+  opacity: 0;
+  color: var(--text-3);
+}
+
+.workspace-chevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+
+.workspace-toggle:hover .workspace-folder,
+.workspace-toggle:focus-visible .workspace-folder {
+  opacity: 0;
+}
+
+.workspace-toggle:hover .workspace-chevron,
+.workspace-toggle:focus-visible .workspace-chevron {
+  opacity: 1;
+}
+
+/* 用 grid-template-rows 0fr↔1fr 做高度过渡，内层 overflow 裁切 */
+.workspace-sessions {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.22s ease,
+    opacity 0.22s ease;
+}
+
+.workspace-sessions[data-collapsed='true'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.workspace-sessions > .session-list {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .session-list {
   display: flex;
   flex-direction: column;
@@ -1074,6 +1147,7 @@
   gap: 8px;
   margin-top: 6px;
   min-height: 18px;
+  padding-inline: 2px;
   color: var(--text-3);
   font-size: 11px;
 }
@@ -1089,8 +1163,8 @@
   transition: opacity 120ms ease;
 }
 
-.bubble:hover .bubble-actions,
-.bubble:focus-within .bubble-actions {
+.message-row:hover .bubble-actions,
+.message-row:focus-within .bubble-actions {
   opacity: 1;
 }
 

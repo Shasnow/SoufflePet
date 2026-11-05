@@ -64,7 +64,6 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
     <div className="bubble-meta">
       <span className="bubble-time">{formatClock(message.time)}</span>
       {message.usage ? <UsageCapsule usage={message.usage} /> : null}
-      <span style={{ flex: 1 }} />
       <div className="bubble-actions">
         <button type="button" className="icon-btn" aria-label="复制消息" title="复制" onClick={() => void copy()}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -79,8 +78,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
         <div className="message-row" data-kind="user">
           <div className="bubble bubble-user">
             <div style={{ whiteSpace: 'pre-wrap' }}>{message.text || '（空消息）'}</div>
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -100,8 +99,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
               </span>
             ) : null}
             {streaming && message.text ? <span className="caret" /> : null}
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -117,8 +116,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
               <span className="collapse-title">{reasoningHeader(message)}</span>
             </button>
             {message.expanded ? <div className="collapse-body">{message.text}</div> : null}
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -148,8 +147,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
                 </div>
               </div>
             ) : null}
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -161,8 +160,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
               <Info size={14} style={{ marginTop: 3, flex: 'none', color: 'var(--text-3)' }} />
               <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
             </div>
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -207,8 +206,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
                 ) : null}
               </div>
             </div>
-            {meta}
           </div>
+          {meta}
         </div>
       )
 
@@ -239,8 +238,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
                 <span className="attachment-path">{message.attachment?.path ?? ''}</span>
               </span>
             </button>
-            {meta}
           </div>
+          {meta}
         </div>
       )
 

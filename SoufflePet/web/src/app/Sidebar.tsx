@@ -3,6 +3,7 @@
 
 import {
   Blocks,
+  ChevronRight,
   Clock,
   Ellipsis,
   FolderOpen,
@@ -57,7 +58,11 @@ export function Sidebar() {
   const [editTitle, setEditTitle] = useState('')
   const [deleting, setDeleting] = useState<SessionSummaryDto | null>(null)
   const [busy, setBusy] = useState(false)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const searchButton = useRef<HTMLButtonElement | null>(null)
+
+  const toggleCollapsed = (key: string) =>
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
 
   const openSearch = () => setSearchOpen(true)
 
@@ -291,38 +296,63 @@ export function Sidebar() {
               {query ? '没有匹配的会话。' : '还没有会话，发出第一条消息后会出现在这里。'}
             </div>
           ) : (
-            groups.map((group) => (
-              <div className="workspace-group" key={group.key || 'default'}>
-                <div className="workspace-title" title={group.key}>
-                  <FolderOpen size={13} />
-                  <span className="name">{group.name}</span>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label={`在 ${group.name} 新建会话`}
-                    style={{ marginLeft: 'auto' }}
-                    onClick={() => void createSession(group.key || undefined)}
+            groups.map((group) => {
+              const groupKey = group.key || 'default'
+              // 搜索时强制展开，避免命中的会话被折叠状态隐藏
+              const isCollapsed = !query && (collapsed[groupKey] ?? false)
+              return (
+                <div className="workspace-group" key={groupKey}>
+                  <div className="workspace-title" title={group.key}>
+                    <button
+                      type="button"
+                      className="workspace-toggle"
+                      aria-expanded={!isCollapsed}
+                      onClick={() => toggleCollapsed(groupKey)}
+                    >
+                      <span className="workspace-icon">
+                        <FolderOpen size={13} className="workspace-folder" />
+                        <ChevronRight
+                          size={13}
+                          className="workspace-chevron"
+                          data-expanded={isCollapsed ? 'false' : 'true'}
+                        />
+                      </span>
+                      <span className="name">{group.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label={`在 ${group.name} 新建会话`}
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => void createSession(group.key || undefined)}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                  <div
+                    className="workspace-sessions"
+                    data-collapsed={isCollapsed ? 'true' : 'false'}
+                    inert={isCollapsed ? true : undefined}
                   >
-                    <Plus size={13} />
-                  </button>
+                    <div className="session-list">
+                      {group.sessions.map((session) => (
+                        <SessionItem
+                          key={session.id}
+                          session={session}
+                          active={session.id === activeId}
+                          onOpen={(item) => openChat(item.id)}
+                          onRename={(item) => {
+                            setEditing(item)
+                            setEditTitle(item.title)
+                          }}
+                          onDelete={(item) => setDeleting(item)}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="session-list">
-                  {group.sessions.map((session) => (
-                    <SessionItem
-                      key={session.id}
-                      session={session}
-                      active={session.id === activeId}
-                      onOpen={(item) => openChat(item.id)}
-                      onRename={(item) => {
-                        setEditing(item)
-                        setEditTitle(item.title)
-                      }}
-                      onDelete={(item) => setDeleting(item)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </section>
       </div>
