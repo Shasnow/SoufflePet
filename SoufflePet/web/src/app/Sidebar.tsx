@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import {
   Blocks,
   ChevronRight,
@@ -372,6 +373,46 @@ export function Sidebar() {
                       <span className="name">{group.name}</span>
                     </button>
                     <div className="workspace-actions">
+                      {group.key ? (
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger asChild>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              aria-label={`${group.name} 工作区操作`}
+                            >
+                              <Ellipsis size={13} />
+                            </button>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Portal>
+                            <DropdownMenu.Content className="popover menu-list" sideOffset={4} align="end">
+                              <DropdownMenu.Item
+                                className="menu-item"
+                                onSelect={() => startRenameWorkspace(group.key, group.name)}
+                              >
+                                <Pencil size={14} />
+                                重命名
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Separator className="menu-sep" />
+                              <DropdownMenu.Item
+                                className="menu-item"
+                                onSelect={() => {
+                                  setDeletingWorkspace({
+                                    path: group.key,
+                                    name: group.name,
+                                    count: sessions.filter(
+                                      (session) => (session.workspacePath ?? '') === group.key,
+                                    ).length,
+                                  })
+                                }}
+                              >
+                                <Trash2 size={14} style={{ color: 'var(--danger)' }} />
+                                <span style={{ color: 'var(--danger)' }}>删除工作区</span>
+                              </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                      ) : null}
                       <button
                         type="button"
                         className="icon-btn"
@@ -380,34 +421,6 @@ export function Sidebar() {
                       >
                         <Plus size={13} />
                       </button>
-                      {group.key ? (
-                        <>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            aria-label={`重命名工作区 ${group.name}`}
-                            onClick={() => startRenameWorkspace(group.key, group.name)}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            aria-label={`删除工作区 ${group.name}`}
-                            onClick={() => {
-                              setDeletingWorkspace({
-                                path: group.key,
-                                name: group.name,
-                                count: sessions.filter(
-                                  (session) => (session.workspacePath ?? '') === group.key,
-                                ).length,
-                              })
-                            }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </>
-                      ) : null}
                     </div>
                   </div>
                   <div
