@@ -513,8 +513,9 @@
   transition: opacity 0.15s ease;
 }
 
+/* 鼠标点击标题不应因获得焦点而常显操作区，只有键盘聚焦时才展开 */
 .workspace-title:hover .workspace-actions,
-.workspace-title:focus-within .workspace-actions,
+.workspace-title:has(:focus-visible) .workspace-actions,
 .workspace-title:has([data-state='open']) .workspace-actions {
   opacity: 1;
   pointer-events: auto;
@@ -589,8 +590,10 @@
   flex: none;
 }
 
+/* 鼠标点击会话不应因获得焦点而常显操作按钮，只有键盘聚焦或菜单展开时才显示 */
 .session-item:hover .session-more,
-.session-item:focus-within .session-more {
+.session-item:has(:focus-visible) .session-more,
+.session-item:has([data-state='open']) .session-more {
   opacity: 1;
 }
 

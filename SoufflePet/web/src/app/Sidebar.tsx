@@ -69,6 +69,8 @@ export function Sidebar() {
     count: number
   } | null>(null)
   const searchButton = useRef<HTMLButtonElement | null>(null)
+  // 记录工作区菜单是否由指针打开：关闭时据此决定是否把焦点还给触发按钮
+  const menuByPointer = useRef(false)
 
   const toggleCollapsed = (key: string) =>
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -380,12 +382,26 @@ export function Sidebar() {
                               type="button"
                               className="icon-btn"
                               aria-label={`${group.name} 工作区操作`}
+                              onPointerDown={() => {
+                                menuByPointer.current = true
+                              }}
+                              onKeyDown={() => {
+                                menuByPointer.current = false
+                              }}
                             >
                               <Ellipsis size={13} />
                             </button>
                           </DropdownMenu.Trigger>
                           <DropdownMenu.Portal>
-                            <DropdownMenu.Content className="popover menu-list" sideOffset={4} align="end">
+                            <DropdownMenu.Content
+                              className="popover menu-list"
+                              sideOffset={4}
+                              align="end"
+                              onCloseAutoFocus={(event) => {
+                                // 鼠标关闭时不要让焦点退回触发按钮，否则操作区会一直处于展开态
+                                if (menuByPointer.current) event.preventDefault()
+                              }}
+                            >
                               <DropdownMenu.Item
                                 className="menu-item"
                                 onSelect={() => startRenameWorkspace(group.key, group.name)}

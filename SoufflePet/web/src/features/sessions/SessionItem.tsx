@@ -3,6 +3,7 @@
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { useRef } from 'react'
 import type { SessionSummaryDto } from '@/bridge/contracts'
 import { formatRelative } from '@/ui/format'
 
@@ -15,6 +16,9 @@ interface SessionItemProps {
 }
 
 export function SessionItem({ session, active, onOpen, onRename, onDelete }: SessionItemProps) {
+  // 记录菜单是否由指针打开：关闭时据此决定是否把焦点还给触发按钮
+  const menuByPointer = useRef(false)
+
   return (
     <div
       className="session-item"
@@ -39,12 +43,26 @@ export function SessionItem({ session, active, onOpen, onRename, onDelete }: Ses
             className="icon-btn session-more"
             aria-label="会话操作"
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={() => {
+              menuByPointer.current = true
+            }}
+            onKeyDown={() => {
+              menuByPointer.current = false
+            }}
           >
             <MoreHorizontal size={14} />
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
-          <DropdownMenu.Content className="popover menu-list" sideOffset={4} align="end">
+          <DropdownMenu.Content
+            className="popover menu-list"
+            sideOffset={4}
+            align="end"
+            onCloseAutoFocus={(event) => {
+              // 鼠标关闭时不要让焦点退回触发按钮，否则操作按钮会一直处于显示态
+              if (menuByPointer.current) event.preventDefault()
+            }}
+          >
             <DropdownMenu.Item
               className="menu-item"
               onSelect={() => onRename(session)}
