@@ -107,7 +107,6 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
           <MessageList key={chat.sessionId} messages={chat.messages} generating={chat.generating} />
           <Composer chat={chat} />
           <div className="composer-foot">
-            <span>Enter 发送 · Shift+Enter 换行 · Backspace 删附件</span>
             <GlobalUsageButton usage={usage} />
           </div>
         </>
