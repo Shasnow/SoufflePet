@@ -9,11 +9,12 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 using SoufflePet.Services;
 using SoufflePet.Services.Plugins;
+using SoufflePet.Services.Web;
 using SoufflePet.Utils;
-using SoufflePet.ViewModels;
 using SoufflePet.Views;
 
 namespace SoufflePet;
@@ -40,15 +41,19 @@ public class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // 默认：Live2DCSharpSDK OpenGL 原生渲染；--webview：切 WebView 方案（对比用）
-            var useWebView = desktop.Args?.Contains("--webview") == true;
-            Logger.Information("Lifetime initialized native={Native}", !useWebView);
+            // 桌宠只有 Live2DCSharpSDK OpenGL 原生渲染；对话/设置统一走 React SPA 主窗口
+            var args = desktop.Args ?? [];
+            var loadedSettings = SouffleSettings.Load();
+            var webDev = args.Contains("--web-dev");
+            Logger.Information("Lifetime initialized webDev={WebDev}", webDev);
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();
             // 插件通过 Microsoft.Extensions.Logging 写日志，由 Serilog 统一落到应用日志
             services.AddLogging(builder => builder.AddSerilog(Log.Logger, dispose: false));
-            services.AddSingleton(SouffleSettings.Load());
+            services.AddSingleton(loadedSettings);
+            services.AddSingleton(new UiMode(webDev));
+            services.AddSingleton<ThemeService>();
             // 联网搜索的 HTTP 客户端：由 IHttpClientFactory 统一管理生命周期与连接池
             services.AddHttpClient(ChatTools.WebSearchClientName,
                 client => client.Timeout = TimeSpan.FromSeconds(20));
@@ -60,43 +65,22 @@ public class App : Application
             services.AddSingleton<IGamepadService, GamepadService>();
             services.AddSingleton<IPowerNotificationService, PowerNotificationService>();
             services.AddSingleton<PetExpressionService>();
-            services.AddSingleton<ChatToolAccess>();
-            services.AddSingleton<UserQuestionService>();
-            services.AddSingleton<ChatFileService>();
-            services.AddSingleton<ChatMemory>();
-            services.AddSingleton<IStatisticsService, StatisticsService>(); // 运行统计（陪伴时长、token 用量），退出时落盘
+            services.AddSingleton<IPetController>(sp => sp.GetRequiredService<PetExpressionService>());
+            services.AddSingleton<IUiDispatcher, AvaloniaUiDispatcher>();
+            services.AddSingleton<IScreenCapture, ScreenCaptureService>();
             services.AddSingleton<IBrowserService, BrowserService>(); // 内置浏览器：网页视图懒创建，窗口关闭只隐藏
-            services.AddSingleton<IMcpConfigStore, McpConfigStore>(); // MCP 连接配置：家目录 .souffle/mcp.json
-            services.AddSingleton<IMcpToolService, McpToolService>();
-            services.AddSingleton(McpToolCache.Load()); // 工具信息缓存：重启后直接展示上次获取的工具
-            services.AddSingleton<ISkillService, SkillService>();
-            services.AddSingleton<PlatformService>();
-            services.AddSingleton<IPluginService, PluginService>();
-            services.AddSingleton<ChatTools>();
-            services.AddSingleton<ILlmChatService, LlmChatService>();
-            services.AddSingleton<ILlmModelCatalog, LlmModelCatalog>(); // 对话模型管理：按提供商获取模型列表
-            services.AddSingleton<IScheduledTaskService, ScheduledTaskService>(); // 定时任务调度：随设置持久化，启动时恢复
-            services.AddSingleton<ChatViewModel>(); // 单例：隐藏后再呼出仍保留对话历史
-            services.AddSingleton<IChatWindowService, ChatWindowService>();
-            services.AddSingleton<McpSettingsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的服务器上
-            services.AddSingleton<IMcpSettingsWindowService, McpSettingsWindowService>();
-            services.AddSingleton<SkillsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的技能上
-            services.AddSingleton<ISkillsWindowService, SkillsWindowService>();
-            services.AddSingleton<ILive2DModelService, Live2DModelService>(); // 模型导入/移除/校验
-            services.AddSingleton<Live2DModelsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的模型上
-            services.AddSingleton<ILive2DModelsWindowService, Live2DModelsWindowService>();
-            services.AddSingleton<LlmModelsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的提供商上
-            services.AddSingleton<ILlmModelsWindowService, LlmModelsWindowService>();
-            services.AddSingleton<PluginsViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的插件上
-            services.AddSingleton<IPluginsWindowService, PluginsWindowService>();
-            services.AddSingleton<ScheduledTasksViewModel>(); // 单例：窗口隐藏后再次打开仍停在原来的任务上
-            services.AddSingleton<IScheduledTasksWindowService, ScheduledTasksWindowService>();
-            services.AddTransient<WebViewPetWindow>();
-            services.AddTransient<NativePetWindow>();
-            // 按启动参数二选一，确保窗口与 petOps 是同一实例
-            services.AddSingleton<IPetWindow>(sp => useWebView
-                ? sp.GetRequiredService<WebViewPetWindow>()
-                : sp.GetRequiredService<NativePetWindow>());
+
+            // 无 Avalonia 的 Core：模型、会话记忆、LLM/工具/MCP/技能/插件/调度、Live2D 文件操作
+            services.AddSouffleCore();
+
+            // M4 会话层：会话索引/状态机/事件路由（全部无 Avalonia，宿主只做 DTO 投影）
+            services.AddSingleton<ChatSessionFactory>();
+            services.AddSingleton<ChatSessionManager>();
+            services.AddSingleton<ChatTriggerRouter>();
+
+            services.AddSingleton<IAppWindowService, AppWindowService>();
+            services.AddSingleton<NativePetWindow>();
+            services.AddSingleton<IPetWindow>(sp => sp.GetRequiredService<NativePetWindow>());
             services.AddSingleton<ITrayService, TrayService>();
             _provider = services.BuildServiceProvider(new ServiceProviderOptions
             {
@@ -255,11 +239,19 @@ public class App : Application
             ApplyAutoExpression(); // 自动表情检测：启动时按设置决定是否启动
 
             // 对话窗口热键（Ctrl+Alt+Space）：同样复用桌宠窗口句柄，须在 Show() 之后注册
-            _provider.GetRequiredService<IChatWindowService>().Start(window);
+            _provider.GetRequiredService<IAppWindowService>().Start(window);
 
             _provider.GetRequiredService<ITrayService>().Show(this, desktop);
 
+            // 开发验收：--open-ui 启动即呼出 SPA 主窗口（正式启动默认隐藏）
+            if (args.Contains("--open-ui"))
+            {
+                Logger.Information("opening ui at startup (--open-ui)");
+                _provider.GetRequiredService<IAppWindowService>().Toggle(window);
+            }
+
             // 定时任务调度：对话层已就绪并订阅了 Triggered，此时启动可避免漏掉启动瞬间到点的任务
+            _provider.GetRequiredService<ChatTriggerRouter>();
             _provider.GetRequiredService<IScheduledTaskService>().Start();
 
             // 退出时统一 Dispose 容器（收集 AutoExpressionService/LocalFileServer/TrayService 等 IDisposable）

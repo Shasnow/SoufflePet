@@ -12,19 +12,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using SoufflePet.Services;
 
 namespace SoufflePet.Utils;
-
-/// <summary>
-/// 一次显示器截图的结果：<see cref="Image" /> 是压缩后回传给模型的数据（<see cref="MediaType" /> 标明格式），
-/// <see cref="FilePath" /> 指向落盘的完整 PNG，<see cref="Width" />/<see cref="Height" /> 是原始分辨率，
-/// <see cref="ScreenLeft" />/<see cref="ScreenTop" /> 是画面左上角在屏幕上的物理像素坐标（供鼠标工具定位）。
-/// </summary>
-public sealed record MonitorScreenshot(
-    byte[] Image, string MediaType, string FilePath, int Width, int Height, int ScreenLeft, int ScreenTop);
-
-/// <summary>一个可截图的顶层窗口：<see cref="Handle" /> 为窗口句柄，<see cref="ProcessName" /> 便于模型区分同名窗口。</summary>
-public sealed record WindowTarget(IntPtr Handle, string Title, string ProcessName, bool IsMinimized);
 
 /// <summary>
 /// 当前显示器截图：按光标所在屏幕确定目标显示器，用 GDI+ 拷贝屏幕像素并编码为 PNG，

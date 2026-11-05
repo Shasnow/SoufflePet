@@ -28,7 +28,7 @@ public interface ITrayService
 /// </summary>
 public sealed class TrayService(
     IPetWindow petOps,
-    IChatWindowService chat,
+    IAppWindowService appWindow,
     SouffleSettings settings)
     : ITrayService, IDisposable
 {
@@ -48,9 +48,9 @@ public sealed class TrayService(
         var resetItem = new NativeMenuItem("重置模型");
         resetItem.Click += (_, _) => petOps.ResetModel();
 
-        // 对话窗口：与 Ctrl+Alt+Space / 左键单击桌宠相同的切换逻辑，打开时停靠在桌宠窗口旁边
-        var chatItem = new NativeMenuItem("对话窗口");
-        chatItem.Click += (_, _) => OpenChatWindow(desktop);
+        // 主窗口：与 Ctrl+Alt+Space / 左键单击桌宠相同的切换逻辑，打开时停靠在桌宠窗口旁边
+        var appItem = new NativeMenuItem("主窗口");
+        appItem.Click += (_, _) => OpenAppWindow(desktop);
 
         // 自动表情联动：检测到游戏/音乐应用自动切换表情（进程白名单见 SoufflePet.json）
         var autoExprItem = NewToggle("自动表情", settings.AutoExpressionEnabled,
@@ -93,7 +93,7 @@ public sealed class TrayService(
 
         menu.Items.Add(toggleItem);
         menu.Items.Add(resetItem);
-        menu.Items.Add(chatItem);
+        menu.Items.Add(appItem);
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(autoExprItem);
         menu.Items.Add(lipSyncItem);
@@ -119,18 +119,18 @@ public sealed class TrayService(
     }
 
     /// <summary>
-    /// 呼出对话窗口：以桌宠窗口为停靠锚点（即 Ctrl+Alt+Space 的锚点）。
+    /// 呼出 React 主窗口：以桌宠窗口为停靠锚点（即 Ctrl+Alt+Space 的锚点）。
     /// 桌宠窗口可能处于隐藏状态，此时位置仍可读，锚点照常可用。
     /// </summary>
-    private void OpenChatWindow(IClassicDesktopStyleApplicationLifetime desktop)
+    private void OpenAppWindow(IClassicDesktopStyleApplicationLifetime desktop)
     {
         if (desktop.MainWindow is not { } anchor)
         {
-            Logger.Warning("tray chat item ignored: pet window not available");
+            Logger.Warning("tray app window item ignored: pet window not available");
             return;
         }
 
-        chat.Toggle(anchor);
+        appWindow.Toggle(anchor);
     }
 
     /// <summary>构造勾选菜单项：初值取自 settings，点击只把新值写回 settings（副作用统一走订阅）。</summary>

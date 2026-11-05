@@ -1,0 +1,133 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Shasnow */
+
+/*
+ * 唯一色值来源。
+ *
+ * 规则：
+ * - 除本文件外，源码里禁止 #hex / rgb( / hsl( / oklch( 字面量（scripts/check-colors.mjs 检查）。
+ * - 只存一个强调色的 L/C/H，其余强调色、表面色、描边、文字色全部派生。
+ * - 使用 OKLCH 相对颜色语法；Chromium 156（WebView2）原生支持。
+ * - Avalonia 的 #AARRGGBB 与 CSS 的 #RRGGBBAA 字节序不同，禁止照抄。
+ * - 语义色固定 hue，不参与强调色派生。
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* 强调色（动态；theme-boot.js / theme/apply.ts 会覆盖三个分量） */
+  --accent-h: 35;
+  --accent-l: 0.72;
+  --accent-c: 0.17;
+  --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+  --accent-hover: oklch(from var(--accent) calc(l + 0.06) c h);
+  --accent-pressed: oklch(from var(--accent) calc(l - 0.06) c h);
+  --accent-soft: oklch(from var(--accent) 0.32 0.08 h / 0.35);
+  --accent-line: oklch(from var(--accent) 0.6 0.12 h / 0.45);
+  --accent-glow: oklch(from var(--accent) 0.5 0.12 h / 0.22);
+  --on-accent-dark: oklch(0.16 0.01 var(--accent-h));
+  --on-accent-light: oklch(0.98 0.005 var(--accent-h));
+  --on-accent: var(--on-accent-dark);
+
+  /* 表面（暗色玻璃） */
+  --surface-0: oklch(0.18 0.006 var(--accent-h));
+  --surface-1: oklch(0.22 0.008 var(--accent-h));
+  --surface-2: oklch(0.27 0.01 var(--accent-h));
+  --surface-3: oklch(0.32 0.012 var(--accent-h));
+  --surface-hover: oklch(from var(--surface-2) calc(l + 0.03) c h);
+  --surface-active: oklch(from var(--surface-2) calc(l + 0.05) c h);
+
+  /* 文字 */
+  --text-1: oklch(0.94 0.005 var(--accent-h));
+  --text-2: oklch(0.74 0.008 var(--accent-h));
+  --text-3: oklch(0.58 0.008 var(--accent-h));
+  --text-disabled: oklch(0.44 0.006 var(--accent-h));
+
+  /* 描边与阴影 */
+  --line: oklch(0.32 0.01 var(--accent-h) / 0.6);
+  --line-strong: oklch(0.4 0.012 var(--accent-h) / 0.8);
+  --scrim: oklch(0.1 0.005 var(--accent-h) / 0.66);
+  --shadow-1: 0 1px 2px oklch(0.08 0.005 var(--accent-h) / 0.35);
+  --shadow-2: 0 12px 40px oklch(0.08 0.005 var(--accent-h) / 0.45);
+  --shadow-3: 0 24px 70px oklch(0.06 0.004 var(--accent-h) / 0.55);
+
+  /* 语义色 */
+  --danger: oklch(0.62 0.19 25);
+  --danger-hover: oklch(from var(--danger) calc(l + 0.06) c h);
+  --danger-soft: oklch(0.62 0.19 25 / 0.16);
+  --success: oklch(0.7 0.15 150);
+  --success-soft: oklch(0.7 0.15 150 / 0.16);
+  --warning: oklch(0.78 0.15 85);
+  --warning-soft: oklch(0.78 0.15 85 / 0.16);
+
+  /* 尺寸与字体 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --font-sans: "Inter Variable", "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --topbar-h: 46px;
+  --sidebar-w: 280px;
+  --sidebar-w-compact: 240px;
+  --content-max: 840px;
+  --composer-max: 760px;
+  --glass-blur: 20px;
+
+  /* Shiki 代码高亮（css-variables 主题）；值必须是可被设置成 CSS 变量的颜色 */
+  --shiki-foreground: var(--text-1);
+  --shiki-background: transparent;
+  --shiki-token-constant: oklch(0.78 0.12 250);
+  --shiki-token-string: oklch(0.76 0.13 145);
+  --shiki-token-comment: var(--text-3);
+  --shiki-token-keyword: oklch(0.74 0.15 315);
+  --shiki-token-parameter: oklch(0.8 0.11 60);
+  --shiki-token-function: oklch(0.78 0.12 250);
+  --shiki-token-string-expression: oklch(0.76 0.13 145);
+  --shiki-token-punctuation: var(--text-2);
+  --shiki-token-link: var(--accent);
+}
+
+:root[data-mode='light'] {
+  color-scheme: light;
+
+  --surface-0: oklch(0.96 0.004 var(--accent-h));
+  --surface-1: oklch(0.99 0.002 var(--accent-h));
+  --surface-2: oklch(0.94 0.006 var(--accent-h));
+  --surface-3: oklch(0.9 0.008 var(--accent-h));
+  --surface-hover: oklch(from var(--surface-2) calc(l - 0.03) c h);
+  --surface-active: oklch(from var(--surface-2) calc(l - 0.05) c h);
+
+  --text-1: oklch(0.2 0.008 var(--accent-h));
+  --text-2: oklch(0.38 0.01 var(--accent-h));
+  --text-3: oklch(0.52 0.01 var(--accent-h));
+  --text-disabled: oklch(0.66 0.008 var(--accent-h));
+
+  --line: oklch(0.8 0.008 var(--accent-h) / 0.7);
+  --line-strong: oklch(0.72 0.01 var(--accent-h) / 0.85);
+  --scrim: oklch(0.3 0.005 var(--accent-h) / 0.4);
+  --shadow-1: 0 1px 2px oklch(0.4 0.005 var(--accent-h) / 0.18);
+  --shadow-2: 0 12px 40px oklch(0.4 0.005 var(--accent-h) / 0.22);
+  --shadow-3: 0 24px 70px oklch(0.4 0.005 var(--accent-h) / 0.28);
+
+  --accent-soft: oklch(from var(--accent) 0.82 0.08 h / 0.55);
+  --accent-glow: oklch(from var(--accent) 0.7 0.12 h / 0.18);
+  --on-accent: oklch(0.98 0.005 var(--accent-h));
+}
+
+/* 无障碍偏好 */
+@media (prefers-contrast: more) {
+  :root {
+    --text-2: var(--text-1);
+    --text-3: oklch(from var(--text-1) calc(l - 0.12) c h);
+    --line: var(--line-strong);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-blur: 0px;
+    --scrim: var(--surface-0);
+  }
+}

@@ -13,46 +13,44 @@
 
 - **透明置顶窗口**：无边框、透明背景、置顶显示，默认停靠屏幕右下角
 - **视线全局跟随**：宿主用 `GetCursorPos` 轮询全局光标（而非窗口内指针事件），鼠标移出窗口甚至在其他显示器上，模型视线仍持续追踪
-- **交互**（两种模式通用）：
+- **交互**：
   - 左键拖动 → 移动窗口
   - 中键拖动 → 移动模型
-  - 左键单击 → 呼出 / 收起对话窗口
+  - 左键单击 → 呼出 / 收起主窗口
   - 右键 → 交互菜单：「戳一戳」「摸摸头」，先播放反应动作再发起一轮对话唤醒桌宠；「切换模型」换当前模型；「切换表情」「切换动作」手动切换表情（可多选同时激活，按激活顺序叠加参数，切换时淡入淡出）/ 播放指定动作（列表来自模型已登记的表情与动作组；「清除动作」把非循环动作留下的姿势/参数恢复默认）
   - 滚轮 → 缩放模型
-- **托盘图标**：显示 / 隐藏、重置模型、对话窗口、退出；关闭窗口默认隐藏到托盘
+- **托盘图标**：显示 / 隐藏、重置模型、主窗口、退出；关闭窗口默认隐藏到托盘
 - **自动表情**：根据当前系统状态，自动切换游戏/音乐表情
 - **口型同步**：在音乐模式（自动检测或手动开启）下，根据当前播放的音乐，自动同步模型的口型
-- **Agent**：`Ctrl+Alt+Space`、左键单击桌宠或托盘菜单「对话窗口」呼出对话窗口，支持 OpenAI 兼容接口、流式回复、思考过程展示、工具调用、MCP 集成、技能、长期记忆与插件（详见下节）
-- **运行统计**：陪伴时长（累计程序运行秒数，跨重启累计）与 token 累计用量，常驻对话窗口底部信息栏并实时增长，桌宠也可用 `get_statistics` 工具查询
+- **Agent**：`Ctrl+Alt+Space`、左键单击桌宠或托盘菜单「主窗口」呼出 React 主窗口，支持 OpenAI 兼容接口、流式回复、思考过程展示、工具调用、MCP 集成、技能、长期记忆与插件（详见下节）
+- **运行统计**：陪伴时长（累计程序运行秒数，跨重启累计）与 token 累计用量，常驻主窗口侧栏底部并实时增长，桌宠也可用 `get_statistics` 工具查询
 - **插件系统**：独立程序集 + `plugin.json` 清单，可扩展工具、处理模型正文、接入新的消息平台；支持界面启停、配置表单与 zip 导入
 
 ## Agent
 
-`Ctrl+Alt+Space`、左键单击桌宠或托盘菜单「对话窗口」呼出对话窗口（再次触发收起）。窗口为单例，隐藏后内容保留；停止按钮可中断当前一轮生成。
+`Ctrl+Alt+Space`、左键单击桌宠或托盘菜单「主窗口」呼出 React 主窗口（再次触发收起）。窗口为单例，关闭只隐藏，隐藏后内容保留；输入区的停止按钮可中断当前一轮生成。对话、设置与会话管理都在同一个单页应用里，不再单独开设置窗口。
 
 ### 消息气泡
 
-助手气泡的正文按 Markdown 渲染（[MarkdownTextBlock.cs](SoufflePet/Controls/MarkdownTextBlock.cs) + [MarkdownParser.cs](SoufflePet/Utils/MarkdownParser.cs)）：段落、标题、有序 / 无序 / 任务列表、引用、围栏代码块（带语言标注、等宽字体、长行折行）、表格、分割线，以及粗体 / 斜体 / 删除线 / 行内代码 / 链接（点击用默认浏览器打开）。用户发言、平台提醒与工具审批气泡按纯文本原样展示，`*`、`#`、`@路径` 这类字符不会被当成语法改写。
+助手气泡的正文由 React 前端渲染 Markdown（GFM + 表格横滚 + KaTeX 公式 + Shiki 代码高亮）：段落、标题、有序 / 无序 / 任务列表、引用、围栏代码块、表格、分割线，以及粗体 / 斜体 / 删除线 / 行内代码 / 链接（点击用默认浏览器打开）。用户发言、平台提醒与工具审批气泡按纯文本原样展示，`*`、`#`、`@路径` 这类字符不会被当成语法改写。
 
-每块都是可选中复制的文本；任务列表用原生 `CheckBox` 展示勾选状态（只做展示，状态取自消息原文，点击不会改写消息）。流式输出时只更新变化块的文字并复用已有控件，不重建整棵可视化树。思考过程与工具调用的折叠面板仍是纯文本展示。
-
-消息区用虚拟化面板（`VirtualizingStackPanel`），只实例化视口附近的气泡，长会话不再随消息数量线性吃内存；ViewModel 侧另保留最近 300 条（`ChatViewModel.MaxVisibleMessages`），更早的气泡会连同图片预览一起释放，请求历史由 `TrimHistory` 按轮单独维护、不受影响。用量胶囊与浮窗、思考 / 工具面板都按需实例化，不展开就不占控件树。
+消息区使用虚拟列表，只实例化视口附近的气泡，长会话不会随消息数量线性吃内存；会话状态机保留最近 300 条可见消息（更早的从界面裁剪，请求历史由上下文窗口单独维护）。思考、工具调用、审批、附件与用量都是独立气泡，按需展开。
 
 ### 对话模型
 
-走 OpenAI 兼容接口，**以提供商为单位配置**：对话窗口模型菜单底部的「管理模型」（或「更多操作 → 对话模型…」）打开独立的对话模型管理面板，与 Live2D 模型管理分开。
+走 OpenAI 兼容接口，**以提供商为单位配置**：主窗口左侧「更多 → 对话模型」打开设置页里的对话模型面板，与 Live2D 模型管理分开。
 
 - 左侧是提供商列表，每个提供商填一次名称、接口地址与 API 密钥（同一提供商下的模型共用）；「移除」会先弹二次确认，确认后连同模型清单与密钥一起从配置里删除。
 - 名称 / 接口地址 / 密钥与模型勾选都是**待保存的编辑副本**：点「保存配置」才写回配置（保存前会校验名称非空且不重名、地址为合法 http/https），「还原」丢弃未保存的改动；切换提供商会一并放弃这些改动。
-- 「获取模型列表」按接口请求 `GET {base}/models`（与对话请求同一套地址/密钥规范化规则），把返回的模型标识合并进清单；接口没实现 `/models` 时也可以在输入框里手动添加模型标识。切换提供商、还原、移除或关闭面板都会取消在途请求，不会让按钮一直卡在「获取中」。
-- 勾选要用的模型后点「保存配置」，勾选的模型才进入对话窗口的模型选择列表（未勾选的不显示，也不会被请求）。
-- 对话窗口的模型选择列表**按提供商分组**，点条目切换当前模型；提供商改名时，当前选中模型的键会同步改写，选中状态不会丢。
+- 「获取模型列表」按接口请求 `GET {base}/models`（与对话请求同一套地址/密钥规范化规则），把返回的模型标识合并进清单；接口没实现 `/models` 时也可以在输入框里手动添加模型标识。切换提供商、还原、移除或离开设置页都会取消在途请求，不会让按钮一直卡在「获取中」。
+- 勾选要用的模型后点「保存配置」，勾选的模型才进入对话输入区的模型选择列表（未勾选的不显示，也不会被请求）。
+- 输入区的模型选择列表**按提供商分组**，点条目切换当前模型；提供商改名时，当前选中模型的键会同步改写，选中状态不会丢。
 
 配置写在 `SoufflePet.json`，唯一事实源是 `ChatProviders`：
 
 | 字段 | 说明 |
 | --- | --- |
-| `Name` | 提供商名称，也是对话窗口模型列表的分组标题 |
+| `Name` | 提供商名称，也是输入区模型列表的分组标题 |
 | `BaseUrl` | 兼容接口地址，例如 `https://api.example.com/v1` |
 | `ApiKey` | API 密钥，可留空（本地 / 无鉴权的接口） |
 | `Models` | 该提供商下的模型清单，每项 `ModelId`（请求中的 `model` 字段）、`Name`（显示名，留空用 `ModelId`）、`IsActive`（是否加入模型选择列表） |
@@ -76,7 +74,7 @@
 
 每轮最多 `MaxToolRounds` 次工具调用（默认 10）。命令执行受 `ToolApproval` 控制：`Manual` 每次在消息区弹出审批气泡等用户点「允许」，`FullAccess` 直接执行。工具调用与思考过程在消息里以折叠面板展示，展开可看参数与结果。
 
-当前时间不由工具提供，而是随消息下发：`TimeAwarenessEnabled` 打开时（默认），每轮把当前本地时间（含星期、UTC 偏移与时区）附加到本轮用户消息末尾，模型无需调用工具即可感知时间；关闭后模型看不到任何时间信息。附加的时间（以及相关回忆）会作为该条消息的请求文本保存在 `conversations.jsonl` 里，但不进入界面历史、也不参与长期记忆检索——这样做是为了让重启后重建的请求与上一轮逐字节一致，继续命中前缀缓存。
+当前时间不由工具提供，而是随消息下发：`TimeAwarenessEnabled` 打开时（默认），每轮把当前本地时间（含星期、UTC 偏移与时区）附加到本轮用户消息末尾，模型无需调用工具即可感知时间；关闭后模型看不到任何时间信息。附加的时间（以及相关回忆）会作为该条消息的请求文本保存在当前会话的 `conversation.jsonl` 里，但不进入界面历史、也不参与长期记忆检索——这样做是为了让重启后重建的请求与上一轮逐字节一致，继续命中前缀缓存。
 
 ### 上下文窗口
 
@@ -93,7 +91,7 @@
 
 ### MCP 服务器
 
-对话窗口「更多操作 → MCP 服务器…」里配置，配置单独保存在用户家目录的 `~/.souffle/mcp.json`（不写进 `SoufflePet.json`）。文件用通行的 MCP 配置格式，可直接照抄 VS Code / Claude 等客户端的配置：
+主窗口左侧「更多 → MCP 服务器」里配置，配置单独保存在用户家目录的 `~/.souffle/mcp.json`（不写进 `SoufflePet.json`）。文件用通行的 MCP 配置格式，可直接照抄 VS Code / Claude 等客户端的配置：
 
 ```json
 {
@@ -115,7 +113,7 @@
 
 ### 插件
 
-插件是独立程序集，通过 `plugin.json` 声明，无需修改主程序即可为模型增加工具、对回复做流式后处理，或接入新的消息平台（如 QQ）。对话窗口「更多操作 → 插件…」里可以查看、启用 / 禁用、编辑配置、重新扫描与导入 zip 包。
+插件是独立程序集，通过 `plugin.json` 声明，无需修改主程序即可为模型增加工具、对回复做流式后处理，或接入新的消息平台（如 QQ）。主窗口左侧「插件」设置页可以查看、启用 / 禁用、编辑配置、重新扫描与导入 zip 包。
 
 插件从应用目录的 `plugins/` 与用户家目录的 `.souffle/plugins` 读取；导入的插件装在后者的 `<id>` 子目录下，成功后自动启用。启用状态记录在 `SoufflePet.json` 的 `DisabledPlugins`。
 
@@ -136,7 +134,7 @@
 
 技能是模型按需读取的说明文档，放在 `.agents/skills/<技能名>/SKILL.md` 或 `.agents/skills/<技能名>.md`。扫描目录：
 
-- 当前工作区（对话窗口底部可切换）下的 `.agents/skills`、`.souffle/skills`
+- 当前工作区（主窗口输入区上方可切换）下的 `.agents/skills`、`.souffle/skills`
 - 用户家目录下的 `.agents/skills`、`.souffle/skills`
 
 已启用的技能会以清单形式注入系统提示词，模型需要时用 `read_skill` 取正文；`DisabledSkills` 记录被停用的技能。设置界面支持从 zip 压缩包安装技能，安装位置固定为用户家目录下的 `.souffle/skills`，不随工作区变化；「卸载」会删除选中技能所在的目录（直接放在技能根目录下的单个 `.md` 则只删该文件），仅限上述扫描目录内的技能，操作前有二次确认。
@@ -145,11 +143,12 @@
 
 `ChatMemoryEnabled` 打开时对话落盘到 `%AppData%\SoufflePet`：
 
-- `conversations.jsonl`：每轮问答与工具调用记录（启动时据此重建请求上下文）
-- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等）
-- `window.json`：上次请求实际使用的历史窗口轮数（重启后按同一窗口恢复，第一次请求才能继续命中服务端前缀缓存）
+- `sessions.json`：会话索引（标题、更新时间、工作区、当前会话），侧栏历史列表据此恢复
+- `sessions/<id>/conversation.jsonl`：该会话每轮问答与工具调用记录（启动时据此重建请求上下文）
+- `sessions/<id>/window.json`：该会话上次请求实际使用的历史窗口轮数（重启后按同一窗口恢复，第一次请求才能继续命中服务端前缀缓存）
+- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等），所有会话共享
 
-检索用中文 2-gram + BM25，不依赖分词库或向量服务。
+旧版单文件 `conversations.jsonl` 会在首次启动时迁移为默认会话，并保留只读 `.bak`；删除的会话移到 `sessions/.deleted`。检索用中文 2-gram + BM25，不依赖分词库或向量服务。
 
 ### 统计信息
 
@@ -158,55 +157,85 @@
 - **陪伴时长**：有史以来程序运行的总时长（关闭即停、下次启动接着累加），每 60 秒与退出时落盘
 - **token 用量**：有史以来累计输入 / 输出 token 与缓存命中率，每轮结束即时落盘
 
-二者常驻对话窗口底部信息栏并实时增长，模型可通过 `get_statistics` 工具查询全部或单项；新增统计项时在 `IStatisticsService` 与实现里各补一处即可。
+二者常驻主窗口侧栏底部并实时增长，模型可通过 `get_statistics` 工具查询全部或单项；新增统计项时在 `IStatisticsService` 与实现里各补一处即可。
 
-助手气泡底部会显示本轮用量胶囊（`用量 114.1K tok` + 时间），点击弹出本轮明细：提供方 / 模型、缓存命中率（1 位小数）、未缓存输入、缓存读取、缓存写入与输出。这份用量与模型标识随最后一条助手消息写进 `conversations.jsonl`，重启恢复历史后胶囊和浮窗仍能看到。底部信息栏的累计用量文案点击后展示累计明细（缓存命中率、缓存读取、未缓存输入、输入合计、输出）。
+助手气泡底部会显示本轮用量胶囊（`用量 114.1K tok` + 时间），点击弹出本轮明细：提供方 / 模型、缓存命中率（1 位小数）、未缓存输入、缓存读取、缓存写入与输出。这份用量与模型标识随最后一条助手消息写进会话的 `conversation.jsonl`，重启恢复历史后胶囊和浮窗仍能看到。侧栏底部的累计用量文案点击后展示累计明细（缓存命中率、缓存读取、未缓存输入、输入合计、输出）。
 
-## 两种运行模式
+## 运行方式
 
-| 模式 | 启动参数 | 渲染方式 |
-| --- | --- | --- |
-| 原生版（默认） | （无参数） | Live2DCSharpSDK + OpenGL ES2 |
-| WebView 版 | `--webview` | WebView2 + WebGL（Live2D JS SDK） |
+桌宠窗口固定使用 Live2DCSharpSDK + OpenGL ES2 原生渲染；对话、会话管理与七个设置页统一由一个 React 单页应用承载（WebView2 窗口，关闭只隐藏）。旧 Avalonia 对话/设置窗口与 WebView 版桌宠已在 M7 删除，不再提供 `--webview` / `--legacy-ui` 回退。
 
 ## 环境要求
 
 - Windows 10+，.NET 10 SDK
-- WebView 版需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-- 原生版需要支持 OpenGL ES2 的显卡驱动
+- React UI 需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+- 桌宠需要支持 OpenGL ES2 的显卡驱动
+- **构建 React UI 需要 Node.js 22.12+ 与 pnpm 10+**（首次构建前执行 `pnpm --dir SoufflePet/web install`）
 
 ## 构建与运行
 
 ```powershell
-# 构建整个解决方案
+# 安装前端依赖（首次）
+pnpm --dir SoufflePet/web install
+
+# 构建整个解决方案（会调用 pnpm build 生成 wwwroot/app）
 dotnet build SoufflePet.sln
 
-# 原生版（默认）
-dotnet run --project SoufflePet
+# 只验证 .NET、跳过前端构建（需已有 wwwroot/app 产物）
+dotnet build SoufflePet.sln -p:SkipWebBuild=true
 
-# WebView 版
-dotnet run --project SoufflePet -- --webview
+# 后端单测（会话记忆 / 调度 / token 格式）
+dotnet test SoufflePet.Core.Tests\SoufflePet.Core.Tests.csproj
+
+# 运行（桌宠窗口默认隐藏，Ctrl+Alt+Space / 托盘 / 左键单击桌宠呼出主窗口）
+dotnet run --project SoufflePet
 ```
+
+前端独立开发/验收：
+
+```powershell
+pnpm --dir SoufflePet/web dev          # http://127.0.0.1:5173/app/
+pnpm --dir SoufflePet/web test         # Vitest
+pnpm --dir SoufflePet/web screenshots  # 五档宽度截图 → .verifybuild/ui
+```
+
+> React 单页应用与宿主桥（`AppWebWindow` / JSON-RPC）按 [docs/react-ui-contract.md](docs/react-ui-contract.md) 实现并已冻结 v1 契约。
+
+启动开关：
+
+```powershell
+# 启动即呼出主窗口（验收用；默认启动只显示桌宠）
+dotnet run --project SoufflePet -- --open-ui
+
+# 前端热更新：先起 Vite，再让窗口加载 dev server
+pnpm --dir SoufflePet/web dev
+dotnet run --project SoufflePet -- --web-dev
+```
+
+> React 窗口使用真实会话内核：`session.*` / `chat.*` 由 `ChatRpc` 转发到 Core 的 `ChatSession`/`ChatSessionManager`；七个设置页由 `SettingsApi` 提供真实读写。WebView2 初始化失败时记录错误并弹出系统提示，不再回退旧窗口。
 
 ## 解决方案结构
 
 ```
 SoufflePet.sln
 ├─ SoufflePet/                  # 主程序（Avalonia 桌面应用）
-│  ├─ Views/                     # 窗口与视图层（桌宠窗口、对话窗口、MCP / 技能设置）
-│  │  ├─ WebViewPetWindow.cs    #   WebView 版窗口（纯代码，+ 本地静态服务器）
-│  │  └─ NativePetWindow.cs      #   原生版窗口（拖拽 / 穿透 / 全局光标）
-│  ├─ ViewModels/                # 对话、MCP、技能与提问面板的视图模型
-│  ├─ Controls/                  # 自定义控件（消息气泡的 Markdown 渲染等）
-│  ├─ Services/                  # LLM 对话、工具调用、MCP、技能、记忆、表情与检测
-│  ├─ Models/                    # 设置、消息、模型与 MCP 配置等数据模型
-│  ├─ Utils/                     # 截图等辅助代码
-│  ├─ Styles/                    # 深色玻璃面板等外观样式
+│  ├─ Views/                     # 窗口层（原生桌宠、内置浏览器、React 主窗口）
+│  │  ├─ NativePetWindow.cs      #   原生桌宠（拖拽 / 穿透 / 全局光标 / 右键菜单）
+│  │  ├─ BrowserWindow.cs        #   内置浏览器窗口（WebView2）
+│  │  └─ Web/AppWebWindow.cs     #   React SPA 主窗口（自定义标题栏 / 8 向缩放 / 关闭隐藏）
+│  ├─ Services/                  # 宿主服务：窗口、托盘、热键、平台实现
+│  │  ├─ AppWindowService.cs     #   主窗口单例 / 热键 / 戳一戳与摸头唤醒
+│  │  └─ Web/                    #   React 桥：WebBridgeServer / ChatRpc / SettingsApi / ThemeService
+│  ├─ Utils/                     # 截图、窗口几何、WebView 配置等辅助代码
 │  ├─ native/                    # 原生渲染控件
 │  │  ├─ NativePetControl.cs     #   OpenGL 渲染循环、逐像素命中检测
 │  │  └─ AvaloniaApi.cs          #   Avalonia GlInterface → OpenGLApi 桥接
-│  ├─ wwwroot/                   # 前端页面与 Live2D 模型资源（已 gitignore）
+│  ├─ web/                       # React SPA 源码（Vite / React 19 / TS / Tailwind）
+│  ├─ wwwroot/                   # 前端产物（app/，构建生成）与 Live2D 模型资源（models/）
 │  └─ Assets/                    # 应用图标等资源
+├─ SoufflePet.Core/              # 无 Avalonia 的领域层：模型、记忆、LLM/工具/MCP/技能/插件/调度
+│  └─ Chat/                      #   会话状态机 / 会话索引与存储 / 平台消息触发路由
+├─ SoufflePet.Core.Tests/        # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
 ├─ SoufflePet.Plugin.Sdk/        # 插件契约（清单、基类、配置表单、消息平台接口）
 ├─ Plugins/                      # 随主程序分发的内置插件
 │  ├─ SoufflePet.Plugin.InputKit/      # 键鼠输入工具
@@ -214,7 +243,8 @@ SoufflePet.sln
 │  └─ SoufflePet.Plugin.NapCat/        # NapCat QQ 消息平台
 ├─ Live2DCSharpSDK.Framework/    # Cubism 框架层（数学、Motion、模型解析）
 ├─ Live2DCSharpSDK.App/          # 应用封装（LAppDelegate、LAppModel、Live2dManager）
-└─ Live2DCSharpSDK.OpenGL/       # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）
+├─ Live2DCSharpSDK.OpenGL/        # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）
+└─ docs/                         # 方案与冻结契约（react-ui-contract.md）
 ```
 
 ## 对 Live2DCSharpSDK 的本地修改
@@ -258,7 +288,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 ### 首次使用
 
-把获得授权的模型压缩包（zip）直接导入即可：对话窗口「更多操作 → Live2D 模型…」打开模型管理面板，点「导入」选择压缩包，面板会自动解压到 `wwwroot/models/`、登记动作与表情，并设为当前模型。
+把获得授权的模型压缩包（zip）直接导入即可：主窗口左侧「更多 → Live2D 模型」打开设置页的模型面板，点「导入」选择压缩包，面板会自动解压到 `wwwroot/models/`、登记动作与表情，并设为当前模型。
 
 也可以手动放置：
 
@@ -266,7 +296,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 2. 确认该目录下存在 `主文件名.model3.json`（目录名与主文件名相同或不同都可以，见下）。
 3. 在模型管理面板里「打开目录」后手工添加，或在 `SoufflePet.json` 的 `Live2DModels` 里加一项：`Name` 写 `目录名/主文件名`，两者一致时只写一段即可。
 
-未配置模型时应用**仍可正常启动**，只是窗口不渲染模型；WebView 版会在左上角显示缺少模型的提示。
+未配置模型时应用**仍可正常启动**，只是窗口不渲染模型。
 
 ### 配置模型
 
@@ -293,7 +323,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 ### 模型管理面板
 
-对话窗口「更多操作 → Live2D 模型…」：
+主窗口左侧「更多 → Live2D 模型」：
 
 - **导入**：选择一个 zip 压缩包，找其中层级最浅的 `*.model3.json` 作为主模型，解压到 `wwwroot/models/<目录名>/`；目录名优先取压缩包内主模型所在目录名，取不到时用压缩包文件名。导入后自动登记引用：
   - 目录内所有 `*.exp3.json` 写进 `FileReferences.Expressions`（`Name` 为去掉后缀的文件名），已有的跳过

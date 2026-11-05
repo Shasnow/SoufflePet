@@ -10,12 +10,22 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <WebUiDir>$(MSBuildProjectDirectory)\web</WebUiDir>
+    <WebUiIndex>$(MSBuildProjectDirectory)\wwwroot\app\index.html</WebUiIndex>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Assets\Live2DCubismCore.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Live2DCubismCore.dll</Link>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- React 源码变更时触发 pnpm build；产物在 wwwroot/app（已 gitignore）。 -->
+    <WebUiSource Include="$(WebUiDir)\src\**\*;$(WebUiDir)\index.html;$(WebUiDir)\package.json;$(WebUiDir)\pnpm-lock.yaml;$(WebUiDir)\pnpm-workspace.yaml;$(WebUiDir)\vite.config.ts;$(WebUiDir)\vitest.config.ts;$(WebUiDir)\tsconfig*.json" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,7 +40,6 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
@@ -45,6 +54,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Live2DCSharpSDK.OpenGL\Live2DCSharpSDK.OpenGL.csproj" />
+    <ProjectReference Include="..\SoufflePet.Core\SoufflePet.Core.csproj" />
     <ProjectReference Include="..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
   </ItemGroup>
 
@@ -52,6 +62,39 @@
     <None Remove="Assets\pet.ico" />
     <AvaloniaResource Include="Assets\pet.ico" />
   </ItemGroup>
+
+  <!-- React UI：dotnet build 默认调用 pnpm build；-p:SkipWebBuild=true 可跳过（需已有产物）。 -->
+  <Target Name="BuildWebUi" BeforeTargets="Build"
+          Condition="'$(SkipWebBuild)' != 'true' and Exists('$(WebUiDir)\package.json')"
+          Inputs="@(WebUiSource)" Outputs="$(WebUiIndex)">
+    <Error Condition="!Exists('$(WebUiDir)\node_modules')"
+           Text="SoufflePet/web 依赖未安装：请先运行 pnpm --dir SoufflePet/web install；或用 -p:SkipWebBuild=true 跳过（需已有 wwwroot/app 产物）。" />
+    <Exec Command="pnpm build" WorkingDirectory="$(WebUiDir)" />
+  </Target>
+
+  <Target Name="WarnMissingWebUi" BeforeTargets="Build"
+          Condition="'$(SkipWebBuild)' == 'true' and !Exists('$(WebUiIndex)')">
+    <Warning Text="SkipWebBuild=true 且 wwwroot/app/index.html 不存在：运行时主窗口会显示加载错误页。" />
+  </Target>
+
+  <!-- 生成的文件在项目求值之后才出现，显式复制到 bin 与 publish 目录。 -->
+  <Target Name="CopyWebUiToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <WebUiOutputFile Include="$(MSBuildProjectDirectory)\wwwroot\app\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebUiOutputFile)"
+          DestinationFiles="@(WebUiOutputFile->'$(OutDir)wwwroot\app\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyWebUiToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <WebUiPublishFile Include="$(MSBuildProjectDirectory)\wwwroot\app\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebUiPublishFile)"
+          DestinationFiles="@(WebUiPublishFile->'$(PublishDir)wwwroot\app\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- 若宿主输出目录已有本地调试部署的插件，发布时一并带上；插件工程独立构建，不在解决方案内 -->
   <Target Name="CopyPluginsToPublish" AfterTargets="Publish">

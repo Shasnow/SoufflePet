@@ -77,7 +77,7 @@ public class NativePetWindow : Window, IPetWindow
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
     public NativePetWindow(SouffleSettings settings, ILipSyncService lipSync, IGamepadService gamepad,
-        IChatWindowService chat)
+        IAppWindowService appWindow)
     {
         Title = "SoufflePet";
         Width = 480;
@@ -141,14 +141,14 @@ public class NativePetWindow : Window, IPetWindow
         pokeItem.Click += (_, _) =>
         {
             _control.PlayPokeReaction();
-            chat.WakeByPoke(this);
+            appWindow.WakeByPoke(this);
         };
         // 摸摸头 = 先播 TapHead 反应动作/表情，再发起一轮对话唤醒桌宠
         var patItem = new MenuItem { Header = "摸摸头" };
         patItem.Click += (_, _) =>
         {
             _control.PlayHeadPatReaction();
-            chat.WakeByHeadPat(this);
+            appWindow.WakeByHeadPat(this);
         };
         // 「切换模型」子项每次弹出前按设置重建：导入/移除模型后不用重启即可看到新列表，
         // 当前模型的勾选也随之下标同步；点选只改下标，重载由 App 的设置变更订阅统一触发
@@ -235,7 +235,7 @@ public class NativePetWindow : Window, IPetWindow
             }
             if (pressPoint is null) return;
             pressPoint = null;
-            chat.Toggle(this);
+            appWindow.Toggle(this);
         };
         PointerWheelChanged += (_, e) =>
         {

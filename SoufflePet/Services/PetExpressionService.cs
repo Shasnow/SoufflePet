@@ -19,7 +19,7 @@ namespace SoufflePet.Services;
 /// 切换动作交给桌宠窗口执行。窗口在组合根解析后 Attach——ChatTools 的解析早于窗口，
 /// 构造函数注入 IPetWindow 会与对话服务形成 DI 循环。
 /// </summary>
-public sealed class PetExpressionService
+public sealed class PetExpressionService : IPetController
 {
     private static readonly ILogger Logger = Log.ForContext<PetExpressionService>();
 

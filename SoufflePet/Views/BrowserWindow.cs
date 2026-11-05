@@ -12,7 +12,7 @@ using SoufflePet.Utils;
 namespace SoufflePet.Views;
 
 /// <summary>
-/// AI 可控的内置浏览器窗口：纯代码构建（与 NativePetWindow / WebViewPetWindow 风格一致），
+/// AI 可控的内置浏览器窗口：纯代码构建（与 NativePetWindow 风格一致），
 /// 内嵌 <see cref="NativeWebView" />（Windows 上即 WebView2/Chromium）加载网页。
 /// 顶部工具栏给用户手动接管的入口——AI 操作与用户点击作用在同一视图上，可随时切换。
 /// 窗口标题固定为 <see cref="WindowTitle" />：截图工具按标题找窗口，标题跟着页面变化会找不到。

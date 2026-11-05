@@ -1,0 +1,79 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Shasnow -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SoufflePet · 五档宽度验收</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #111;
+        color: #ddd;
+        font-family: "Segoe UI", sans-serif;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #999;
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        overflow-x: auto;
+        padding-bottom: 16px;
+      }
+      .frame {
+        flex: none;
+      }
+      .label {
+        font: 12px/1.4 Consolas, monospace;
+        color: #aaa;
+        margin-bottom: 4px;
+      }
+      iframe {
+        border: 1px solid #333;
+        background: #1b1c1e;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SoufflePet React SPA · 容器宽度验收</h1>
+    <p>
+      mock 宿主；每档是独立 iframe。用
+      <code>pnpm --dir SoufflePet/web dev</code> 启动后访问
+      <code>/app/dev/widths.html</code>。截图脚本见 <code>scripts/screenshots.mjs</code>。
+    </p>
+    <div class="row" id="row"></div>
+    <script>
+      const widths = [
+        { width: 1416, height: 900 },
+        { width: 1024, height: 900 },
+        { width: 800, height: 900 },
+        { width: 652, height: 1002 },
+        { width: 420, height: 800 },
+      ]
+      const row = document.getElementById('row')
+      for (const item of widths) {
+        const wrap = document.createElement('div')
+        wrap.className = 'frame'
+        const label = document.createElement('div')
+        label.className = 'label'
+        label.textContent = `${item.width} × ${item.height}`
+        const frame = document.createElement('iframe')
+        frame.width = item.width
+        frame.height = item.height
+        frame.src = `/app/?mock=1&scenario=rich#/chat/s-rich`
+        wrap.append(label, frame)
+        row.append(wrap)
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Shasnow
+
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ChatSnapshotDto } from '@/bridge/contracts'
+import { useChatStore } from '@/stores/chatStore'
+import { Composer } from './Composer'
+
+vi.mock('@/bridge/client', () => ({
+  invoke: vi.fn(async () => null),
+}))
+
+import { invoke } from '@/bridge/client'
+
+const snapshot: ChatSnapshotDto = {
+  sessionId: 's1',
+  messages: [],
+  draft: '',
+  attachments: [],
+  generating: false,
+  models: [
+    { key: 'p/m', provider: 'p', name: 'm', modelId: 'm' },
+  ],
+  selectedModelKey: 'p/m',
+  approvalMode: 'manual',
+  workspace: { path: 'D:/w', name: 'w' },
+  workspaces: [{ path: 'D:/w', name: 'w' }],
+  usage: null,
+  ask: null,
+}
+
+function Harness() {
+  const chat = useChatStore((state) => state.bySession[state.activeId ?? '']) ?? snapshot
+  return <Composer chat={chat} hero />
+}
+
+describe('Composer', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockClear()
+    useChatStore.setState({ bySession: { s1: { ...snapshot, draft: '' } }, activeId: 's1' })
+  })
+
+  it('sends on Enter and not on Shift+Enter', async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+
+    fireEvent.change(input, { target: { value: 'hello' } })
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: true })
+    expect(invoke).not.toHaveBeenCalledWith('chat.send', expect.anything())
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: false })
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('chat.send', {
+        text: 'hello',
+        attachmentIds: [],
+      })
+    })
+  })
+
+  it('does not send while IME composition is active', async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+
+    fireEvent.change(input, { target: { value: 'ni hao' } })
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    expect(invoke).not.toHaveBeenCalledWith('chat.send', expect.anything())
+
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('chat.send', expect.objectContaining({ text: 'ni hao' }))
+    })
+  })
+
+  it('switches the send button to stop while generating', () => {
+    useChatStore.setState({
+      bySession: { s1: { ...snapshot, generating: true, draft: 'draft' } },
+      activeId: 's1',
+    })
+    render(<Harness />)
+    expect(screen.getByLabelText('停止生成')).toBeInTheDocument()
+  })
+})

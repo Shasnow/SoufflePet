@@ -12,3 +12,10 @@ bin
 **/*Test
 Plugins/**/artifacts/
 **/Live2DCubismCore.h
+**/node_modules
+SoufflePet/web/dist/
+SoufflePet/web/coverage/
+SoufflePet/web/test-results/
+SoufflePet/web/playwright-report/
+SoufflePet/web/.vite/
+SoufflePet/web/*.tsbuildinfo

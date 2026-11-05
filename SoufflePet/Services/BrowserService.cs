@@ -17,42 +17,6 @@ using SoufflePet.Views;
 namespace SoufflePet.Services;
 
 /// <summary>
-/// 内置浏览器：由对话模型驱动 <see cref="BrowserWindow" /> 里的网页视图完成导航、读取与交互。
-/// 所有操作经 UI 线程串行执行（模型可能并发发起多个调用），页面数据的读写统一走 InvokeScript，
-/// 不需要额外的驱动库或 CDP 依赖。
-/// </summary>
-public interface IBrowserService
-{
-    /// <summary>打开网址（只允许 http/https），返回页面标题与加载状态。</summary>
-    Task<string> OpenAsync(string url, CancellationToken cancellationToken);
-
-    /// <summary>取出当前页面的标题、可交互元素（带引用编号）与正文，供模型决定下一步操作。</summary>
-    Task<string> SnapshotAsync(CancellationToken cancellationToken);
-
-    /// <summary>点击快照里某个引用编号对应的元素。</summary>
-    Task<string> ClickAsync(string reference, CancellationToken cancellationToken);
-
-    /// <summary>向快照里某个引用编号对应的输入框写入文本，可清空原值、可直接提交。</summary>
-    Task<string> TypeAsync(
-        string reference, string text, bool clear, bool submit, CancellationToken cancellationToken);
-
-    /// <summary>向页面（或指定元素）派发一次按键事件。</summary>
-    Task<string> PressKeyAsync(string key, string? reference, CancellationToken cancellationToken);
-
-    /// <summary>滚动页面或指定元素。</summary>
-    Task<string> ScrollAsync(int deltaY, string? reference, CancellationToken cancellationToken);
-
-    /// <summary>返回上一页。</summary>
-    Task<string> BackAsync(CancellationToken cancellationToken);
-
-    /// <summary>关闭内置浏览器窗口并释放其占用（WebView2 视图随控件销毁）。</summary>
-    Task<string> CloseAsync(CancellationToken cancellationToken);
-
-    /// <summary>截取浏览器窗口画面（隐藏或最小化时先还原成可见的正常状态），图片回传给模型走多模态通道。</summary>
-    Task<MonitorScreenshot> ScreenshotAsync(CancellationToken cancellationToken);
-}
-
-/// <summary>
 /// 内置浏览器服务（DI 单例）：懒创建窗口、串行化操作、把页面脚本的结果整理成模型可读的文本。
 /// 窗口关闭只隐藏，登录态与浏览历史保留在会话里；应用退出时统一销毁。
 /// </summary>

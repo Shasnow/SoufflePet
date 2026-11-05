@@ -9,18 +9,38 @@ SoufflePet 是基于 [Avalonia](https://avaloniaui.net/) 的 Windows Live2D 桌�
 ## 常用命令
 
 ```powershell
-# 构建整个解决方案
+# 首次：安装前端依赖（React UI）
+pnpm --dir SoufflePet/web install
+
+# 构建整个解决方案（会调用 pnpm build，产物写入 wwwroot/app）
 dotnet build SoufflePet.sln
 
-# 原生版（默认，Live2DCSharpSDK + OpenGL ES2）
+# 只验证 .NET、跳过前端构建（需已有 wwwroot/app 产物）
+dotnet build SoufflePet.sln -p:SkipWebBuild=true
+
+# 后端单测（会话状态机 / 会话管理 / 记忆 / 调度 / token 格式）
+dotnet test SoufflePet.Core.Tests\SoufflePet.Core.Tests.csproj
+
+# 原生桌宠（Live2DCSharpSDK + OpenGL ES2）
 dotnet run --project SoufflePet
 
-# WebView 版（WebView2 + WebGL）
-dotnet run --project SoufflePet -- --webview
+# 启动即呼出 React 主窗口（默认只显示桌宠；Ctrl+Alt+Space / 托盘 / 单击桌宠也可呼出）
+dotnet run --project SoufflePet -- --open-ui
+
+# 前端热更新：先起 Vite，再让窗口加载 dev server
+pnpm --dir SoufflePet/web dev
+dotnet run --project SoufflePet -- --web-dev
+
+# 前端独立开发 / 测试 / 五档截图
+pnpm --dir SoufflePet/web dev
+pnpm --dir SoufflePet/web test
+pnpm --dir SoufflePet/web screenshots
 ```
 
-- 运行依赖 Windows 10+、.NET 10 SDK。WebView 版需 WebView2 Runtime，原生版需支持 OpenGL ES2 的显卡驱动。
-- 仓库**没有单元测试项目**。改动后以 `dotnet build SoufflePet.sln` 验证编译（`-warnaserror` 未启用，但请勿引入新警告），必要时手动运行应用验证行为。
+- 运行依赖 Windows 10+、.NET 10 SDK。React 主窗口需 WebView2 Runtime，桌宠需支持 OpenGL ES2 的显卡驱动。
+- React UI 构建依赖 **Node.js 22.12+ 与 pnpm 10+**；`dotnet build` 默认调用 `pnpm build`，缺依赖时会给出可操作错误。
+- 测试：Web 前端用 Vitest（`pnpm --dir SoufflePet/web test`）；领域层用 `dotnet test SoufflePet.Core.Tests`。改动后至少跑 `dotnet build SoufflePet.sln`（`-warnaserror` 未启用，但请勿引入新警告）。
+- `SoufflePet.Core` **不得引用 Avalonia**；平台能力（桌宠表情、截图、浏览器、UI 线程）通过 `IPetController` / `IScreenCapture` / `IBrowserService` / `IUiDispatcher` 抽象注入。
 - 插件工程**不在解决方案内**，需单独构建（见下）。
 - **输出文件被占用**：构建时若报 MSB3026 错误（通常是运行中的 `.NET Host` 进程锁定了 dll），**改用 `.verifybuild` 作为输出目录重试**，不要终止用户进程：
 
@@ -35,16 +55,19 @@ dotnet run --project SoufflePet -- --webview
 ```
 SoufflePet.sln
 ├─ SoufflePet/                     # 主程序（Avalonia）
-│  ├─ Views/                       # 窗口与视图（桌宠、对话、MCP / 技能 / 插件设置）
-│  ├─ ViewModels/                  # MVVM 视图模型（CommunityToolkit.Mvvm）
-│  ├─ Services/                    # LLM 对话、工具、MCP、技能、记忆、表情、平台等
-│  │  └─ Plugins/                  # 插件发现、加载、响应管线
-│  ├─ Models/                      # 设置、消息、模型、MCP 等数据模型
-│  ├─ Utils/                       # 截图、开机自启、全局光标等
-│  ├─ Styles/                      # 深色玻璃面板等 axaml 样式
+│  ├─ Views/                       # 窗口（原生桌宠、内置浏览器、React 主窗口）
+│  │  └─ Web/AppWebWindow.cs       #   React SPA 主窗口（WebView2、拖拽/缩放/隐藏）
+│  ├─ Services/                    # 宿主服务：窗口/托盘/热键/平台实现
+│  │  ├─ AppWindowService.cs       #   主窗口单例、Ctrl+Alt+Space、戳一戳/摸头唤醒
+│  │  └─ Web/                      #   WebBridgeServer / ChatRpc / SettingsApi / ThemeService
+│  ├─ Utils/                       # 截图、开机自启、全局光标、窗口几何等
 │  ├─ native/                      # 原生渲染控件与 Avalonia→OpenGL 桥接
-│  ├─ wwwroot/                     # 前端页面与 Live2D 模型资源（gitignore，仅 index.html 入库）
+│  ├─ web/                         # React SPA 源码（Vite / React 19 / TS / Tailwind 4）
+│  ├─ wwwroot/                     # 前端产物（app/）与 Live2D 模型资源（均 gitignore）
 │  └─ Assets/                      # 图标、Live2DCubismCore.dll
+├─ SoufflePet.Core/                # 无 Avalonia 的领域层（模型/LLM/工具/MCP/记忆/调度）
+│  └─ Chat/                        #   ChatSession / ChatSessionManager / 会话存储 / 触发路由
+├─ SoufflePet.Core.Tests/          # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
 ├─ SoufflePet.Plugin.Sdk/          # 插件契约（PluginBase、清单、配置表单、IMessagePlatform）
 ├─ Plugins/                        # 内置插件（独立构建，不在 sln 编译项）
 │  ├─ SoufflePet.Plugin.InputKit/
@@ -75,17 +98,16 @@ SoufflePet.sln
 ## 编码约定
 
 - 面向可空引用类型：项目 `Nullable` 一律 `enable`，不要引入新的可空性警告。
-- 命名空间与目录、文件名对齐；服务放 `Services/`，数据模型放 `Models/`，视图模型放 `ViewModels/`。
-- 依赖注入优先：`Services/` 中面向窗口消费的服务常用 `IXxxService` 接口 + 实现，在 `App.axaml.cs` 注册（如 `IAutoExpressionService`）。新增服务遵循同一模式。
+- 命名空间与目录、文件名对齐；宿主服务放 `SoufflePet/Services/`，领域模型与服务放 `SoufflePet.Core/`，前端组件放 `SoufflePet/web/src/`。
+- 依赖注入优先：`Services/` 中面向窗口消费的服务常用 `IXxxService` 接口 + 实现，在 `App.axaml.cs` 注册（如 `IAutoExpressionService`、`IAppWindowService`）。新增服务遵循同一模式。
 - 日志统一用 Serilog：`private static readonly ILogger Logger = Log.ForContext<T>();`（`Services` 中普遍如此）。
 - UI 线程：涉及 UI 的更新经 `Avalonia.Threading.Dispatcher` 切换；后台线程（平台回调、检测轮询）不要长时间同步阻塞。
 - 现有代码注释与提交均为**中文**，保持一致。
-- 不引入新依赖除非确有必要；跟随已有的版本（Avalonia 12.1.1、Microsoft.Extensions.AI 10.11.0 等）。
 
 ## 关键约束与陷阱
 
 - **Live2D SDK 子项目为本地改造版**：来自上游 [Live2DCSharpSDK](https://github.com/Coloryr/Live2DCSharpSDK)（MIT），本仓库有大量适配桌宠的修改与 Bug 修复。改动前先读 README 的「对 Live2DCSharpSDK 的本地修改」一节，避免覆盖已有本地改动。源文件行尾为 CRLF，与上游 diff 需 `--strip-trailing-cr`。
-- **wwwroot 不入库**：`SoufflePet/wwwroot/` 除 `index.html` 外全部 gitignore；**不附带、不分发任何 Live2D 模型资源**，不要提交模型文件或把它当作可用资源断言。
+- **wwwroot 不入库**：`SoufflePet/wwwroot/` 下的 `app/`（构建产物）与 `models/`（模型资源）全部 gitignore；**不附带、不分发任何 Live2D 模型资源**，不要提交模型文件或把它当作可用资源断言。
 - **插件与宿主分开构建**：插件工程不在 `SoufflePet.sln` 中。
 
   ```powershell
@@ -97,7 +119,9 @@ SoufflePet.sln
   ```
 
   插件契约 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件**不要**自带副本。
-- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；长期记忆 `%AppData%\SoufflePet`；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
+- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；长期记忆 `%AppData%\SoufflePet`（`sessions.json` + `sessions\<id>\conversation.jsonl`）；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
+- **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把应用数据根目录（会话、记忆、统计、调度日志、窗口几何）指到临时目录；不设置时仍为 `%AppData%\SoufflePet`。
+- **UI 架构**：React SPA 是唯一对话/设置界面；桌宠只有 `NativePetWindow` 一个原生渲染窗口。WebView2 初始化失败会记录错误并弹一次系统提示，**不再回退旧 Avalonia 窗口**；`--legacy-ui`、`--react-ui`、`--webview` 等迁移期开关已删除。
 - 模型在**启动时**加载，`Live2DModels` / `ModelsDirectory` 改后需重启生效；运行中可从桌宠右键菜单切换模型。
 
 ## 快速定位
@@ -105,10 +129,20 @@ SoufflePet.sln
 | 需求 | 入口文件 |
 | --- | --- |
 | 应用启动 / DI 注册 | [Program.cs](SoufflePet/Program.cs)、[App.axaml.cs](SoufflePet/App.axaml.cs) |
-| 对话与工具调用 | [LlmChatService.cs](SoufflePet/Services/LlmChatService.cs)、[ChatTools.cs](SoufflePet/Services/ChatTools.cs) |
-| 对话模型配置 / 管理面板 | [ChatProviderConfig.cs](SoufflePet/Models/ChatProviderConfig.cs)、[LlmModelsViewModel.cs](SoufflePet/ViewModels/LlmModelsViewModel.cs)、[LlmModelCatalog.cs](SoufflePet/Services/LlmModelCatalog.cs) |
-| 消息气泡 Markdown 渲染 | [MarkdownTextBlock.cs](SoufflePet/Controls/MarkdownTextBlock.cs)、[MarkdownParser.cs](SoufflePet/Utils/MarkdownParser.cs) |
-| 桌宠渲染窗口 | [NativePetWindow.cs](SoufflePet/Views/NativePetWindow.cs)、[WebViewPetWindow.cs](SoufflePet/Views/WebViewPetWindow.cs) |
-| 插件系统 | [PluginService.cs](SoufflePet/Services/Plugins/PluginService.cs)、[PluginBase.cs](SoufflePet.Plugin.Sdk/PluginBase.cs) |
-| MCP 集成 | [McpToolService.cs](SoufflePet/Services/McpToolService.cs) |
+| React SPA 源码 | [web/src](SoufflePet/web/src)、[App.tsx](SoufflePet/web/src/app/App.tsx) |
+| React 宿主窗口 / 桥 | [AppWebWindow.cs](SoufflePet/Views/Web/AppWebWindow.cs)、[WebBridgeServer.cs](SoufflePet/Services/Web/WebBridgeServer.cs)、[ChatRpc.cs](SoufflePet/Services/Web/ChatRpc.cs) |
+| 设置 API / 设置页 | [SettingsApi.cs](SoufflePet/Services/Web/SettingsApi.cs)、[SettingsDto.cs](SoufflePet/Services/Web/SettingsDto.cs)、[features/settings](SoufflePet/web/src/features/settings) |
+| 桥接契约 / mock 宿主 | [react-ui-contract.md](docs/react-ui-contract.md)、[client.ts](SoufflePet/web/src/bridge/client.ts)、[mock-host.ts](SoufflePet/web/src/bridge/mock-host.ts) |
+| OKLCH 主题 | [tokens.css](SoufflePet/web/src/styles/tokens.css)、[oklch.ts](SoufflePet/web/src/theme/oklch.ts)、[ThemeService.cs](SoufflePet/Services/Web/ThemeService.cs) |
+| Core 领域层 / 组合根 | [SoufflePet.Core](SoufflePet.Core)、[CoreServiceCollectionExtensions.cs](SoufflePet.Core/Services/CoreServiceCollectionExtensions.cs) |
+| 会话状态机 / 会话管理 | [ChatSession.cs](SoufflePet.Core/Chat/ChatSession.cs)、[ChatSessionManager.cs](SoufflePet.Core/Chat/ChatSessionManager.cs)、[ChatSessionStore.cs](SoufflePet.Core/Chat/ChatSessionStore.cs) |
+| Core 测试 | [CoreTests.cs](SoufflePet.Core.Tests/CoreTests.cs)、[ChatSessionTests.cs](SoufflePet.Core.Tests/ChatSessionTests.cs) |
+| 对话与工具调用 | [LlmChatService.cs](SoufflePet.Core/Services/LlmChatService.cs)、[ChatTools.cs](SoufflePet.Core/Services/ChatTools.cs) |
+| 主窗口呼出 / 热键 / 戳一戳 | [AppWindowService.cs](SoufflePet/Services/AppWindowService.cs) |
+| 对话模型配置 / 设置页 | [ChatProviderConfig.cs](SoufflePet.Core/Models/ChatProviderConfig.cs)、[LlmSettings.tsx](SoufflePet/web/src/features/settings/LlmSettings.tsx)、[LlmModelCatalog.cs](SoufflePet.Core/Services/LlmModelCatalog.cs) |
+| 消息气泡 / Markdown 渲染 | [MessageList.tsx](SoufflePet/web/src/features/chat/MessageList.tsx)、[Markdown.tsx](SoufflePet/web/src/ui/Markdown.tsx) |
+| 桌宠渲染窗口 | [NativePetWindow.cs](SoufflePet/Views/NativePetWindow.cs) |
+| 插件系统 | [PluginService.cs](SoufflePet.Core/Services/Plugins/PluginService.cs)、[PluginBase.cs](SoufflePet.Plugin.Sdk/PluginBase.cs) |
+| MCP 集成 | [McpToolService.cs](SoufflePet.Core/Services/McpToolService.cs) |
+| 定时任务 / 记忆 / 调度 | [ScheduledTaskService.cs](SoufflePet.Core/Services/ScheduledTaskService.cs)、[ChatMemory.cs](SoufflePet.Core/Services/ChatMemory.cs) |
 | 自动表情 / 口型 | [AutoExpressionService.cs](SoufflePet/Services/AutoExpressionService.cs)、[LipSyncService.cs](SoufflePet/Services/LipSyncService.cs) |
