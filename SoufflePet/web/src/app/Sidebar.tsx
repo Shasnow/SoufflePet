@@ -24,7 +24,6 @@ import { useChatStore } from '@/stores/chatStore'
 import { filterSessions, groupSessions, useSessionStore } from '@/stores/sessionStore'
 import { useUiStore } from '@/stores/uiStore'
 import { Dialog } from '@/ui/Dialog'
-import { GlobalUsageButton } from '@/ui/Usage'
 import { Popover } from '@/ui/Popover'
 import { chatRoute, navigate, settingsRoute, useRoute } from '@/app/router'
 import type { SettingsPanel } from '@/app/router'
@@ -42,7 +41,6 @@ const MORE_ITEMS: { panel: MorePanel; label: string }[] = [
 
 export function Sidebar() {
   const pet = useAppStore((state) => state.pet)
-  const usage = useAppStore((state) => state.usage)
   const sessions = useSessionStore((state) => state.sessions)
   const activeId = useSessionStore((state) => state.activeId)
   const query = useSessionStore((state) => state.query)
@@ -445,7 +443,6 @@ export function Sidebar() {
           <span className="account-avatar">{pet.initial}</span>
           <div className="account-meta">
             <div className="account-name">{pet.name}</div>
-            <GlobalUsageButton usage={usage} compact />
           </div>
           <button
             type="button"

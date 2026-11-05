@@ -43,7 +43,7 @@ export function UsageRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function GlobalUsageButton({ usage, compact = false }: { usage: GlobalUsageDto; compact?: boolean }) {
+export function GlobalUsageButton({ usage }: { usage: GlobalUsageDto }) {
   const total = usage.inputTokens + usage.outputTokens
   const rate = usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : 0
 
@@ -53,9 +53,7 @@ export function GlobalUsageButton({ usage, compact = false }: { usage: GlobalUsa
       align="start"
       trigger={
         <button type="button" className="usage-foot-btn" title={`${formatTokens(total)} · 缓存命中 ${formatPercent(rate)}`}>
-          {compact
-            ? `${formatCompactTokens(total)} tok · ${formatPercent(rate)}`
-            : `${formatCompactTokens(total)} tok · 缓存命中 ${formatPercent(rate)}`}
+          {`${formatCompactTokens(total)} tok · 缓存命中 ${formatPercent(rate)}`}
         </button>
       }
     >
