@@ -941,14 +941,69 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             response(id, NOTES_WORKSPACE)
             return
           }
+          case 'chat.workspace.rename': {
+            const path = String(payload.path ?? '')
+            const name = String(payload.name ?? '').trim()
+            const fallback = path.split(/[\\/]/).filter(Boolean).pop() ?? path
+            const label = name || fallback
+            // 只改展示名：路径、会话分组与磁盘目录都不动
+            const rename = (list: WorkspaceDto[]) =>
+              list.map((item) => (item.path === path ? { path: item.path, name: label } : item))
+            for (const session of sessions) {
+              session.chat.workspaces = rename(session.chat.workspaces)
+              if (session.chat.workspace?.path === path) session.chat.workspace = { path, name: label }
+              if (session.summary.workspacePath === path) session.summary.workspaceName = label
+            }
+            if (draft) {
+              draft.chat.workspaces = rename(draft.chat.workspaces)
+              if (draft.chat.workspace?.path === path) draft.chat.workspace = { path, name: label }
+              if (draft.summary.workspacePath === path) draft.summary.workspaceName = label
+            }
+            emitSessions()
+            const activeChat = activeId ? getSessionChat(activeId) : undefined
+            if (activeChat) {
+              emitOps(activeId!, [
+                {
+                  op: 'workspace',
+                  workspace: activeChat.workspace,
+                  workspaces: activeChat.workspaces,
+                },
+              ])
+            }
+            response(id, { workspaces: activeChat?.workspaces ?? [] })
+            return
+          }
           case 'chat.workspace.delete': {
+            const path = String(payload.path ?? '')
+            if (payload.deleteSessions === true) {
+              // 侧栏删除工作区：组内会话一起移出列表
+              const removed = sessions.filter((session) => session.summary.workspacePath === path)
+              for (const item of removed) {
+                const index = sessions.indexOf(item)
+                if (index >= 0) sessions.splice(index, 1)
+              }
+              if (sessions.length === 0) {
+                const draftId = newId('s')
+                draft = { summary: summaryOf(draftId, '新会话', WORKSPACE), chat: emptyChat(draftId) }
+                activeId = draftId
+              } else if (removed.some((item) => item.summary.id === activeId)) {
+                activeId = sessions[0].summary.id
+              }
+              for (const session of sessions) {
+                session.chat.workspaces = session.chat.workspaces.filter((item) => item.path !== path)
+                if (session.chat.workspace?.path === path) session.chat.workspace = null
+              }
+              emitSessions()
+              response(id, { sessions: sessions.map((session) => session.summary), activeId })
+              return
+            }
+
             const sessionId = activeId
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
               return
             }
-            const path = String(payload.path ?? '')
             chat.workspaces = chat.workspaces.filter((item) => item.path !== path)
             if (chat.workspace?.path === path) chat.workspace = null
             emitOps(sessionId!, [

@@ -368,6 +368,78 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         return payload;
     }
 
+    /// <summary>删除工作区：组内会话全部移入回收站，并把工作区从历史列表里移除。</summary>
+    public async Task<ChatSessionListPayload> DeleteWorkspaceAsync(string path, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string? full = NormalizeWorkspacePath(path);
+        if (full is null) throw new ChatSessionException("invalid_argument", "工作区目录不存在");
+
+        List<string> ids;
+        lock (_gate)
+        {
+            ids = _records
+                .Where(record => record.WorkspacePath is { Length: > 0 } workspace
+                    && string.Equals(workspace, full, StringComparison.OrdinalIgnoreCase))
+                .Select(record => record.Id)
+                .ToList();
+        }
+
+        foreach (var id in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 会话删完后仍有活动会话（可能已是新建草稿），由它负责移除工作区记录并推送新的工作区状态
+        var active = ActiveSession;
+        if (active is not null)
+        {
+            await active.DeleteWorkspaceAsync(full).ConfigureAwait(false);
+            if (string.Equals(_settings.ActiveWorkspacePath, full, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.ActiveWorkspacePath = string.Empty;
+                _settings.Save();
+            }
+        }
+        else
+        {
+            lock (_gate)
+            {
+                _settings.WorkspacePaths = _settings.WorkspacePaths
+                    .Where(item => !string.Equals(item, full, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                _settings.WorkspaceNames = _settings.WorkspaceNames
+                    .Where(entry => !string.Equals(entry.Key, full, StringComparison.OrdinalIgnoreCase))
+                    .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+                if (string.Equals(_settings.ActiveWorkspacePath, full, StringComparison.OrdinalIgnoreCase))
+                    _settings.ActiveWorkspacePath = string.Empty;
+            }
+
+            _settings.Save();
+        }
+
+        Save();
+        RaiseSessionsChanged();
+
+        ChatSessionListPayload payload;
+        lock (_gate) payload = new ChatSessionListPayload(PersistedLocked(), _activeId);
+        return payload;
+    }
+
+    /// <summary>重命名工作区展示名（只改界面显示，不改磁盘目录）。</summary>
+    public async Task<IReadOnlyList<ChatWorkspaceState>> RenameWorkspaceAsync(
+        string path,
+        string? name,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var active = ActiveSession ?? throw new ChatSessionException("not_found", "当前没有活动会话");
+        var workspaces = await active.RenameWorkspaceAsync(path, name).ConfigureAwait(false);
+        RaiseSessionsChanged();
+        return workspaces;
+    }
+
     public Task<IReadOnlyList<SessionRecord>> SearchAsync(string query, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -495,6 +567,20 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
     private static bool Contains(string? value, string query) =>
         value is { Length: > 0 } && value.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeWorkspacePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try
+        {
+            var full = Path.GetFullPath(path);
+            return Directory.Exists(full) ? full : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {

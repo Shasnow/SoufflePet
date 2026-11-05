@@ -41,6 +41,7 @@ public sealed class ChatSession : IAsyncDisposable
     private const int MaxPendingTurns = 3;
     private const int MaxVisibleMessages = 300;
     private const int TitleLength = 30;
+    private const int WorkspaceNameLength = 40;
     private const string SystemPrefix = "[系统消息]";
     private const string PlatformNoticePrefix = "[平台提醒]";
 
@@ -476,9 +477,21 @@ public sealed class ChatSession : IAsyncDisposable
         var cleared = false;
         lock (_gate)
         {
+            var key = full ?? path;
             _settings.WorkspacePaths = _settings.WorkspacePaths
-                .Where(item => !string.Equals(item, full ?? path, StringComparison.OrdinalIgnoreCase))
+                .Where(item => !string.Equals(item, key, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+            if (full is not null)
+            {
+                var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in _settings.WorkspaceNames)
+                {
+                    if (string.Equals(entry.Key, full, StringComparison.OrdinalIgnoreCase)) continue;
+                    names[entry.Key] = entry.Value;
+                }
+
+                _settings.WorkspaceNames = names;
+            }
 
             cleared = full is null
                 ? string.Equals(_workspacePath, path, StringComparison.OrdinalIgnoreCase)
@@ -499,6 +512,43 @@ public sealed class ChatSession : IAsyncDisposable
         // 工作区被移除后会话回到默认分组，历史文件一起搬走
         if (cleared) RebaseStorage(null);
         RaiseSummary();
+        return Task.FromResult(workspaces);
+    }
+
+    /// <summary>重命名工作区：只改展示名称，磁盘目录与会话分组不变。</summary>
+    public Task<IReadOnlyList<ChatWorkspaceState>> RenameWorkspaceAsync(string path, string? name)
+    {
+        string? full = NormalizeDirectory(path);
+        if (full is null) throw new ChatSessionException("invalid_argument", "工作区目录不存在");
+
+        IReadOnlyList<ChatWorkspaceState> workspaces;
+        ChatWorkspaceState? active;
+        lock (_gate)
+        {
+            var known = _settings.WorkspacePaths.Any(item =>
+                            string.Equals(item, full, StringComparison.OrdinalIgnoreCase))
+                        || string.Equals(_workspacePath, full, StringComparison.OrdinalIgnoreCase);
+            if (!known) throw new ChatSessionException("invalid_argument", "工作区不在历史列表中");
+
+            var label = (name ?? string.Empty).Trim();
+            if (label.Length > WorkspaceNameLength) label = label[..WorkspaceNameLength];
+
+            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in _settings.WorkspaceNames)
+            {
+                if (string.Equals(entry.Key, full, StringComparison.OrdinalIgnoreCase)) continue;
+                names[entry.Key] = entry.Value;
+            }
+
+            if (label.Length > 0) names[full] = label;
+            _settings.WorkspaceNames = names;
+            _settings.Save();
+
+            workspaces = SnapshotWorkspacesLocked();
+            active = ToWorkspace(_workspacePath);
+            EmitLocked(new ChatOpWorkspace(active, workspaces));
+        }
+
         return Task.FromResult(workspaces);
     }
 
@@ -1434,7 +1484,7 @@ public sealed class ChatSession : IAsyncDisposable
         {
             if (NormalizeDirectory(path) is not { } full) continue;
             if (result.Any(item => string.Equals(item.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
-            result.Add(new ChatWorkspaceState(full, WorkspaceName(full)));
+            result.Add(new ChatWorkspaceState(full, _settings.WorkspaceDisplayName(full)));
         }
 
         return result;
@@ -1574,15 +1624,8 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
-    private static ChatWorkspaceState? ToWorkspace(string? path) =>
-        path is { Length: > 0 } ? new ChatWorkspaceState(path, WorkspaceName(path)) : null;
-
-    private static string WorkspaceName(string fullPath)
-    {
-        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var name = Path.GetFileName(trimmed);
-        return name.Length > 0 ? name : fullPath;
-    }
+    private ChatWorkspaceState? ToWorkspace(string? path) =>
+        path is { Length: > 0 } ? new ChatWorkspaceState(path, _settings.WorkspaceDisplayName(path)) : null;
 
     private static bool ApplyWorkingDirectory(string? path)
     {

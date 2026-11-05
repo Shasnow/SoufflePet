@@ -232,7 +232,8 @@ interface AppSnapshotDto {
 | `chat.approval.decide` | `{messageId,approve:boolean}` | `null` |
 | `chat.workspace.switch` | `{path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
 | `chat.workspace.pick` | `{}` | `WorkspaceDto|null` |
-| `chat.workspace.delete` | `{path}` | `{workspaces:WorkspaceDto[]}` |
+| `chat.workspace.delete` | `{path,deleteSessions?:boolean}` | `{workspaces:WorkspaceDto[]}` 或 `{sessions:SessionSummaryDto[],activeId:string\|null}`（`deleteSessions` 为 true 时组内会话一并移入回收站） |
+| `chat.workspace.rename` | `{path,name}` | `{workspaces:WorkspaceDto[]}`（仅改展示名，不改磁盘目录；`name` 为空则恢复目录名） |
 | `chat.ask` | `{requestId,action:'prev'|'next'|'select'|'custom'|'submit'|'cancel',payload?}` | `null` |
 | `chat.file.open` | `{path}` | `null`（仅存在文件；系统默认程序） |
 | `chat.link.open` | `{url}` | `null`（仅 http/https） |

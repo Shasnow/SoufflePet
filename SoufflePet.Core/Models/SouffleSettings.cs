@@ -184,6 +184,25 @@ public partial class SouffleSettings : ObservableObject
     [Description("当前激活的工作区路径；为空表示应用所在目录（工具相对路径、命令执行与 AGENTS.md 均以此为准）")]
     public partial string ActiveWorkspacePath { get; set; } = string.Empty;
 
+    [ObservableProperty]
+    [Description("工作区显示名称（键为工作区全路径；仅影响界面展示，不改动磁盘目录）")]
+    public partial Dictionary<string, string> WorkspaceNames { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>工作区展示名：优先取自定义名称，没有则回落到目录名。</summary>
+    public string WorkspaceDisplayName(string fullPath)
+    {
+        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (var entry in WorkspaceNames)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Value)) continue;
+            var key = entry.Key.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(key, trimmed, StringComparison.OrdinalIgnoreCase)) return entry.Value.Trim();
+        }
+
+        var name = Path.GetFileName(trimmed);
+        return name.Length > 0 ? name : fullPath;
+    }
+
     // ===== React UI =====
 
     [ObservableProperty]

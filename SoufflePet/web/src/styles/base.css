@@ -501,6 +501,24 @@
   opacity: 1;
 }
 
+/* 工作区操作区：平时隐藏，hover / 键盘聚焦时淡入 */
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.workspace-title:hover .workspace-actions,
+.workspace-title:focus-within .workspace-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* 用 grid-template-rows 0fr↔1fr 做高度过渡，内层 overflow 裁切 */
 .workspace-sessions {
   display: grid;

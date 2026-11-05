@@ -255,13 +255,33 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 {
                     var path = await _window.PickFolderAsync("选择工作区").ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
-                    return path is null ? null : MapWorkspace(new ChatWorkspaceState(path, WorkspaceName(path)));
+                    return path is null ? null : MapWorkspace(new ChatWorkspaceState(path, _settings.WorkspaceDisplayName(path)));
+                }
+                case "chat.workspace.rename":
+                {
+                    var workspaces = await _sessions.RenameWorkspaceAsync(
+                        GetString(parameters, "path") ?? string.Empty,
+                        GetString(parameters, "name"),
+                        cancellationToken).ConfigureAwait(false);
+                    return new { workspaces = MapWorkspaces(workspaces) };
                 }
                 case "chat.workspace.delete":
                 {
+                    var path = GetString(parameters, "path") ?? string.Empty;
+                    // 侧栏删除工作区会连同组内会话一起移入回收站；输入区的工作区菜单只移除历史记录
+                    if (GetBool(parameters, "deleteSessions"))
+                    {
+                        var payload = await _sessions.DeleteWorkspaceAsync(path, cancellationToken)
+                            .ConfigureAwait(false);
+                        return new
+                        {
+                            sessions = MapSessions(payload.Sessions),
+                            activeId = payload.ActiveId,
+                        };
+                    }
+
                     var session = RequireSession();
-                    var workspaces = await session.DeleteWorkspaceAsync(
-                        GetString(parameters, "path") ?? string.Empty).ConfigureAwait(false);
+                    var workspaces = await session.DeleteWorkspaceAsync(path).ConfigureAwait(false);
                     return new { workspaces = MapWorkspaces(workspaces) };
                 }
                 case "chat.ask":
@@ -397,18 +417,18 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private static IReadOnlyList<WorkspaceDto> MapWorkspaces(IReadOnlyList<ChatWorkspaceState> workspaces) =>
         [.. workspaces.Select(workspace => new WorkspaceDto(workspace.Path, workspace.Name))];
 
-    private static SessionSummaryDto MapSession(SessionRecord record) => new(
+    private SessionSummaryDto MapSession(SessionRecord record) => new(
         record.Id,
         record.Title,
         record.WorkspacePath,
-        record.WorkspacePath is { Length: > 0 } path ? WorkspaceName(path) : null,
+        record.WorkspacePath is { Length: > 0 } path ? _settings.WorkspaceDisplayName(path) : null,
         record.CreatedAt.ToString("O"),
         record.UpdatedAt.ToString("O"),
         record.MessageCount,
         record.LastUserText,
         record.ModelKey);
 
-    private static IReadOnlyList<SessionSummaryDto> MapSessions(IReadOnlyList<SessionRecord> records) =>
+    private IReadOnlyList<SessionSummaryDto> MapSessions(IReadOnlyList<SessionRecord> records) =>
         [.. records.Select(MapSession)];
 
     private IReadOnlyList<object> MapOps(IReadOnlyList<ChatOp> ops) => [.. ops.Select(MapOp)];
@@ -480,13 +500,6 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         {
             Logger.Warning(ex, "reset MCP connections after workspace switch failed");
         }
-    }
-
-    private static string WorkspaceName(string fullPath)
-    {
-        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var name = Path.GetFileName(trimmed);
-        return name.Length > 0 ? name : fullPath;
     }
 
     private static GlobalUsageDto ToGlobalUsage(GlobalUsageSnapshot usage) => new(
