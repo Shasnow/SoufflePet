@@ -282,6 +282,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
   ]
 
   const sessions: MockSessionData[] = []
+  // 草稿会话：真实宿主在发出第一条消息前不落盘、不进侧栏列表，mock 保持一致
+  let draft: MockSessionData | null = null
   const streamTimers = new Map<string, number>()
   const titleOverride = new Map<string, string>()
 
@@ -517,12 +519,24 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     }
   }
 
+  function getSessionData(id: string): MockSessionData | undefined {
+    return sessions.find((session) => session.summary.id === id)
+      ?? (draft?.summary.id === id ? draft : undefined)
+  }
+
   function getSessionChat(id: string): ChatSnapshotDto | undefined {
-    return sessions.find((session) => session.summary.id === id)?.chat
+    return getSessionData(id)?.chat
   }
 
   function getSessionSummary(id: string): SessionSummaryDto | undefined {
-    return sessions.find((session) => session.summary.id === id)?.summary
+    return getSessionData(id)?.summary
+  }
+
+  /// 草稿在第一条消息发出时转正：进列表、参与搜索与持久化
+  function promoteDraft(sessionId: string): void {
+    if (!draft || draft.summary.id !== sessionId) return
+    sessions.push(draft)
+    draft = null
   }
 
   function emitEvent(name: string, payload: Record<string, unknown>): void {
@@ -715,17 +729,21 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'session.new': {
+            // 和真实宿主一致：新建只产生一个内存草稿，发出第一条消息后才进列表
+            if (draft) {
+              activeId = draft.summary.id
+              emitSessions()
+              response(id, draft.summary)
+              return
+            }
             const sessionId = newId('s')
             const workspace = WORKSPACE
             const chat = emptyChat(sessionId)
             chat.workspace = workspace
-            const summary = {
-              ...summaryOf(sessionId, '新会话', workspace),
-            }
-            sessions.push({ summary, chat })
+            draft = { summary: { ...summaryOf(sessionId, '新会话', workspace) }, chat }
             activeId = sessionId
             emitSessions()
-            response(id, summary)
+            response(id, draft.summary)
             return
           }
           case 'session.open': {
@@ -767,10 +785,13 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             }
             sessions.splice(index, 1)
             if (sessions.length === 0) {
-              const fallback = { ...summaryOf('s-new', '新会话', WORKSPACE) }
-              sessions.push({ summary: fallback, chat: emptyChat('s-new') })
+              // 删掉最后一个会话后补草稿，而不是立刻造出一个已保存的空会话
+              const draftId = newId('s')
+              draft = { summary: summaryOf(draftId, '新会话', WORKSPACE), chat: emptyChat(draftId) }
+              activeId = draftId
+            } else if (activeId === sessionId) {
+              activeId = sessions[0].summary.id
             }
-            if (activeId === sessionId) activeId = sessions[0].summary.id
             emitSessions()
             response(id, {
               sessions: sessions.map((session) => session.summary),
@@ -784,11 +805,13 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
               fail(id, 'conflict', '没有活动会话')
               return
             }
+            promoteDraft(sessionId)
             stream(
               sessionId,
               String(payload.text ?? ''),
               (payload.attachmentNames as string[] | undefined) ?? [],
             )
+            emitSessions()
             response(id, null)
             return
           }

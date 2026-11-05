@@ -61,11 +61,11 @@ await page.evaluate(() => {
 await page.waitForTimeout(400)
 await page.screenshot({ path: join(outDir, 'm4-migrated.png') })
 
-// 新建会话：走侧栏真实交互
+// 新建会话：走侧栏真实交互；此时只是空白草稿，不应立刻出现在侧栏
 await page.locator('.nav-new').click()
 await page.waitForSelector('.welcome', { timeout: 10_000 })
 await page.waitForTimeout(400)
-assert(await page.locator('.session-item').count() === 2, '新建会话后侧栏数量不对')
+assert(await page.locator('.session-item').count() === 1, '新会话在发出消息前就进了侧栏')
 await page.screenshot({ path: join(outDir, 'm4-new-session.png') })
 
 // 发送一条消息，验证真实流式回复

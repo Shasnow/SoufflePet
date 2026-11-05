@@ -288,7 +288,7 @@ export function Sidebar() {
 
           {groups.length === 0 ? (
             <div className="sidebar-empty">
-              {query ? '没有匹配的会话。' : '还没有会话，点「新会话」开始。'}
+              {query ? '没有匹配的会话。' : '还没有会话，发出第一条消息后会出现在这里。'}
             </div>
           ) : (
             groups.map((group) => (

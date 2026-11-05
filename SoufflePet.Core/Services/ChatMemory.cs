@@ -78,6 +78,7 @@ public sealed class ChatMemory
 
     private readonly Lock _gate = new();
     private readonly SouffleSettings _settings;
+    private readonly string _root;
     private readonly string _conversationsPath;
     private readonly string _profilePath;
     private readonly string _windowPath;
@@ -121,7 +122,8 @@ public sealed class ChatMemory
     {
         _settings = settings;
 
-        Directory.CreateDirectory(root);
+        // 目录按需创建：草稿会话在发出第一条消息前不应该在磁盘上留下任何东西。
+        _root = root;
         _conversationsPath = Path.Combine(root, conversationFileName);
         _profilePath = profilePath;
         _windowPath = Path.Combine(root, "window.json");
@@ -129,6 +131,19 @@ public sealed class ChatMemory
         LoadProfile();
         LoadTurns();
         LoadWindow();
+    }
+
+    /// <summary>会话目录；首次写入时才真正创建（草稿会话保持在纯内存状态）。</summary>
+    private void EnsureDirectory()
+    {
+        try
+        {
+            if (!Directory.Exists(_root)) Directory.CreateDirectory(_root);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "create session directory failed path={Path}", _root);
+        }
     }
 
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
@@ -188,6 +203,7 @@ public sealed class ChatMemory
 
             try
             {
+                EnsureDirectory();
                 File.AppendAllText(_conversationsPath,
                     JsonSerializer.Serialize(turn, LineJsonOptions) + Environment.NewLine);
             }
@@ -294,6 +310,7 @@ public sealed class ChatMemory
         _windowTurns = turns;
         try
         {
+            EnsureDirectory();
             File.WriteAllText(_windowPath, JsonSerializer.Serialize(new WindowState { Turns = turns }, JsonOptions));
         }
         catch (Exception ex)

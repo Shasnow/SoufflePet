@@ -133,7 +133,12 @@ public sealed class ChatSessionStore
             }
         }
 
-        if (alive.Count == 0) alive.Add(CreateEmptyRecord(out _));
+        if (alive.Count == 0)
+        {
+            // 没有已落盘会话时不伪造空会话：由 ChatSessionManager 在内存里开一个草稿，
+            // 真正发出第一条消息时才写索引与目录。
+            return new ChatSessionIndex { ActiveSessionId = null, Sessions = [] };
+        }
 
         var active = alive.Any(record => string.Equals(record.Id, index?.ActiveSessionId, StringComparison.Ordinal))
             ? index!.ActiveSessionId
@@ -160,17 +165,31 @@ public sealed class ChatSessionStore
         }
     }
 
-    /// <summary>新建一个空会话目录并返回它的索引记录。</summary>
-    public SessionRecord CreateEmptyRecord(out string directory)
+    /// <summary>
+    /// 生成一条会话记录但不在磁盘上创建任何东西（草稿会话：首条消息发出时才落盘）。
+    /// </summary>
+    public SessionRecord NewDraftRecord(string? workspacePath)
     {
-        var id = NewSessionId();
-        directory = SessionDirectory(id);
-        Directory.CreateDirectory(directory);
-        var conversation = ConversationPath(id);
-        if (!File.Exists(conversation)) File.WriteAllText(conversation, string.Empty);
-
         var now = DateTimeOffset.Now;
-        return new SessionRecord(id, DefaultTitle, null, now, now, 0, null, null);
+        return new SessionRecord(NewSessionId(), DefaultTitle, workspacePath, now, now, 0, null, null);
+    }
+
+    /// <summary>
+    /// 删除草稿会话的残留目录：草稿从未写入过索引/对话，直接删目录，不进回收站。
+    /// 目录不存在时静默返回。
+    /// </summary>
+    public void DeleteDraft(string id)
+    {
+        if (!IsSafeId(id)) return;
+        try
+        {
+            var directory = SessionDirectory(id);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "delete draft directory failed id={Id}", id);
+        }
     }
 
     /// <summary>删除会话：目录移入 sessions/.deleted/&lt;id&gt;-&lt;时间戳&gt;，可人工恢复。</summary>

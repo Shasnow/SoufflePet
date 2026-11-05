@@ -54,6 +54,13 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     private readonly SouffleSettings _settings;
     private readonly Dictionary<string, ChatSession> _open = new(StringComparer.Ordinal);
     private readonly List<SessionRecord> _records;
+
+    /// <summary>
+    /// 草稿会话 id：已创建但还没有发出任何消息。它们留在 <see cref="_records" /> 里以便
+    /// 重命名/打开，但既不写 sessions.json，也不出现在侧栏列表，首条消息发出后才转正。
+    /// </summary>
+    private readonly HashSet<string> _drafts = new(StringComparer.Ordinal);
+
     private string? _activeId;
     private bool _disposed;
 
@@ -70,6 +77,17 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
         var index = _store.Load();
         _records = index.Sessions.ToList();
+
+        if (_records.Count == 0)
+        {
+            // 首次启动 / 所有会话都被删掉：先只开一个内存草稿，等第一条消息再落盘
+            var draft = CreateAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+            _open.TryGetValue(draft.Id, out var draftSession);
+            draftSession?.Activate();
+            Save();
+            Logger.Information("no persisted sessions; draft created id={Id}", draft.Id);
+            return;
+        }
 
         var preferred = !string.IsNullOrWhiteSpace(settings.UiLastSessionId)
             && _records.Any(record => string.Equals(record.Id, settings.UiLastSessionId, StringComparison.Ordinal))
@@ -101,9 +119,13 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     {
         get
         {
-            lock (_gate) return [.. _records];
+            lock (_gate) return PersistedLocked();
         }
     }
+
+    /// <summary>已落盘会话（草稿不出现在侧栏/搜索结果里）。</summary>
+    private List<SessionRecord> PersistedLocked() =>
+        [.. _records.Where(record => !_drafts.Contains(record.Id))];
 
     /// <summary>当前活动会话；第一个快照与没有指定 sessionId 的命令都用它。</summary>
     public ChatSession? ActiveSession
@@ -122,7 +144,12 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
     public event Action<ChatSessionListPayload>? SessionsChanged;
 
-    public Task<SessionRecord> CreateAsync(string? workspacePath, CancellationToken cancellationToken)
+    /// <summary>
+    /// 新建会话：只在内存里开一个草稿，不写 sessions.json、不建会话目录。
+    /// 草稿在第一条消息发出后由 <see cref="OnSessionSummary" /> 转正并进入侧栏列表。
+    /// 已经停在空白草稿上时直接复用它；其它遗留草稿会被丢弃，避免堆出多个隐形会话。
+    /// </summary>
+    public async Task<SessionRecord> CreateAsync(string? workspacePath, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string? full = null;
@@ -149,22 +176,75 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
             _settings.Save();
         }
 
-        var record = _store.CreateEmptyRecord(out _);
-        record = record with { WorkspacePath = full };
+        // 已经停在空白草稿上：直接复用它（连点「新会话」不会丢正在输入的内容，也不会堆出多个草稿）
+        SessionRecord? activeDraft;
+        lock (_gate)
+        {
+            activeDraft = _activeId is not null && _drafts.Contains(_activeId)
+                ? _records.FirstOrDefault(record => record.Id == _activeId)
+                : null;
+        }
 
+        if (activeDraft is not null)
+        {
+            var session = await OpenAsync(activeDraft.Id, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(activeDraft.WorkspacePath, full, StringComparison.OrdinalIgnoreCase))
+            {
+                await session.SwitchWorkspaceAsync(full ?? string.Empty).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    var index = _records.FindIndex(record => record.Id == activeDraft.Id);
+                    if (index >= 0) _records[index] = _records[index] with { WorkspacePath = full };
+                }
+
+                activeDraft = activeDraft with { WorkspacePath = full };
+            }
+
+            return activeDraft;
+        }
+
+        var discarded = RemoveDraftsLocked();
+
+        var record = _store.NewDraftRecord(full);
         lock (_gate)
         {
             _records.Add(record);
+            _drafts.Add(record.Id);
             _activeId = record.Id;
         }
 
-        var session = OpenCore(record.Id);
-        session?.Activate();
-        PersistActive();
-        Save();
-        RaiseSessionsChanged();
-        Logger.Information("session created id={Id} workspace={Workspace}", record.Id, full);
-        return Task.FromResult(record);
+        var created = OpenCore(record.Id);
+        created?.Activate();
+
+        foreach (var (id, draft) in discarded)
+        {
+            await draft.DisposeAsync().ConfigureAwait(false);
+            _store.DeleteDraft(id);
+        }
+
+        Logger.Information("draft session created id={Id} workspace={Workspace}", record.Id, full);
+        return record;
+    }
+
+    /// <summary>
+    /// 清掉所有还没发过消息的草稿（含当前正在看的那个），返回需要释放的会话实例与其 id。
+    /// 草稿没有内容可丢，连点「新会话」不会堆出多个隐形会话。
+    /// </summary>
+    private List<(string Id, ChatSession Session)> RemoveDraftsLocked()
+    {
+        List<(string, ChatSession)> removed = [];
+        lock (_gate)
+        {
+            foreach (var id in _drafts.ToList())
+            {
+                if (_open.Remove(id, out var session) && session is not null) removed.Add((id, session));
+                _records.RemoveAll(record => record.Id == id);
+                _drafts.Remove(id);
+                if (string.Equals(_activeId, id, StringComparison.Ordinal)) _activeId = null;
+            }
+        }
+
+        return removed;
     }
 
     public async Task<ChatSession> OpenAsync(string sessionId, CancellationToken cancellationToken)
@@ -226,10 +306,12 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         ChatSession? session = null;
+        bool draft;
         lock (_gate)
         {
             if (!_records.Any(record => record.Id == sessionId))
                 throw new ChatSessionException("not_found", "会话不存在");
+            draft = _drafts.Remove(sessionId);
             _open.Remove(sessionId, out session);
         }
 
@@ -239,8 +321,15 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
             await session.DisposeAsync().ConfigureAwait(false);
         }
 
-        if (!_store.Delete(sessionId))
+        // 草稿从没落过盘：删掉可能残留的空目录即可，不进回收站
+        if (draft)
+        {
+            _store.DeleteDraft(sessionId);
+        }
+        else if (!_store.Delete(sessionId))
+        {
             throw new ChatSessionException("io_error", "删除会话目录失败");
+        }
 
         string? nextActive;
         lock (_gate)
@@ -249,6 +338,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
             if (string.Equals(_activeId, sessionId, StringComparison.Ordinal))
             {
                 _activeId = _records
+                    .Where(record => !_drafts.Contains(record.Id))
                     .OrderByDescending(record => record.UpdatedAt)
                     .Select(record => record.Id)
                     .FirstOrDefault();
@@ -259,7 +349,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
         if (nextActive is null)
         {
-            // 删掉最后一个会话：立即建一个空会话，保证页面始终有可打开的会话
+            // 删掉最后一个会话：内存里补一个草稿，保证页面有可打开的会话
             var replacement = await CreateAsync(null, cancellationToken).ConfigureAwait(false);
             nextActive = replacement.Id;
         }
@@ -269,7 +359,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         RaiseSessionsChanged();
 
         ChatSessionListPayload payload;
-        lock (_gate) payload = new ChatSessionListPayload([.. _records], _activeId);
+        lock (_gate) payload = new ChatSessionListPayload(PersistedLocked(), _activeId);
         return payload;
     }
 
@@ -279,8 +369,9 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         query = (query ?? string.Empty).Trim();
         lock (_gate)
         {
-            if (query.Length == 0) return Task.FromResult<IReadOnlyList<SessionRecord>>([.. _records]);
-            var result = _records
+            var source = PersistedLocked();
+            if (query.Length == 0) return Task.FromResult<IReadOnlyList<SessionRecord>>(source);
+            var result = source
                 .Where(record =>
                     Contains(record.Title, query)
                     || Contains(record.LastUserText, query)
@@ -323,6 +414,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
     private void OnSessionSummary(string sessionId, ChatSessionSummary summary)
     {
+        bool promoted = false;
         lock (_gate)
         {
             var index = _records.FindIndex(record => record.Id == sessionId);
@@ -336,6 +428,21 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
                 LastUserText = summary.LastUserText,
                 ModelKey = summary.ModelKey,
             };
+
+            // 草稿的第一条消息已经进了会话：落盘并进入侧栏列表
+            if (_drafts.Contains(sessionId) && summary.MessageCount > 0)
+            {
+                _drafts.Remove(sessionId);
+                promoted = true;
+            }
+        }
+
+        if (promoted)
+        {
+            // 目录由 ChatMemory 在写入对话时按需创建；这里只把记录写进索引，
+            // 避免与正在进行的 AddTurn 抢同一个 conversation.jsonl。
+            PersistActive();
+            Logger.Information("draft session persisted id={Id} title={Title}", sessionId, summary.Title);
         }
 
         Save();
@@ -345,7 +452,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     private void RaiseSessionsChanged()
     {
         ChatSessionListPayload payload;
-        lock (_gate) payload = new ChatSessionListPayload([.. _records], _activeId);
+        lock (_gate) payload = new ChatSessionListPayload(PersistedLocked(), _activeId);
         try
         {
             SessionsChanged?.Invoke(payload);
@@ -359,7 +466,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     private void PersistActive()
     {
         string? active;
-        lock (_gate) active = _activeId;
+        lock (_gate) active = _activeId is not null && !_drafts.Contains(_activeId) ? _activeId : null;
 
         if (string.Equals(_settings.UiLastSessionId, active, StringComparison.Ordinal)) return;
         _settings.UiLastSessionId = active ?? string.Empty;
@@ -370,7 +477,11 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     {
         ChatSessionIndex index;
         lock (_gate)
-            index = new ChatSessionIndex { ActiveSessionId = _activeId, Sessions = [.. _records] };
+        {
+            var active = _activeId is not null && !_drafts.Contains(_activeId) ? _activeId : null;
+            index = new ChatSessionIndex { ActiveSessionId = active, Sessions = PersistedLocked() };
+        }
+
         _store.Save(index);
     }
 
@@ -380,12 +491,18 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     public async ValueTask DisposeAsync()
     {
         List<ChatSession> sessions;
+        List<string> drafts;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
             sessions = [.. _open.Values];
+            drafts = [.. _drafts];
             _open.Clear();
+            // 草稿记录不能进索引：清掉标记的同时把记录从内存表里移除
+            if (_activeId is not null && _drafts.Contains(_activeId)) _activeId = null;
+            _drafts.Clear();
+            _records.RemoveAll(record => drafts.Contains(record.Id));
         }
 
         foreach (var session in sessions)
@@ -400,6 +517,9 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
                 Logger.Warning(ex, "dispose session failed id={Id}", session.Id);
             }
         }
+
+        // 草稿没有写进索引：退出时把可能残留的目录一并清掉
+        foreach (var id in drafts) _store.DeleteDraft(id);
 
         Save();
     }

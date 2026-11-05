@@ -211,7 +211,7 @@ interface AppSnapshotDto {
 | 方法 | 参数 | 返回 |
 | --- | --- | --- |
 | `session.list` | `{}` | `SessionSummaryDto[]` |
-| `session.new` | `{workspacePath?}` | `SessionSummaryDto` |
+| `session.new` | `{workspacePath?}` | `SessionSummaryDto`（草稿：不落盘、不进列表，首条消息后才出现在 `session.list`） |
 | `session.open` | `{sessionId}` | `ChatSnapshotDto` |
 | `session.rename` | `{sessionId,title}` | `SessionSummaryDto` |
 | `session.delete` | `{sessionId}` | `{sessions:SessionSummaryDto[],activeId:string|null}` |
@@ -417,6 +417,7 @@ type ChatOp =
 - `conversation.jsonl` 行格式与旧文件相同（`Time/Role/Text/...`），旧文件可被新代码直接读。
 - `SoufflePet.json` 新增 `UiAccentColor`、`UiAccentFollowSystem`、`UiSidebarCollapsed`、`UiLastSessionId`；迁移期的 `UiRenderer` 已在 M7 删除（旧配置里的该键会被忽略）。
 - 迁移前写 `conversations.jsonl.bak`；删除会话进回收站；索引损坏时按目录重建。
+- 草稿会话只在内存里：`session.new` 不写 `sessions.json`、不建 `sessions/<id>/`，首条用户消息落盘后才有目录与索引记录（见 §13-21）。
 - `statistics.json`、`profile.json` 不迁移、不改字段。
 
 ## 8. 安全规则
@@ -499,3 +500,4 @@ type ChatOp =
 18. M8 安全/性能：`AppWebWindow` 只允许 SPA 同源顶层导航，跨源 http(s) 交给系统浏览器、其它 scheme 直接取消；`NewWindowRequested` 不在应用内开新窗口；页面默认右键菜单按输入/选区放行，其余禁用。Windows 11 应用 DWM 圆角；RPC 耗时 ≥16 ms 打 Debug 日志。
 19. 桥并发/取消：写请求串行化，只读与窗口命令不占写锁；请求使用窗口生命周期 token。`event` envelope 增加顶层 `rev` 以支持非对象 payload；`payload` 不再被强制转成空对象。
 20. 设置落盘改为锁内序列化 + 临时文件原子替换；`/local-file` 按路径缓存 token 并每分钟清理过期项；`chat.file.open` 收窄到会话附件/工作区并拒绝可执行扩展名。
+21. 新建会话延迟落盘：`session.new` 先只在内存里开草稿（不写 `sessions.json`、不建会话目录、不进侧栏与搜索），首条用户消息发出后由宿主转正；连点「新会话」复用/收敛草稿。删除最后一个会话时同样只补草稿，不再立刻造出空的已保存会话。

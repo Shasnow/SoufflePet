@@ -247,7 +247,18 @@ public sealed class ChatSessionTests : IAsyncLifetime
         Assert.Equal("旧会话第一条", migrated.Title);
         Assert.True(File.Exists(legacy + ".bak"));
 
+        // 新建只是内存草稿：不进列表、不建目录
         var created = await manager.CreateAsync(null, CancellationToken.None);
+        Assert.DoesNotContain(manager.Sessions, record => record.Id == created.Id);
+        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, created.Id)));
+
+        // 发出第一条消息才落盘并进入列表
+        var draft = manager.ActiveSession!;
+        await draft.SendAsync("第一条消息", null, CancellationToken.None);
+        await draft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(manager.Sessions, record => record.Id == created.Id);
+        Assert.True(Directory.Exists(Path.Combine(SessionsRoot, created.Id)));
+
         await manager.RenameAsync(created.Id, "改过的标题", CancellationToken.None);
         var search = await manager.SearchAsync("改过", CancellationToken.None);
         Assert.Contains(search, record => record.Id == created.Id);
@@ -260,6 +271,46 @@ public sealed class ChatSessionTests : IAsyncLifetime
         var opened = await manager.OpenAsync(migrated.Id, CancellationToken.None);
         Assert.Equal(2, opened.Snapshot.Messages.Count);
         Assert.True(File.Exists(legacy));
+    }
+
+    [Fact]
+    public async Task DraftSessionIsNotPersistedUntilFirstMessage()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+
+        // 全新的数据目录：只有一个内存草稿，索引与目录都是空的
+        Assert.Empty(manager.Sessions);
+        var draft = manager.ActiveSession;
+        Assert.NotNull(draft);
+        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, draft!.Id)));
+        var indexJson = await File.ReadAllTextAsync(Path.Combine(_root, "sessions.json"));
+        Assert.DoesNotContain(draft.Id, indexJson);
+
+        await draft.SendAsync("草稿转正", null, CancellationToken.None);
+        await draft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var record = Assert.Single(manager.Sessions);
+        Assert.Equal(draft.Id, record.Id);
+        Assert.Equal("草稿转正", record.Title);
+        Assert.True(File.Exists(Path.Combine(SessionsRoot, draft.Id, "conversation.jsonl")));
+        indexJson = await File.ReadAllTextAsync(Path.Combine(_root, "sessions.json"));
+        Assert.Contains(draft.Id, indexJson);
+    }
+
+    [Fact]
+    public async Task RepeatedCreateKeepsOnlyOneInvisibleDraft()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+        Assert.Empty(manager.Sessions);
+
+        var first = await manager.CreateAsync(null, CancellationToken.None);
+        var second = await manager.CreateAsync(null, CancellationToken.None);
+        // 已经停在空白草稿上：复用同一个，不会堆出第二个隐形会话
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(second.Id, manager.ActiveSessionId);
+        Assert.Empty(manager.Sessions);
+        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, first.Id)));
+        Assert.False(Directory.Exists(Path.Combine(SessionsRoot, second.Id)));
     }
 
     [Fact]
@@ -291,10 +342,18 @@ public sealed class ChatSessionTests : IAsyncLifetime
         {
             var approved = await _access.RequestApprovalAsync("run_shell_command", "echo two", ct);
             await Task.Yield();
-            yield return new LlmTextDelta(approved ? "第二会话允许" : "第二会话拒绝");
+            yield return new LlmTextDelta(approved ? "允许执行" : "拒绝执行");
         }
 
-        // 第一个会话已加载并订阅了审批事件；审批必须仍落到真正在生成的新会话
+        // 先让第一个会话发一条消息落盘，它仍然保持打开并订阅着审批事件
+        await first.SendAsync("第一个会话跑命令", null, CancellationToken.None);
+        var firstApproval = await WaitForAsync(() =>
+            first.Snapshot.Messages.FirstOrDefault(message => message.Kind == ChatMessageKinds.Approval));
+        await first.DecideApprovalAsync(firstApproval.Id, approve: true);
+        await first.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Single(manager.Sessions);
+
+        // 再开一个新会话（草稿）；审批必须仍落到真正在生成的新会话
         var second = await manager.CreateAsync(null, CancellationToken.None);
         var active = manager.ActiveSession!;
         Assert.NotEqual(first.Id, active.Id);
@@ -305,8 +364,8 @@ public sealed class ChatSessionTests : IAsyncLifetime
         await active.DecideApprovalAsync(approval.Id, approve: true);
         await active.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal("第二会话允许", active.Snapshot.Messages.Last().Text);
-        Assert.DoesNotContain(first.Snapshot.Messages, message => message.Kind == ChatMessageKinds.Approval);
+        Assert.Equal("允许执行", active.Snapshot.Messages.Last().Text);
+        Assert.DoesNotContain(first.Snapshot.Messages, message => message.Id == approval.Id);
         Assert.Equal(second.Id, active.Id);
     }
 
@@ -344,9 +403,16 @@ public sealed class ChatSessionTests : IAsyncLifetime
     public async Task DeletingActiveSessionSwitchesToRemainingThenCreatesReplacement()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+
+        // 先把第一个会话发条消息落盘（全新的数据目录只有一个草稿）
+        var draft = manager.ActiveSession!;
+        await draft.SendAsync("第一个会话", null, CancellationToken.None);
+        await draft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
         var first = Assert.Single(manager.Sessions);
+
         var second = await manager.CreateAsync(null, CancellationToken.None);
         Assert.Equal(second.Id, manager.ActiveSessionId);
+        Assert.Single(manager.Sessions); // 草稿还没进列表
 
         var afterSecond = await manager.DeleteAsync(second.Id, CancellationToken.None);
         Assert.Equal(first.Id, afterSecond.ActiveId);
@@ -355,7 +421,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
         var afterFirst = await manager.DeleteAsync(first.Id, CancellationToken.None);
         Assert.NotNull(afterFirst.ActiveId);
         Assert.NotEqual(first.Id, afterFirst.ActiveId);
-        Assert.Single(afterFirst.Sessions);
+        Assert.Empty(afterFirst.Sessions); // 替代品是内存草稿
         Assert.NotNull(manager.ActiveSession);
         Assert.True(Directory.Exists(Path.Combine(SessionsRoot, ".deleted")));
     }
