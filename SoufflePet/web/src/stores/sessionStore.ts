@@ -49,7 +49,10 @@ export function sortSessions(sessions: SessionSummaryDto[]): SessionSummaryDto[]
   return [...sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }
 
-export function groupSessions(sessions: SessionSummaryDto[]): {
+export function groupSessions(
+  sessions: SessionSummaryDto[],
+  workspaces: { path: string; name: string }[] = [],
+): {
   key: string
   name: string
   sessions: SessionSummaryDto[]
@@ -60,6 +63,12 @@ export function groupSessions(sessions: SessionSummaryDto[]): {
     const name = session.workspaceName ?? (key ? key.split(/[\\/]/).filter(Boolean).pop() ?? key : '默认工作区')
     if (!groups.has(key)) groups.set(key, { key, name, sessions: [] })
     groups.get(key)!.sessions.push(session)
+  }
+
+  // 没有任何会话的工作区也要显示：否则会话删空后分组连同「新建会话」入口一起消失
+  for (const workspace of workspaces) {
+    if (!workspace.path || groups.has(workspace.path)) continue
+    groups.set(workspace.path, { key: workspace.path, name: workspace.name, sessions: [] })
   }
   return [...groups.values()]
 }

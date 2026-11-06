@@ -111,7 +111,8 @@ public sealed record AppSnapshotDto(
     GlobalUsageDto Usage,
     IReadOnlyList<SessionSummaryDto> Sessions,
     string? ActiveSessionId,
-    ChatSnapshotDto? Chat);
+    ChatSnapshotDto? Chat,
+    IReadOnlyList<WorkspaceDto> Workspaces);
 
 public sealed record WindowStateDto(bool Visible, bool Maximized);
 

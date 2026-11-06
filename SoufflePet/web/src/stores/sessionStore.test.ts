@@ -49,4 +49,16 @@ describe('session store helpers', () => {
     expect(groups[0].sessions.map((s) => s.id)).toEqual(['a', 'b'])
     expect(groups[0].name).toBe('work')
   })
+
+  it('keeps workspaces without sessions', () => {
+    const groups = groupSessions(
+      [session('a', 'a', '2026-11-05T10:00:00Z', 'D:/work')],
+      [
+        { path: 'D:/work', name: 'work' },
+        { path: 'D:/empty', name: '空工作区' },
+      ],
+    )
+    expect(groups.map((group) => group.key)).toEqual(['D:/work', 'D:/empty'])
+    expect(groups[1]).toMatchObject({ name: '空工作区', sessions: [] })
+  })
 })

@@ -111,7 +111,35 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
             ToGlobalUsage(_statistics.GlobalUsage),
             MapSessions(records),
             _sessions.ActiveSessionId,
-            chat);
+            chat,
+            MapWorkspaces());
+    }
+
+    /// <summary>全部已知工作区（含没有任何会话的），侧栏据此保留空工作区分组与新建入口。</summary>
+    private IReadOnlyList<WorkspaceDto> MapWorkspaces()
+    {
+        var result = new List<WorkspaceDto>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var workspacePath in _settings.WorkspacePaths)
+        {
+            if (string.IsNullOrWhiteSpace(workspacePath)) continue;
+            string full;
+            try
+            {
+                full = Path.GetFullPath(workspacePath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "invalid workspace path {Path}", workspacePath);
+                continue;
+            }
+
+            // 目录已被删除的工作区不再展示，与 ChatSnapshot.Workspaces 的过滤规则保持一致
+            if (!Directory.Exists(full) || !seen.Add(full)) continue;
+            result.Add(new WorkspaceDto(full, _settings.WorkspaceDisplayName(full)));
+        }
+
+        return result;
     }
 
     public async Task<object?> HandleAsync(

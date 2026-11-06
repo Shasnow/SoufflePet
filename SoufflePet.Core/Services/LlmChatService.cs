@@ -807,11 +807,13 @@ public sealed class LlmChatService(
     /// </summary>
     private static void BuildWorkspaceBlock(StringBuilder builder)
     {
-        var path = Path.Combine(Environment.CurrentDirectory, AgentsFileName);
+        // 按当前会话的逻辑工作目录读取，不依赖进程 cwd：进程 cwd 可能已被另一个会话占用
+        var current = WorkspaceContext.Current;
+        var path = Path.Combine(current, AgentsFileName);
         builder.AppendLine();
         builder.AppendLine("## 工作区");
         builder.AppendLine();
-        builder.AppendLine($"当前工作区：'{Environment.CurrentDirectory}'");
+        builder.AppendLine($"当前工作区：'{current}'");
         try
         {
             if (!File.Exists(path)) return;

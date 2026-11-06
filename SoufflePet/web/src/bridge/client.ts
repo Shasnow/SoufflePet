@@ -263,6 +263,10 @@ export class BridgeClient {
         const data = payload as { sessionId?: string; ops?: ChatOp[] }
         if (data.sessionId && Array.isArray(data.ops)) {
           useChatStore.getState().applyOps(data.sessionId, data.ops)
+          // 工作区列表是全宿主共享的，切换/重命名/删除后同步给侧栏，空的也要保留
+          for (const op of data.ops) {
+            if (op.op === 'workspace') useAppStore.getState().setWorkspaces(op.workspaces ?? [])
+          }
         }
         break
       }
@@ -310,6 +314,7 @@ export class BridgeClient {
     const app = useAppStore.getState()
     app.setPet(data.pet)
     app.setUsage(data.usage)
+    app.setWorkspaces(data.workspaces ?? [])
     app.setReady(true)
     app.setBridgeError(null)
 

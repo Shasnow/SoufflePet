@@ -209,8 +209,10 @@ public sealed class McpToolService(IMcpConfigStore configStore) : IMcpToolServic
                 Name = server.Name,
                 Command = server.Command.Trim(),
                 Arguments = server.Arguments,
+                // MCP 服务器进程由整个宿主共享，连接一次后所有会话复用，
+                // 因此工作目录固定为应用目录，不跟随某个会话的工作区
                 WorkingDirectory = string.IsNullOrWhiteSpace(server.WorkingDirectory)
-                    ? Environment.CurrentDirectory
+                    ? AppContext.BaseDirectory
                     : server.WorkingDirectory,
                 InheritEnvironmentVariables = true,
                 EnvironmentVariables = server.Environment.ToDictionary(kv => kv.Key, kv => (string?)kv.Value),

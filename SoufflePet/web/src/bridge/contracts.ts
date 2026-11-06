@@ -97,6 +97,7 @@ export interface ChatSnapshotDto {
   models: ChatModelDto[]
   selectedModelKey: string | null
   approvalMode: ApprovalMode
+  /** 未绑定工作区时为 null；宿主省略 null 字段，运行时可能收到 undefined，store 会归一为 null。 */
   workspace: WorkspaceDto | null
   workspaces: WorkspaceDto[]
   usage: UsageDto | null
@@ -144,6 +145,8 @@ export interface AppSnapshotDto {
   sessions: SessionSummaryDto[]
   activeSessionId: string | null
   chat: ChatSnapshotDto | null
+  /** 全部已知工作区（含没有会话的）；同样会被 WhenWritingNull 省略，读取时按空数组兜底 */
+  workspaces: WorkspaceDto[]
 }
 
 /* ============================== 设置 DTO ============================== */

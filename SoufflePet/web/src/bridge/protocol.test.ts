@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessageDto, ChatSnapshotDto } from './contracts'
 import { parseIncoming, makeRequest } from './protocol'
-import { reduceChatOps } from '@/stores/chatStore'
+import { reduceChatOps, normalizeChatSession } from '@/stores/chatStore'
 
 function message(id: string, text = id): ChatMessageDto {
   return { id, kind: 'assistant', text, time: new Date(0).toISOString() }
@@ -28,6 +28,16 @@ function snapshot(): ChatSnapshotDto {
 }
 
 describe('chat op reducer', () => {
+  it('宿主省略 null 字段时把 workspace 归一到 null', () => {
+    const raw = { ...snapshot(), workspace: undefined } as unknown as ChatSnapshotDto
+    expect(normalizeChatSession(raw).workspace).toBeNull()
+
+    const switched = reduceChatOps(snapshot(), [
+      { op: 'workspace', workspace: undefined as unknown as ChatSnapshotDto['workspace'], workspaces: [] },
+    ])
+    expect(switched.workspace).toBeNull()
+  })
+
   it('adds, inserts, removes and patches messages by id', () => {
     let state = reduceChatOps(snapshot(), [{ op: 'msg:add', msg: message('b') }])
     expect(state.messages.map((m) => m.id)).toEqual(['a', 'b'])

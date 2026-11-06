@@ -579,6 +579,15 @@
   font-size: 13px;
 }
 
+/* 空工作区里的占位新建入口 */
+.session-new {
+  color: var(--text-3);
+}
+
+.session-new .title {
+  font-size: 12.5px;
+}
+
 .session-item .time {
   flex: none;
   color: var(--text-3);

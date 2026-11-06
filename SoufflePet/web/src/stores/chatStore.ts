@@ -67,7 +67,8 @@ export function reduceChatOps(session: ChatSnapshotDto, ops: ChatOp[]): ChatSnap
         break
       }
       case 'workspace': {
-        next = { ...next, workspace: op.workspace, workspaces: op.workspaces }
+        // 宿主用 WhenWritingNull，未绑定工作区时 workspace 字段会被省略（undefined），补齐成 null
+        next = { ...next, workspace: op.workspace ?? null, workspaces: op.workspaces }
         break
       }
       case 'models': {
@@ -93,6 +94,16 @@ export function reduceChatOps(session: ChatSnapshotDto, ops: ChatOp[]): ChatSnap
   return next
 }
 
+/**
+ * 宿主 WebJson 用 WhenWritingNull 序列化，值为 null 的字段会被省略，
+ * 前端收到的会话里 workspace 可能是 undefined。这里统一补齐为 null，
+ * 否则「workspace === null」这类判空在真实宿主下恒为 false。
+ */
+export function normalizeChatSession(session: ChatSnapshotDto): ChatSnapshotDto {
+  if (session.workspace !== undefined) return session
+  return { ...session, workspace: null }
+}
+
 interface ChatState {
   bySession: Record<string, ChatSnapshotDto>
   activeId: string | null
@@ -113,11 +124,13 @@ export const useChatStore = create<ChatState>()((set) => ({
     set((state) => ({
       activeId,
       bySession: session
-        ? { ...state.bySession, [session.sessionId]: session }
+        ? { ...state.bySession, [session.sessionId]: normalizeChatSession(session) }
         : state.bySession,
     })),
   upsertSnapshot: (session) =>
-    set((state) => ({ bySession: { ...state.bySession, [session.sessionId]: session } })),
+    set((state) => ({
+      bySession: { ...state.bySession, [session.sessionId]: normalizeChatSession(session) },
+    })),
   applyOps: (sessionId, ops) =>
     set((state) => {
       const current = state.bySession[sessionId]

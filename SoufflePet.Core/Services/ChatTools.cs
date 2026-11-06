@@ -785,7 +785,8 @@ public sealed class ChatTools
 
         try
         {
-            fullPath = Path.GetFullPath(raw);
+            // 相对路径按当前会话的逻辑工作区解析，不能依赖进程 cwd
+            fullPath = WorkspaceContext.Resolve(raw);
         }
         catch (Exception ex)
         {
@@ -1117,6 +1118,8 @@ public sealed class ChatTools
 
         var startInfo = new ProcessStartInfo("powershell.exe")
         {
+            // 命令在会话工作区里执行：每个会话有各自的逻辑工作目录，不能依赖进程 cwd
+            WorkingDirectory = WorkspaceContext.Current,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,

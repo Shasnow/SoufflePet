@@ -365,6 +365,51 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SwitchingWorkspaceDoesNotChangeProcessCurrentDirectory()
+    {
+        var workspace = Path.Combine(_root, "workspace-cwd");
+        var other = Path.Combine(_root, "workspace-cwd-other");
+        Directory.CreateDirectory(workspace);
+        Directory.CreateDirectory(other);
+
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+        var before = Directory.GetCurrentDirectory();
+
+        var record = await manager.CreateAsync(workspace, CancellationToken.None);
+        var session = manager.ActiveSession!;
+        Assert.Equal(before, Directory.GetCurrentDirectory());
+
+        await session.SwitchWorkspaceAsync(other);
+        Assert.Equal(before, Directory.GetCurrentDirectory());
+
+        await manager.OpenAsync(record.Id, CancellationToken.None);
+        Assert.Equal(before, Directory.GetCurrentDirectory());
+    }
+
+    [Fact]
+    public async Task TurnUsesSessionWorkspaceAsLogicalCurrentDirectory()
+    {
+        var workspace = Path.Combine(_root, "workspace-logical");
+        Directory.CreateDirectory(workspace);
+
+        string? seen = null;
+        var manager = CreateManager(new FakeLlm((_, _, _) =>
+        {
+            seen = WorkspaceContext.Current;
+            return Streams(new LlmTextDelta("ok"));
+        }));
+        await manager.CreateAsync(workspace, CancellationToken.None);
+
+        var session = manager.ActiveSession!;
+        await session.SendAsync("逻辑工作区", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(workspace, seen);
+        // 轮次结束后回到无会话上下文状态，不留全局痕迹
+        Assert.Equal(AppContext.BaseDirectory, WorkspaceContext.Current);
+    }
+
+    [Fact]
     public async Task ProfileIsSharedAcrossSessionMemories()
     {
         var profile = Path.Combine(_root, "profile.json");

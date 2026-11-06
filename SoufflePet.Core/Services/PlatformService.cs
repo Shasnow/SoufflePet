@@ -143,7 +143,8 @@ public class PlatformService : IDisposable
         string fullPath;
         try
         {
-            fullPath = Path.GetFullPath(raw);
+            // 相对路径按当前会话的逻辑工作区解析
+            fullPath = WorkspaceContext.Resolve(raw);
         }
         catch (Exception ex)
         {

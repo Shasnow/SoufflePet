@@ -42,6 +42,7 @@ const MORE_ITEMS: { panel: MorePanel; label: string }[] = [
 
 export function Sidebar() {
   const pet = useAppStore((state) => state.pet)
+  const workspaces = useAppStore((state) => state.workspaces)
   const sessions = useSessionStore((state) => state.sessions)
   const activeId = useSessionStore((state) => state.activeId)
   const query = useSessionStore((state) => state.query)
@@ -85,7 +86,11 @@ export function Sidebar() {
   }
 
   const filtered = useMemo(() => filterSessions(sessions, query), [sessions, query])
-  const groups = useMemo(() => groupSessions(filtered), [filtered])
+  // 搜索时不显示没有命中会话的空工作区分组
+  const groups = useMemo(
+    () => groupSessions(filtered, query ? [] : workspaces),
+    [filtered, workspaces, query],
+  )
 
   const currentPanel = route.kind === 'settings' ? route.panel : null
   const moreActive = currentPanel !== null && MORE_ITEMS.some((item) => item.panel === currentPanel)
@@ -125,7 +130,14 @@ export function Sidebar() {
   const pickWorkspace = async () => {
     try {
       const workspace = await invoke<WorkspaceDto | null>('chat.workspace.pick')
-      if (workspace) await createSession(workspace.path)
+      if (workspace) {
+        // 新选中的工作区立即进入全局列表，会话删空后分组也不会消失
+        const app = useAppStore.getState()
+        if (!app.workspaces.some((item) => item.path === workspace.path)) {
+          app.setWorkspaces([...app.workspaces, workspace])
+        }
+        await createSession(workspace.path)
+      }
     } catch (error) {
       console.warn('pick workspace failed', error)
     }
@@ -202,6 +214,9 @@ export function Sidebar() {
       )
       ids.forEach((id) => removeChat(id))
       setUpdated(result.sessions, result.activeId)
+      // 宿主推送的 workspace op 会同步全量列表，这里先本地兜底移除（无活动会话时宿主不会推 op）
+      const app = useAppStore.getState()
+      app.setWorkspaces(app.workspaces.filter((item) => item.path !== deletingWorkspace.path))
       if (ids.some((id) => id === activeId)) {
         navigate(chatRoute(result.activeId ?? undefined), true)
       }
@@ -442,19 +457,31 @@ export function Sidebar() {
                     inert={isCollapsed ? true : undefined}
                   >
                     <div className="session-list">
-                      {group.sessions.map((session) => (
-                        <SessionItem
-                          key={session.id}
-                          session={session}
-                          active={session.id === activeId}
-                          onOpen={(item) => openChat(item.id)}
-                          onRename={(item) => {
-                            setEditing(item)
-                            setEditTitle(item.title)
-                          }}
-                          onDelete={(item) => setDeleting(item)}
-                        />
-                      ))}
+                      {group.sessions.length === 0 ? (
+                        // 空工作区至少保留一个新建入口，避免分组存在却无法开始会话
+                        <button
+                          type="button"
+                          className="session-item session-new"
+                          onClick={() => void createSession(group.key)}
+                        >
+                          <Plus size={12} />
+                          <span className="title">新会话</span>
+                        </button>
+                      ) : (
+                        group.sessions.map((session) => (
+                          <SessionItem
+                            key={session.id}
+                            session={session}
+                            active={session.id === activeId}
+                            onOpen={(item) => openChat(item.id)}
+                            onRename={(item) => {
+                              setEditing(item)
+                              setEditTitle(item.title)
+                            }}
+                            onDelete={(item) => setDeleting(item)}
+                          />
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>

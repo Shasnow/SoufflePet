@@ -152,10 +152,17 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
-    /// <summary>打开会话后把进程工作目录切到该会话的工作区（没有工作区时回到应用目录）。</summary>
+    /// <summary>
+    /// 打开会话时校验工作区目录是否仍然存在，不存在就让会话回落到默认分组。
+    /// 这里只做校验：会话的工作区是逻辑工作目录，不改变进程的物理 cwd。
+    /// </summary>
     public void Activate()
     {
-        if (!ApplyWorkingDirectory(_workspacePath)) _workspacePath = null;
+        if (_workspacePath is { } path && NormalizeDirectory(path) is null)
+        {
+            _workspacePath = null;
+            Logger.Warning("workspace no longer exists, fallback to default id={Session} path={Path}", Id, path);
+        }
     }
 
     /// <summary>把会话存储迁到当前工作区对应的分组目录（由工厂注入的解析器决定）。</summary>
@@ -300,7 +307,7 @@ public sealed class ChatSession : IAsyncDisposable
                 string full;
                 try
                 {
-                    full = Path.GetFullPath(path);
+                    full = WorkspaceContext.Resolve(path, _workspacePath);
                 }
                 catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
                 {
@@ -436,14 +443,12 @@ public sealed class ChatSession : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>切换工作区：目录必须存在，进程工作目录同步切换。</summary>
+    /// <summary>切换工作区：目录必须存在；只记录为该会话的逻辑工作目录，不改变进程 cwd。</summary>
     public Task<ChatWorkspaceState?> SwitchWorkspaceAsync(string path)
     {
         string? full = NormalizeDirectory(path);
         if (!string.IsNullOrWhiteSpace(path) && full is null)
             throw new ChatSessionException("invalid_argument", "工作区目录不存在");
-        if (full is not null && !ApplyWorkingDirectory(full))
-            throw new ChatSessionException("io_error", "无法进入该工作区目录");
 
         ChatWorkspaceState? workspace;
         IReadOnlyList<ChatWorkspaceState> workspaces;
@@ -500,7 +505,6 @@ public sealed class ChatSession : IAsyncDisposable
             {
                 _workspacePath = null;
                 _settings.ActiveWorkspacePath = string.Empty;
-                ApplyWorkingDirectory(null);
             }
 
             _settings.Save();
@@ -663,10 +667,12 @@ public sealed class ChatSession : IAsyncDisposable
         LlmUsageEvent? usage = null;
         var toolBubbles = new Dictionary<string, MessageState>(StringComparer.Ordinal);
         CancellationToken token;
+        string? workspacePath;
 
         MessageState reply;
         lock (_gate)
         {
+            workspacePath = _workspacePath;
             messageText = messageText.Trim();
             var requestText = BuildUserRequestText(messageText);
             _history.Add(new ChatMessage(ChatRole.User, requestText));
@@ -769,6 +775,9 @@ public sealed class ChatSession : IAsyncDisposable
         try
         {
             CurrentTurn.Value = this;
+            // 本轮对话内的相对路径、AGENTS.md、技能目录、命令工作目录都按本会话的工作区解析；
+            // 用异步上下文而非进程 cwd，多个会话并发生成时互不干扰
+            using var workspaceScope = WorkspaceContext.Enter(workspacePath);
             await foreach (var evt in _llm.StreamAsync(model, [.. _history], token)
                                .ConfigureAwait(false))
             {
@@ -1626,22 +1635,6 @@ public sealed class ChatSession : IAsyncDisposable
 
     private ChatWorkspaceState? ToWorkspace(string? path) =>
         path is { Length: > 0 } ? new ChatWorkspaceState(path, _settings.WorkspaceDisplayName(path)) : null;
-
-    private static bool ApplyWorkingDirectory(string? path)
-    {
-        var target = string.IsNullOrEmpty(path) ? AppContext.BaseDirectory : path;
-        try
-        {
-            Directory.SetCurrentDirectory(target);
-            Logger.Debug("working directory switched to {Path}", target);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning(ex, "switch working directory to {Path} failed", target);
-            return false;
-        }
-    }
 
     private static bool IsUsable(ChatModelConfig model) =>
         !string.IsNullOrWhiteSpace(model.ModelId)

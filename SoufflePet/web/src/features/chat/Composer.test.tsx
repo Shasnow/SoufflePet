@@ -84,9 +84,24 @@ describe('Composer', () => {
   })
 
   it('已绑定工作区的会话隐藏工作区切换入口', () => {
+    useChatStore.setState({
+      bySession: {
+        s1: {
+          ...snapshot,
+          messages: [{ id: 'm1', kind: 'user', text: 'hi', time: '' }],
+        },
+      },
+      activeId: 's1',
+    })
     render(<Harness />)
     expect(screen.queryByLabelText('工作区')).toBeNull()
     expect(document.querySelector('.composer-context')).toBeNull()
+  })
+
+  it('未发送消息的新会话即使已选工作区仍可切换', () => {
+    render(<Harness />)
+    const chip = screen.getByLabelText('工作区')
+    expect(chip.textContent).toContain(snapshot.workspace?.name ?? '')
   })
 
   it('未绑定工作区的会话仍可手动切换工作区', () => {

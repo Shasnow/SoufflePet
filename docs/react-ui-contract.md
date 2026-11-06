@@ -191,6 +191,7 @@ interface AppSnapshotDto {
   sessions: SessionSummaryDto[]
   activeSessionId: string | null
   chat: ChatSnapshotDto | null
+  workspaces: WorkspaceDto[]
 }
 ```
 

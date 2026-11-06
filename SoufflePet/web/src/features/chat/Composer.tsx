@@ -104,8 +104,9 @@ export function Composer({ chat, hero = false }: ComposerProps) {
   }
 
   const canSend = chat.draft.trim().length > 0 || chat.attachments.length > 0 || chat.generating
-  // 已绑定工作区的会话不允许再改工作区，未绑定时才显示入口供手动切换
-  const canPickWorkspace = chat.workspace === null
+  // 还没发过消息的新会话（含从工作区新建的）可以随意切换工作区；
+  // 一旦有对话内容，绑定工作区的会话就不再提供入口
+  const canPickWorkspace = chat.messages.length === 0 || chat.workspace == null
 
   return (
     <div className="composer-wrap">

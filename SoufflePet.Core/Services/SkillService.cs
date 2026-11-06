@@ -76,8 +76,8 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
     {
         get
         {
-            // 每次取当前工作目录：工作区切换后技能目录要跟着走，不能构造时算完就固定
-            var current = Environment.CurrentDirectory;
+            // 每次取当前会话的逻辑工作目录：不同会话的技能目录互不影响
+            var current = WorkspaceContext.Current;
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
             List<string> directories =
@@ -326,7 +326,7 @@ public sealed class SkillService(SouffleSettings settings) : ISkillService
     /// <summary>技能目录在界面上的标签：工作目录内用相对路径，家目录用 ~ 开头，其余给绝对路径。</summary>
     public string DescribeDirectory(string directory)
     {
-        if (RelativeWithin(Environment.CurrentDirectory, directory) is { } fromCurrent) return fromCurrent;
+        if (RelativeWithin(WorkspaceContext.Current, directory) is { } fromCurrent) return fromCurrent;
 
         if (RelativeWithin(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), directory) is { } fromHome)
             return $"~/{fromHome}";

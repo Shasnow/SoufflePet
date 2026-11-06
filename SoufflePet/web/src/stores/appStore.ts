@@ -2,17 +2,19 @@
 // Copyright (C) 2026 Shasnow
 
 import { create } from 'zustand'
-import type { GlobalUsageDto } from '@/bridge/contracts'
+import type { GlobalUsageDto, WorkspaceDto } from '@/bridge/contracts'
 
 interface AppState {
   ready: boolean
   bridgeError: string | null
   pet: { name: string; initial: string }
   usage: GlobalUsageDto
+  workspaces: WorkspaceDto[]
   setReady: (ready: boolean) => void
   setBridgeError: (message: string | null) => void
   setPet: (pet: { name: string; initial: string }) => void
   setUsage: (usage: GlobalUsageDto) => void
+  setWorkspaces: (workspaces: WorkspaceDto[]) => void
 }
 
 const EMPTY_USAGE: GlobalUsageDto = {
@@ -30,8 +32,10 @@ export const useAppStore = create<AppState>()((set) => ({
   bridgeError: null,
   pet: { name: '舒芙蕾', initial: '舒' },
   usage: EMPTY_USAGE,
+  workspaces: [],
   setReady: (ready) => set({ ready }),
   setBridgeError: (bridgeError) => set({ bridgeError }),
   setPet: (pet) => set({ pet }),
   setUsage: (usage) => set({ usage }),
+  setWorkspaces: (workspaces) => set({ workspaces }),
 }))

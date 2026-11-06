@@ -561,6 +561,19 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     })
   }
 
+  // 与宿主一致：工作区列表是全宿主共享的，包含当前没有任何会话的工作区
+  function collectWorkspaces(): WorkspaceDto[] {
+    const map = new Map<string, WorkspaceDto>()
+    for (const workspace of [WORKSPACE, NOTES_WORKSPACE]) map.set(workspace.path, workspace)
+    for (const session of sessions) {
+      for (const workspace of session.chat.workspaces) map.set(workspace.path, workspace)
+    }
+    if (draft) {
+      for (const workspace of draft.chat.workspaces) map.set(workspace.path, workspace)
+    }
+    return [...map.values()]
+  }
+
   function emitSnapshot(): void {
     rev += 1
     const chat = activeId ? getSessionChat(activeId) ?? null : null
@@ -582,6 +595,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       sessions: sessions.map((session) => session.summary),
       activeSessionId: activeId,
       chat,
+      workspaces: collectWorkspaces(),
     }
     emit({ v: 1, type: 'snapshot', rev, data: snapshot })
   }
