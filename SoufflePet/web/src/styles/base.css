@@ -1113,6 +1113,14 @@
   margin-top: 26px;
 }
 
+/* 消息滚动区的外层：承载「回到最新」浮层，按钮不随内容滚动 */
+.message-list-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .message-list {
   position: relative;
   flex: 1;

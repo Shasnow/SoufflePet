@@ -47,41 +47,43 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
   }, [messages.length, lastLength, atBottom])
 
   return (
-    <div
-      className="message-list"
-      ref={parentRef}
-      onScroll={(event) => {
-        const element = event.currentTarget
-        const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-        setAtBottom(distance < 24)
-      }}
-    >
-      <div className="message-list-inner">
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((item) => {
-            const message = messages[item.index]
-            if (!message) return null
-            return (
-              <div
-                key={message.id}
-                data-index={item.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${item.start}px)`,
-                }}
-              >
-                <MessageItem
-                  sessionId={sessionId}
-                  message={message}
-                  streaming={generating && item.index === messages.length - 1 && message.kind === 'assistant'}
-                />
-              </div>
-            )
-          })}
+    <div className="message-list-wrap">
+      <div
+        className="message-list"
+        ref={parentRef}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          const distance = element.scrollHeight - element.scrollTop - element.clientHeight
+          setAtBottom(distance < 24)
+        }}
+      >
+        <div className="message-list-inner">
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const message = messages[item.index]
+              if (!message) return null
+              return (
+                <div
+                  key={message.id}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${item.start}px)`,
+                  }}
+                >
+                  <MessageItem
+                    sessionId={sessionId}
+                    message={message}
+                    streaming={generating && item.index === messages.length - 1 && message.kind === 'assistant'}
+                  />
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
       {!atBottom ? (
