@@ -62,7 +62,12 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
     }
   }
 
-  const meta = (
+  // 时间、用量与复制按钮只属于对话正文（用户消息 / 助手正文），
+  // 思考、工具、通知、审批、附件等辅助气泡不显示
+  const showMeta =
+    message.kind === 'user' || (message.kind === 'assistant' && message.text.length > 0)
+
+  const meta = showMeta ? (
     <div className="bubble-meta">
       <span className="bubble-time">{formatClock(message.time)}</span>
       {message.usage ? <UsageCapsule usage={message.usage} /> : null}
@@ -72,7 +77,7 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
         </button>
       </div>
     </div>
-  )
+  ) : null
 
   switch (message.kind) {
     case 'user':
