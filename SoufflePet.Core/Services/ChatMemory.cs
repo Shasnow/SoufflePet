@@ -525,11 +525,11 @@ public sealed class ChatMemory
         if (profileLines.Count == 0) return;
 
         builder.AppendLine();
-        builder.AppendLine("## 长期记忆");
+        builder.AppendLine("## 记忆系统");
         builder.AppendLine();
-        builder.AppendLine("以下是之前对话里保存下来的用户信息，回答时可以自然使用，不要生硬复述。");
+        builder.AppendLine("使用remember/forget命令来添加/删除记忆，记忆跨会话共享。以下是之前对话里记忆的信息，回答时可以自然使用，不要生硬复述。");
         builder.AppendLine();
-        builder.AppendLine("### 用户档案：");
+        builder.AppendLine("### 长期记忆：");
         builder.AppendLine();
         foreach (var line in profileLines) builder.AppendLine(line);
     }
@@ -884,10 +884,10 @@ public sealed class ChatMemory
         /// <summary>该轮的思考内容（reasoning_content），用于请求时原样回传给推理模型。</summary>
         public string? Reasoning { get; set; }
 
-        /// <summary>界面上展示的文本；与发给模型的 Text 不同时使用（例如平台提醒的紧凑摘要）。</summary>
+        /// <summary>界面上展示的文本；与发给模型的 Text 不同时使用（例如平台消息的紧凑摘要）。</summary>
         public string? Display { get; set; }
 
-        /// <summary>该条是否为平台提醒。与 <see cref="Display" /> 相互独立：Display 只表示展示文本不同。</summary>
+        /// <summary>该条是否为平台消息。与 <see cref="Display" /> 相互独立：Display 只表示展示文本不同。</summary>
         public bool IsPlatformNotice { get; set; }
 
         /// <summary>检索用的切词结果，只在内存里保留。</summary>

@@ -175,7 +175,7 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
-                "把用户信息写入长期记忆；同一个 key 会覆盖旧值"),
+                "写入长期记忆；同一个 key 会覆盖旧值"),
             AIFunctionFactory.Create(
                 Forget,
                 "forget",
