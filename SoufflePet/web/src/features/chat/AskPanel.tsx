@@ -20,13 +20,35 @@ export function AskPanel({ sessionId, ask }: AskPanelProps) {
 
 function AskCard({ sessionId, ask }: AskPanelProps) {
   const [index, setIndex] = useState(0)
-  const [answers, setAnswers] = useState<Record<number, string>>({})
+  // 选项与自由输入分开存：点选项不应把文字灌进下方输入框
+  const [selected, setSelected] = useState<Record<number, string>>({})
+  const [custom, setCustom] = useState<Record<number, string>>({})
 
   const questions = ask.questions
   const current = questions[index]
-  const currentAnswer = answers[index] ?? ''
-  const answered = questions.every((_, questionIndex) => (answers[questionIndex] ?? '').trim().length > 0)
+  const currentAnswer = custom[index] ?? ''
+  const answerOf = (questionIndex: number) =>
+    (custom[questionIndex] ?? '').trim() || selected[questionIndex] || ''
+  const answered = questions.every((_, questionIndex) => answerOf(questionIndex).length > 0)
   const label = current ? `${index + 1} / ${questions.length}` : ''
+
+  const clearAt = (source: Record<number, string>, key: number) => {
+    if (!(key in source)) return source
+    const next = { ...source }
+    delete next[key]
+    return next
+  }
+
+  const choose = (option: string) => {
+    setSelected((previous) => ({ ...previous, [index]: option }))
+    setCustom((previous) => clearAt(previous, index))
+    if (index < questions.length - 1) setIndex(index + 1)
+  }
+
+  const typeAnswer = (value: string) => {
+    setCustom((previous) => ({ ...previous, [index]: value }))
+    setSelected((previous) => clearAt(previous, index))
+  }
 
   const submit = async () => {
     try {
@@ -37,7 +59,7 @@ function AskCard({ sessionId, ask }: AskPanelProps) {
         payload: {
           answers: questions.map((question, questionIndex) => ({
             question: question.text,
-            answer: (answers[questionIndex] ?? '').trim(),
+            answer: answerOf(questionIndex),
           })),
         },
       })
@@ -71,14 +93,8 @@ function AskCard({ sessionId, ask }: AskPanelProps) {
                 key={option.text}
                 type="button"
                 className="menu-item"
-                data-active={answers[index] === option.text ? 'true' : 'false'}
-                onClick={() =>
-                  setAnswers((previous) => {
-                    const next = { ...previous, [index]: option.text }
-                    if (index < questions.length - 1) setIndex(index + 1)
-                    return next
-                  })
-                }
+                data-active={selected[index] === option.text ? 'true' : 'false'}
+                onClick={() => choose(option.text)}
                 style={{ alignItems: 'flex-start' }}
               >
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
@@ -97,7 +113,7 @@ function AskCard({ sessionId, ask }: AskPanelProps) {
             value={currentAnswer}
             placeholder="或者自由输入答案…"
             aria-label="自由输入答案"
-            onChange={(event) => setAnswers((previous) => ({ ...previous, [index]: event.target.value }))}
+            onChange={(event) => typeAnswer(event.target.value)}
           />
         </>
       ) : null}

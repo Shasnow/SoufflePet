@@ -177,11 +177,18 @@ describe('Composer', () => {
     expect(document.querySelector('.dialog-overlay')).toBeNull()
 
     fireEvent.click(screen.getByText('选项A'))
+    // 点选项只做选中，不能把选项文字灌进自由输入框
+    expect((screen.getByLabelText('自由输入答案') as HTMLTextAreaElement).value).toBe('')
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith(
         'chat.ask',
-        expect.objectContaining({ sessionId: 's1', requestId: 'r1', action: 'submit' }),
+        expect.objectContaining({
+          sessionId: 's1',
+          requestId: 'r1',
+          action: 'submit',
+          payload: { answers: [{ question: '选哪个？', answer: '选项A' }] },
+        }),
       )
     })
   })
