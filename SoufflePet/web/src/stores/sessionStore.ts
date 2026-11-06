@@ -12,6 +12,7 @@ interface SessionState {
   setUpdated: (sessions: SessionSummaryDto[], activeId: string | null) => void
   setActive: (id: string | null) => void
   setQuery: (query: string) => void
+  setGenerating: (id: string, generating: boolean) => void
   renameLocal: (id: string, title: string) => void
   removeLocal: (id: string, activeId: string | null) => void
 }
@@ -24,6 +25,12 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setUpdated: (sessions, activeId) => set({ sessions, activeId }),
   setActive: (activeId) => set({ activeId }),
   setQuery: (query) => set({ query }),
+  setGenerating: (id, generating) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === id ? { ...session, generating } : session,
+      ),
+    })),
   renameLocal: (id, title) =>
     set((state) => ({
       sessions: state.sessions.map((session) => (session.id === id ? { ...session, title } : session)),

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useRef } from 'react'
 import type { SessionSummaryDto } from '@/bridge/contracts'
 import { formatRelative } from '@/ui/format'
@@ -34,6 +34,11 @@ export function SessionItem({ session, active, onOpen, onRename, onDelete }: Ses
         }
       }}
     >
+      {session.generating ? (
+        <span className="session-spin" aria-hidden>
+          <Loader2 size={12} />
+        </span>
+      ) : null}
       <span className="title">{session.title}</span>
       <span className="time">{formatRelative(session.updatedAt)}</span>
       <DropdownMenu.Root>

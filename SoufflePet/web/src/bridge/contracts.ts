@@ -114,6 +114,8 @@ export interface SessionSummaryDto {
   messageCount: number
   lastUserText?: string
   modelKey?: string
+  /** 该会话是否正在生成回复；宿主在生成开始/结束时推送 session.updated 刷新 */
+  generating?: boolean
 }
 
 export interface ThemeDto {

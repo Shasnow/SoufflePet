@@ -100,7 +100,8 @@ public sealed record SessionSummaryDto(
     string UpdatedAt,
     int MessageCount,
     string? LastUserText,
-    string? ModelKey);
+    string? ModelKey,
+    bool Generating);
 
 public sealed record AppSnapshotDto(
     int ProtocolVersion,

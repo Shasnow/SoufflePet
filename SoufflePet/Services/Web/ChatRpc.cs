@@ -349,8 +349,13 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private ChatSession RequireSession() =>
         _sessions.ActiveSession ?? throw new BridgeRpcException("not_found", "当前没有活动会话");
 
-    private void OnSessionOps(ChatOpBatch batch) =>
+    private void OnSessionOps(ChatOpBatch batch)
+    {
+        // 注意：这里由 ChatSession 在持锁（_gate）状态下同步调用。
+        // 生成开始/结束不再补推 session.updated：全量摘要的序列化与 InvokeScript 会阻塞消息 patch，
+        // 页面改用 chat.ops 里的 turn 增量维护侧栏加载图标。
         Raise("chat.ops", new { sessionId = batch.SessionId, ops = MapOps(batch.Ops) });
+    }
 
     private void OnSessionsChanged(ChatSessionListPayload payload) =>
         Raise("session.updated", new { sessions = MapSessions(payload.Sessions), activeId = payload.ActiveId });
@@ -445,7 +450,10 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private static IReadOnlyList<WorkspaceDto> MapWorkspaces(IReadOnlyList<ChatWorkspaceState> workspaces) =>
         [.. workspaces.Select(workspace => new WorkspaceDto(workspace.Path, workspace.Name))];
 
-    private SessionSummaryDto MapSession(SessionRecord record) => new(
+    private SessionSummaryDto MapSession(SessionRecord record) =>
+        MapSession(record, _sessions.GeneratingSessionIds().Contains(record.Id));
+
+    private SessionSummaryDto MapSession(SessionRecord record, bool generating) => new(
         record.Id,
         record.Title,
         record.WorkspacePath,
@@ -454,10 +462,14 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         record.UpdatedAt.ToString("O"),
         record.MessageCount,
         record.LastUserText,
-        record.ModelKey);
+        record.ModelKey,
+        generating);
 
-    private IReadOnlyList<SessionSummaryDto> MapSessions(IReadOnlyList<SessionRecord> records) =>
-        [.. records.Select(MapSession)];
+    private IReadOnlyList<SessionSummaryDto> MapSessions(IReadOnlyList<SessionRecord> records)
+    {
+        var generating = _sessions.GeneratingSessionIds();
+        return [.. records.Select(record => MapSession(record, generating.Contains(record.Id)))];
+    }
 
     private IReadOnlyList<object> MapOps(IReadOnlyList<ChatOp> ops) => [.. ops.Select(MapOp)];
 

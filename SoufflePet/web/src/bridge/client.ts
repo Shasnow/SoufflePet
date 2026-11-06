@@ -263,9 +263,11 @@ export class BridgeClient {
         const data = payload as { sessionId?: string; ops?: ChatOp[] }
         if (data.sessionId && Array.isArray(data.ops)) {
           useChatStore.getState().applyOps(data.sessionId, data.ops)
-          // 工作区列表是全宿主共享的，切换/重命名/删除后同步给侧栏，空的也要保留
           for (const op of data.ops) {
+            // 工作区列表是全宿主共享的，切换/重命名/删除后同步给侧栏，空的也要保留
             if (op.op === 'workspace') useAppStore.getState().setWorkspaces(op.workspaces ?? [])
+            // 生成状态只在 turn 增量里推送，避免宿主在会话锁内序列化整张会话列表
+            if (op.op === 'turn') useSessionStore.getState().setGenerating(data.sessionId, op.generating)
           }
         }
         break

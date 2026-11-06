@@ -1465,6 +1465,9 @@ public sealed class ChatSession : IAsyncDisposable
 
     // ===== 快照 =====
 
+    /// <summary>是否正在生成回复（侧栏据此显示加载图标；单次 bool 读取无需加锁）。</summary>
+    public bool IsGenerating => _generating;
+
     private ChatSessionSnapshot BuildSnapshotLocked() => new(
         Id,
         _messages.Select(message => message.ToState()).ToList(),

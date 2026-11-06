@@ -305,6 +305,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       messageCount,
       lastUserText,
       modelKey: MODELS[0].key,
+      generating: false,
     }
   }
 
@@ -649,6 +650,9 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       { op: 'turn', generating: true },
       { op: 'attachments', attachments: [] },
     ])
+    const streamingSummary = getSessionSummary(sessionId)
+    // 与宿主一致：生成状态走 chat.ops 的 turn 增量，不额外推送整张会话列表
+    if (streamingSummary) streamingSummary.generating = true
     if (!titleOverride.has(sessionId)) {
       titleOverride.set(sessionId, titleFromText(userText))
       const summary = getSessionSummary(sessionId)
@@ -696,6 +700,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
         if (summary) {
           summary.updatedAt = iso()
           summary.messageCount = current.messages.length
+          summary.generating = false
         }
         emitOps(sessionId, [
           { op: 'msg:patch', id: assistantId, patch: { usage, time: timeLabel() } },
@@ -843,6 +848,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             const chat = getSessionChat(sessionId)
             if (chat) {
               chat.generating = false
+              const summary = getSessionSummary(sessionId)
+              if (summary) summary.generating = false
               const last = [...chat.messages].reverse().find((message) => message.kind === 'assistant')
               if (last && !last.text.includes('（已停止）')) {
                 last.text += '（已停止）'
@@ -851,6 +858,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
                   { op: 'turn', generating: false },
                 ])
               }
+              // 侧栏加载图标由 turn 增量清除，先刷新摘要以同步停止后的文本长度
+              emitSessions()
             }
             response(id, null)
             return

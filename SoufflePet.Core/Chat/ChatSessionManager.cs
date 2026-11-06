@@ -142,6 +142,18 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>当前正在生成回复的会话 id 快照，供侧栏显示加载图标。</summary>
+    public HashSet<string> GeneratingSessionIds()
+    {
+        lock (_gate)
+        {
+            return _open
+                .Where(pair => pair.Value.IsGenerating)
+                .Select(pair => pair.Key)
+                .ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
     public event Action<ChatOpBatch>? OpsProduced;
 
     public event Action<ChatSessionListPayload>? SessionsChanged;
