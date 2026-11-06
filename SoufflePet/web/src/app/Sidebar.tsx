@@ -526,7 +526,7 @@ export function Sidebar() {
                           <SessionItem
                             key={session.id}
                             session={session}
-                            active={session.id === activeId}
+                            active={route.kind === 'chat' && session.id === activeId}
                             onOpen={(item) => openChat(item.id)}
                             onRename={(item) => {
                               setEditing(item)
