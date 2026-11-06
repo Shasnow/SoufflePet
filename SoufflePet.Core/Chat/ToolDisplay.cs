@@ -67,6 +67,11 @@ public static class ToolDisplay
             "forget" => Compose("忘记", ReadString(root, "key")),
             "recall" => Compose("回忆", ReadString(root, "query")),
             "read_skill" => Compose("读取技能", ReadString(root, "name")),
+            "list_plugins" => "列出插件",
+            "set_plugin_enabled" => Compose(
+                ReadString(root, "enabled") == "false" ? "停用插件" : "启用插件",
+                ReadString(root, "pluginId")),
+            "reload_plugins" => "重新扫描插件",
             "get_messages" => Compose("读取消息", ReadString(root, "conversation")),
             "send_message" => Compose("发送消息", ReadString(root, "conversation")),
             "send_attachment" => Compose("发送文件",

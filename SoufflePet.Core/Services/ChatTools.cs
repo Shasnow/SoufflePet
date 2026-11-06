@@ -189,6 +189,18 @@ public sealed class ChatTools
                 "read_skill",
                 "读取某个技能的完整说明"),
             AIFunctionFactory.Create(
+                ListPlugins,
+                "list_plugins",
+                "列出已发现插件的 id、版本、启用状态与提供的工具"),
+            AIFunctionFactory.Create(
+                SetPluginEnabled,
+                "set_plugin_enabled",
+                "启用或停用某个插件：启用后其工具从下一轮对话开始可用"),
+            AIFunctionFactory.Create(
+                ReloadPlugins,
+                "reload_plugins",
+                "重新扫描插件目录，发现新增或移除的插件；已加载插件保持运行状态"),
+            AIFunctionFactory.Create(
                 GetMessages,
                 "get_messages",
                 "读取消息平台某个会话的最近消息"),
@@ -412,6 +424,77 @@ public sealed class ChatTools
             ? builder.Append(content).ToString()
             : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
     }
+
+    /// <summary>列出全部已发现插件（数据取自插件服务，这里只负责转成可读文本）。</summary>
+    private string ListPlugins()
+    {
+        var plugins = _plugins.Plugins;
+        if (plugins.Count == 0) return "当前没有发现任何插件。";
+
+        var builder = new StringBuilder($"共 {plugins.Count} 个插件：");
+        foreach (var plugin in plugins)
+        {
+            var manifest = plugin.Manifest;
+            builder.Append("\n- id=").Append(manifest.Id)
+                .Append(" 名称「").Append(manifest.DisplayName).Append('」')
+                .Append(" 版本=").Append(manifest.Version)
+                .Append(" 来源=").Append(plugin.IsBuiltIn ? "内置" : "用户")
+                .Append(" 启用=").Append(plugin.Enabled ? "是" : "否")
+                .Append(" 运行=").Append(StateText(plugin.State));
+            if (plugin.ToolNames.Count > 0)
+                builder.Append(" 工具=").Append(string.Join('、', plugin.ToolNames));
+            if (plugin.FailureCount > 0)
+                builder.Append(" 失败次数=").Append(plugin.FailureCount);
+            if (!string.IsNullOrWhiteSpace(plugin.Error))
+                builder.Append(" 错误=").Append(plugin.Error);
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>启用或停用插件：插件服务负责加载/卸载，这里校验 id 并转述结果。</summary>
+    private async Task<string> SetPluginEnabled(
+        [Description("插件 id，取自 list_plugins")] string pluginId,
+        [Description("启用/停用")] bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        var id = pluginId.Trim();
+        if (id.Length == 0) return "请提供插件 id，可先用 list_plugins 查看。";
+
+        if (_plugins.Plugins.FirstOrDefault(p => string.Equals(p.Manifest.Id, id, StringComparison.OrdinalIgnoreCase))
+            is not { } plugin)
+            return $"没有找到插件「{id}」，请先用 list_plugins 确认 id。";
+
+        await _plugins.SetEnabledAsync(plugin.Manifest.Id, enabled, cancellationToken).ConfigureAwait(false);
+
+        var updated = _plugins.Plugins.FirstOrDefault(
+            p => string.Equals(p.Manifest.Id, plugin.Manifest.Id, StringComparison.OrdinalIgnoreCase));
+        var name = updated?.Manifest.DisplayName ?? plugin.Manifest.DisplayName;
+
+        if (enabled && updated?.State is PluginState.Failed)
+            return $"插件「{name}」启用失败：{updated.Error ?? "未知原因"}";
+
+        return enabled
+            ? $"已启用插件「{name}」（{plugin.Manifest.Id}），其工具会从下一轮对话开始可用。"
+            : $"已停用插件「{name}」（{plugin.Manifest.Id}），其工具已从下一轮对话移除。";
+    }
+
+    /// <summary>重新扫描插件目录：只发现新增/移除，不重载已加载插件。</summary>
+    private string ReloadPlugins()
+    {
+        _plugins.Discover();
+        var plugins = _plugins.Plugins;
+        return $"已重新扫描插件目录：共发现 {plugins.Count} 个插件，其中 {plugins.Count(p => p.Enabled)} 个已启用。"
+            + "已加载插件保持原状态；新增插件的工具会在下一轮对话加载。";
+    }
+
+    private static string StateText(PluginState state) => state switch
+    {
+        PluginState.Enabled => "已加载",
+        PluginState.Loading => "加载中",
+        PluginState.Failed => "加载失败",
+        PluginState.Disabled => "已停用",
+        _ => "未加载",
+    };
 
     /// <summary>列出全部定时任务（数据取自调度服务，这里只负责转成可读文本）。</summary>
     private string ListScheduledTasks()

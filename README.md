@@ -69,6 +69,8 @@
 | `ask_user` | 向用户提问：分页面板 + 预设选项（可带说明）+ 自由输入，全部作答后结果回传模型 |
 | `remember` / `forget` / `recall` | 长期记忆的写入、删除与关键词检索 |
 | `read_skill` | 读取某个技能的完整说明 |
+| `list_plugins` / `reload_plugins` | 列出插件的 id、版本、启用状态与工具 / 重新扫描插件目录（不重载已加载插件） |
+| `set_plugin_enabled` | 启用或停用插件，工具在下一轮对话生效；直接执行，不走审批 |
 | `get_statistics` | 查询运行统计（陪伴时长、token 用量等），不传参返回全部、传名称返回单项 |
 
 窗口列表、截屏与键鼠操作由内置 `computer-use` 插件提供，浏览器操作由 `browser-use` 插件提供（见下文「插件」）。
