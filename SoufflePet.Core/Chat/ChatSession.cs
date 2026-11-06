@@ -48,7 +48,7 @@ public sealed class ChatSession : IAsyncDisposable
     private const string PlatformNoticePrefix = "[平台提醒]";
 
     private static readonly string AttachmentDirectory = Path.Combine(
-        ChatMemory.DefaultRoot, "attachments");
+        ChatMemory.SouffleHome, "attachments");
 
     /// <summary>
     /// 当前正在跑一轮对话的会话。工具线程发起审批/提问/展示文件时，按它路由到正确的会话，

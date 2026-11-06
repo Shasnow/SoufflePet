@@ -15,7 +15,7 @@ namespace SoufflePet.Core.Chat;
 
 /// <summary>
 /// 会话工厂：把无 UI 的会话状态机与 Core 服务装配到一起。每个会话独立对话文件与窗口状态，
-/// 用户档案（profile.json）在所有会话之间共享。
+/// 用户档案（memory.json）在所有会话之间共享。
 /// </summary>
 public sealed class ChatSessionFactory(
     SouffleSettings settings,

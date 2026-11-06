@@ -152,13 +152,13 @@
 - `<workspace-group>/<id>/diffs/<id>.json`：编辑工具产生的完整行级差异，按需加载，避免会话文件随编辑次数膨胀
 - `<workspace-group>/<id>/backups/<文件名>.<hash>.bak`：编辑工具覆盖文件前的旧版本（同一文件只保留最近一份），随会话目录一起进入 `.deleted`
 - `<workspace-group>/<id>/window.json`：该会话上次请求实际使用的历史窗口轮数（重启后按同一窗口恢复，第一次请求才能继续命中服务端前缀缓存）
-- `profile.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等），所有会话共享，仍在 `%AppData%\SoufflePet`
+- `memory.json`：模型通过 `remember` 写入的事实（称呼、喜好、常用路径等），所有会话共享，位于 `~/.souffle/memory.json`
 
 不迁移旧的 `conversations.jsonl` 与旧 `%AppData%\SoufflePet\sessions` 数据；删除的会话移到 `sessions/.deleted`。检索用中文 2-gram + BM25，不依赖分词库与向量服务。
 
 ### 统计信息
 
-`IStatisticsService` 统一统计桌宠的运行信息，落盘在 `%AppData%\SoufflePet\statistics.json`，目前包含：
+`IStatisticsService` 统一统计桌宠的运行信息，落盘在 `~/.souffle/statistics.json`，目前包含：
 
 - **陪伴时长**：有史以来程序运行的总时长（关闭即停、下次启动接着累加），每 60 秒与退出时落盘
 - **token 用量**：有史以来累计输入 / 输出 token 与缓存命中率，每轮结束即时落盘

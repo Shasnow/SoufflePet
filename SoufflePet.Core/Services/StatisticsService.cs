@@ -79,7 +79,7 @@ public interface IStatisticsService
 
 /// <summary>
 /// 桌宠运行统计服务：目前包含陪伴时长（跨重启累计的程序运行时间）、对话 token 用量、戳一戳次数、摸摸头次数与对话次数，
-/// 统一落盘到 %AppData%\SoufflePet\statistics.json（与长期记忆同目录）。
+/// 统一落盘到 <c>~/.souffle/statistics.json</c>（与长期记忆同目录）。
 /// 陪伴时长只累计程序运行期间的时间，用 <see cref="Stopwatch" /> 计算以免定时器漂移，
 /// 每 60 秒与退出时各落一次盘，落盘值恒为「启动前累计 + 本次会话已运行」，重复落盘不会重复计数；
 /// token 用量在每轮结束时即时落盘，戳一戳次数每被戳一次即时落盘，对话次数每次手输发送即时落盘。
@@ -104,7 +104,7 @@ public sealed class StatisticsService : IStatisticsService, IDisposable
 
     public StatisticsService()
     {
-        var root = ChatMemory.DefaultRoot;
+        var root = ChatMemory.SouffleHome;
         Directory.CreateDirectory(root);
         _path = Path.Combine(root, "statistics.json");
 

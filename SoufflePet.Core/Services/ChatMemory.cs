@@ -38,8 +38,8 @@ public readonly record struct MemoryTurn(
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
-/// 数据保存在 %AppData%\SoufflePet 下（不随安装目录变化）：
-/// conversations.jsonl 记录每轮问答与工具调用，profile.json 保存模型用 remember 写入的事实。
+/// 用户级数据统一保存在 <c>~/.souffle</c> 下（不随安装目录变化）：
+/// 会话目录里的 conversation.jsonl 记录每轮问答与工具调用，memory.json 保存模型用 remember 写入的事实。
 /// 检索使用中文 2-gram + BM25，不依赖分词库与向量服务。
 /// </summary>
 public sealed class ChatMemory
@@ -90,25 +90,9 @@ public sealed class ChatMemory
     private int _windowTurns;
 
     /// <summary>
-    /// 应用数据根目录（长期档案、统计、旧版对话文件都在这里）。
+    /// 用户级数据根目录：默认 <c>%USERPROFILE%\.souffle</c>，长期档案、统计、调度日志、窗口几何、附件与
+    /// <c>sessions/</c> 都在这里；<c>mcp.json</c>、<c>plugins/</c>、<c>skills/</c> 同样落在其下。
     /// 可用环境变量 <c>SOUFFLEPET_DATA_DIR</c> 指向独立目录，供自动化验收/测试隔离用户数据。
-    /// </summary>
-    public static string DefaultRoot
-    {
-        get
-        {
-            var custom = Environment.GetEnvironmentVariable("SOUFFLEPET_DATA_DIR");
-            return string.IsNullOrWhiteSpace(custom)
-                ? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "SoufflePet")
-                : Path.GetFullPath(custom);
-        }
-    }
-
-    /// <summary>
-    /// 用户级配置目录：默认 <c>%USERPROFILE%\.souffle</c>，会话按工作区分组存在其下的 <c>sessions/</c>。
-    /// 设置 <c>SOUFFLEPET_DATA_DIR</c> 时直接用它，保持验收/测试隔离语义不变。
     /// </summary>
     public static string SouffleHome
     {
@@ -124,18 +108,18 @@ public sealed class ChatMemory
     }
 
     public ChatMemory(SouffleSettings settings)
-        : this(settings, DefaultRoot, "conversations.jsonl", Path.Combine(DefaultRoot, "profile.json"))
+        : this(settings, SouffleHome, "conversations.jsonl", Path.Combine(SouffleHome, "memory.json"))
     {
     }
 
-    /// <summary>测试用：把会话/档案/窗口状态写到指定根目录，避免污染 %AppData%。</summary>
+    /// <summary>测试用：把会话/档案/窗口状态写到指定根目录，避免污染用户数据。</summary>
     internal ChatMemory(SouffleSettings settings, string root)
-        : this(settings, root, "conversations.jsonl", Path.Combine(root, "profile.json"))
+        : this(settings, root, "conversations.jsonl", Path.Combine(root, "memory.json"))
     {
     }
 
     /// <summary>
-    /// 会话级记忆：对话文件放在会话目录里（默认 conversation.jsonl），档案仍指向全局 profile.json，
+    /// 会话级记忆：对话文件放在会话目录里（默认 conversation.jsonl），档案仍指向全局 memory.json，
     /// 这样每个会话有独立上下文，而 remember 写入的长期档案对所有会话共享。
     /// </summary>
     internal ChatMemory(SouffleSettings settings, string root, string conversationFileName, string profilePath)
@@ -755,7 +739,7 @@ public sealed class ChatMemory
     }
 
     /// <summary>
-    /// 落盘用户档案。多会话共享同一个 profile.json 时，<paramref name="merge" /> 先把磁盘上
+    /// 落盘用户档案。多会话共享同一个 memory.json 时，<paramref name="merge" /> 先把磁盘上
     /// 其他会话刚写入的条目合并进来（同键以本实例为准），避免后写的会话覆盖先写的记忆；
     /// 删除走 merge: false，确保删除结果就是最终结果。
     /// </summary>

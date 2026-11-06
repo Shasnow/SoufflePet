@@ -12,13 +12,13 @@ namespace SoufflePet.Utils;
 /// <summary>主窗口几何（物理像素位置 + DIP 尺寸）；与历史窗口轮数的 window.json 分开。</summary>
 public sealed record UiWindowState(int X, int Y, double Width, double Height, bool Maximized);
 
-/// <summary>%AppData%\SoufflePet\ui-window.json 的读写；损坏/缺失时返回 null。</summary>
+/// <summary><c>~/.souffle/ui-window.json</c> 的读写；损坏/缺失时返回 null。</summary>
 public static class UiWindowStore
 {
     private static readonly ILogger Logger = Log.ForContext(typeof(UiWindowStore));
 
     private static readonly string Path = System.IO.Path.Combine(
-        ChatMemory.DefaultRoot,
+        ChatMemory.SouffleHome,
         "ui-window.json");
 
     public static UiWindowState? Load()

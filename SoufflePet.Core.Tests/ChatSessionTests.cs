@@ -52,7 +52,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
         _questions = new UserQuestionService();
         _files = new ChatFileService();
         _statistics = new FakeStatistics();
-        _store = new ChatSessionStore(SessionsRoot, Path.Combine(_root, "profile.json"));
+        _store = new ChatSessionStore(SessionsRoot, Path.Combine(_root, "memory.json"));
 
         return Task.CompletedTask;
     }
@@ -630,7 +630,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
     [Fact]
     public async Task ProfileIsSharedAcrossSessionMemories()
     {
-        var profile = Path.Combine(_root, "profile.json");
+        var profile = Path.Combine(_root, "memory.json");
         var a = new ChatMemory(_settings, Path.Combine(_root, "a"), "conversation.jsonl", profile);
         var b = new ChatMemory(_settings, Path.Combine(_root, "b"), "conversation.jsonl", profile);
 

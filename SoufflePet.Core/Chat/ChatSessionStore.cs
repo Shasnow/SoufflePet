@@ -52,14 +52,14 @@ public sealed class ChatSessionStore
     /// <summary>默认存储：用户目录 <c>~/.souffle/sessions</c>（按工作区分组）。</summary>
     public static ChatSessionStore CreateDefault() => new(
         Path.Combine(ChatMemory.SouffleHome, "sessions"),
-        Path.Combine(ChatMemory.DefaultRoot, "profile.json"));
+        Path.Combine(ChatMemory.SouffleHome, "memory.json"));
 
     /// <param name="root">会话存储根目录（索引、按工作区分组的会话目录、回收站都在其下）。</param>
     /// <param name="profilePath">全局用户档案；会话之间共享。</param>
     public ChatSessionStore(string root, string? profilePath = null)
     {
         Root = Path.GetFullPath(root);
-        ProfilePath = profilePath ?? Path.Combine(Root, "profile.json");
+        ProfilePath = profilePath ?? Path.Combine(Root, "memory.json");
     }
 
     /// <summary>会话存储根目录。</summary>

@@ -59,7 +59,7 @@ public interface IScheduledTaskService : IDisposable
 /// <summary>
 /// 定时任务调度服务：用 System.Threading.Timer 做一次性延时，到点后经 IUiDispatcher 回到 UI 线程
 /// 执行（Core 不引用 Avalonia）。任务配置随 SouffleSettings 持久化，执行日志落在
-/// %AppData%\SoufflePet\scheduled-tasks.log。
+/// <c>~/.souffle/scheduled-tasks.log</c>。
 /// </summary>
 public sealed class ScheduledTaskService : IScheduledTaskService
 {
@@ -72,7 +72,7 @@ public sealed class ScheduledTaskService : IScheduledTaskService
     private const int MaxLogFileLines = 2000;
 
     private static readonly string LogFilePath = Path.Combine(
-        ChatMemory.DefaultRoot, "scheduled-tasks.log");
+        ChatMemory.SouffleHome, "scheduled-tasks.log");
 
     private readonly SouffleSettings _settings;
     private readonly IUiDispatcher _ui;

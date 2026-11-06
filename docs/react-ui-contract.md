@@ -443,12 +443,11 @@ type ChatOp =
     <workspace-group>\<id>\window.json
     .deleted\<id>-<timestamp>\
     <workspace-group>\workspace.txt  # 分组对应的工作区全路径（重建索引用）
-
-%AppData%\SoufflePet\                # 其余数据仍在应用数据根目录
-  profile.json
+  memory.json                        # 全局长期记忆（所有会话共享）
   statistics.json
   scheduled-tasks.log
   ui-window.json
+  attachments\                       # 聊天附件副本
 ```
 
 - 会话按工作区分组存放：目录名是「可读前缀 + 路径哈希」（无工作区为 `_default`），避免同名目录冲突；切换/移除工作区时会话目录随之搬到新分组。
@@ -458,7 +457,7 @@ type ChatOp =
 - 不做旧数据迁移：不导入旧 `conversations.jsonl`，也不自动搬 `%AppData%\SoufflePet\sessions`；需要旧记录时手工拷贝到 `~/.souffle/sessions/<workspace-group>/<id>/`。
 - 删除会话进回收站；索引损坏时按会话目录重建（工作区分组从 `workspace.txt` 还原）。
 - 草稿会话只在内存里：`session.new` 不写索引、不建会话目录，首条用户消息落盘后才有目录与索引记录（见 §13-21）。
-- `statistics.json`、`profile.json` 不迁移、不改字段。
+- `statistics.json`、`memory.json` 不迁移、不改字段。
 
 ## 8. 安全规则
 
@@ -541,7 +540,7 @@ type ChatOp =
 19. 桥并发/取消：写请求串行化，只读与窗口命令不占写锁；请求使用窗口生命周期 token。`event` envelope 增加顶层 `rev` 以支持非对象 payload；`payload` 不再被强制转成空对象。
 20. 设置落盘改为锁内序列化 + 临时文件原子替换；`/local-file` 按路径缓存 token 并每分钟清理过期项；`chat.file.open` 收窄到会话附件/工作区并拒绝可执行扩展名。
 21. 新建会话延迟落盘：`session.new` 先只在内存里开草稿（不写 `sessions.json`、不建会话目录、不进侧栏与搜索），首条用户消息发出后由宿主转正；连点「新会话」复用/收敛草稿。删除最后一个会话时同样只补草稿，不再立刻造出空的已保存会话。
-22. 会话存储迁到 `%USERPROFILE%\.souffle\sessions`：按工作区分组为 `<workspace-group>/<id>/`，索引改为根目录 `index.json`；不做旧 `%AppData%\SoufflePet` 会话与旧 `conversations.jsonl` 的自动迁移。其余数据（`profile.json`、统计、调度日志、窗口几何）仍在应用数据根目录。
+22. 会话存储迁到 `%USERPROFILE%\.souffle\sessions`：按工作区分组为 `<workspace-group>/<id>/`，索引改为根目录 `index.json`；不做旧 `%AppData%\SoufflePet` 会话与旧 `conversations.jsonl` 的自动迁移。其余数据（`memory.json`、统计、调度日志、窗口几何、附件）也统一在 `~/.souffle`。
 23. 输入卡底部工具条：附件 → 审批模式（都在输入框内左侧），模型选择靠右、紧邻发送按钮；工作区选择仍留在输入卡上方的上下文行。
 24. 消息元信息（时间、复制按钮、本轮用量）放在气泡外、气泡下方，跟随气泡左右对齐；复制按钮在整行 hover/focus 时显示。
 25. 工具气泡标题改为可定制的 `tool.label`：内置工具按「动词 · 参数」生成（如 `运行命令 · npm test`、`读取 · a.txt`），插件可用 `AIFunction.AdditionalProperties["display"]` 模板覆盖，MCP 工具使用服务端 `title`；`label` 随工具记录落盘，刷新/重启后仍保留，缺失时界面回退到「调用工具：名称」。
