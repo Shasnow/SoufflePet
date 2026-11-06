@@ -73,6 +73,15 @@ const USAGE_SESSION: UsageDto = {
   time: iso(8),
 }
 
+const SESSION_STATS = {
+  rounds: 4,
+  steps: 6,
+  modelSeconds: 52.8,
+  toolSeconds: 21.7,
+  averageFirstTokenSeconds: 4.4,
+  tokensPerSecond: 129,
+}
+
 const RICH_TEXT = [
   '### 整理结果',
   '',
@@ -495,7 +504,13 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
         usage: { inputTokens: 6_400, outputTokens: 220, cachedInputTokens: 6_100, model: 'deepseek/deepseek-chat' },
       },
     ]
-    chat.usage = { inputTokens: 12_500, outputTokens: 480, cachedInputTokens: 12_000, model: 'deepseek/deepseek-chat' }
+    chat.usage = {
+      inputTokens: 12_500,
+      outputTokens: 480,
+      cachedInputTokens: 12_000,
+      model: 'deepseek/deepseek-chat',
+      ...SESSION_STATS,
+    }
     sessions.push({
       summary: summary(id, 'Live2D 模型动效排查', NOTES_WORKSPACE, chat.messages.length, iso(60 * 28), '我把配置发你看看。'),
       chat,

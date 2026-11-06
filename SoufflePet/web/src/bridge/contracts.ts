@@ -32,6 +32,13 @@ export interface UsageDto {
   cachedInputTokens: number
   model?: string
   time?: string
+  /** 会话级统计；消息气泡的用量对象不带这些字段。 */
+  rounds?: number
+  steps?: number
+  modelSeconds?: number
+  toolSeconds?: number
+  averageFirstTokenSeconds?: number
+  tokensPerSecond?: number
 }
 
 export interface ChatModelDto {

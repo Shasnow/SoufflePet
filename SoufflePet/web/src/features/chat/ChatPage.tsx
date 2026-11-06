@@ -8,7 +8,7 @@ import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useToastStore } from '@/stores/toastStore'
-import { GlobalUsageButton } from '@/ui/Usage'
+import { GlobalUsageButton, SessionStatsButton } from '@/ui/Usage'
 import { chatRoute, navigate } from '@/app/router'
 import { Composer } from './Composer'
 import { MessageList } from './MessageList'
@@ -103,6 +103,8 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
   }
 
   const empty = chat.messages.length === 0
+  // 重启后恢复的历史消息没有耗时数据（steps 为 0），此时不展示会全是 0 的统计胶囊
+  const sessionUsage = chat.usage && (chat.usage.steps ?? 0) > 0 ? chat.usage : null
 
   return (
     <div className="chat-page">
@@ -117,7 +119,8 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
             generating={chat.generating}
           />
           <Composer key={`composer-${chat.sessionId}`} chat={chat} />
-          <div className="composer-foot">
+          <div className={sessionUsage ? 'composer-foot has-session-stats' : 'composer-foot'}>
+            {sessionUsage ? <SessionStatsButton usage={sessionUsage} /> : null}
             <GlobalUsageButton usage={usage} />
           </div>
         </>

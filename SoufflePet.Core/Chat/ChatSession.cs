@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -81,6 +82,17 @@ public sealed class ChatSession : IAsyncDisposable
     private bool _processingPending;
     private bool _disposed;
     private ChatUsageState? _usage;
+    // 会话级统计：与 token 累计一起更新，快照/用量事件会带上计算后的结果
+    private int _sessionRounds;
+    private int _sessionSteps;
+    private double _sessionModelMilliseconds;
+    private double _sessionToolMilliseconds;
+    private double _sessionFirstTokenMilliseconds;
+    private int _sessionFirstTokenSamples;
+    private double _sessionGenerationMilliseconds;
+    // 审批等待时长：工具执行耗时里要扣掉用户点确认的挂机时间
+    private long _approvalStartedAt;
+    private double _approvalWaitMilliseconds;
     private ChatAskState? _ask;
     private UserQuestionRequest? _askRequest;
     private ToolApprovalRequest? _approvalRequest;
@@ -106,7 +118,9 @@ public sealed class ChatSession : IAsyncDisposable
         UserQuestionService questions,
         ChatFileService files,
         IStatisticsService statistics,
-        Func<string?, string>? directoryResolver = null)
+        Func<string?, string>? directoryResolver = null,
+        ChatUsageState? persistedUsage = null,
+        ChatSessionStatsState? persistedStats = null)
     {
         Id = id;
         _directoryResolver = directoryResolver;
@@ -123,12 +137,28 @@ public sealed class ChatSession : IAsyncDisposable
 
         _memory = new ChatMemory(settings, directory, "conversation.jsonl", profilePath);
 
+        // 索引里保存了累计用量与计时：直接恢复，避免只按最近窗口重建而丢失历史
+        _usage = persistedUsage;
+        if (persistedStats is not null)
+        {
+            _sessionRounds = persistedStats.Rounds;
+            _sessionSteps = persistedStats.Steps;
+            _sessionModelMilliseconds = persistedStats.ModelMilliseconds;
+            _sessionToolMilliseconds = persistedStats.ToolMilliseconds;
+            _sessionFirstTokenMilliseconds = persistedStats.FirstTokenMilliseconds;
+            _sessionFirstTokenSamples = persistedStats.FirstTokenSamples;
+            _sessionGenerationMilliseconds = persistedStats.GenerationMilliseconds;
+        }
+
         _toolAccess.ApprovalRequested += OnApprovalRequested;
         _questions.QuestionAsked += OnQuestionAsked;
         _files.FileShown += OnFileShown;
         _files.FileEdited += OnFileEdited;
 
         LoadRecentHistory();
+        // 旧索引没有统计字段时，至少用当前窗口里的用户轮数作为起点
+        if (persistedStats is null)
+            _sessionRounds = CountHistoryUserTurns();
         TrimMessages();
     }
 
@@ -670,6 +700,9 @@ public sealed class ChatSession : IAsyncDisposable
         MessageState? answered = null;
         LlmUsageEvent? usage = null;
         var toolBubbles = new Dictionary<string, MessageState>(StringComparer.Ordinal);
+        // 工具调用耗时：(Started, 完成) 事件之间计时，工具在 LlmChatService 中串行执行
+        long toolStartedAt = 0;
+        var toolMilliseconds = 0d;
         CancellationToken token;
         string? workspacePath;
 
@@ -677,9 +710,12 @@ public sealed class ChatSession : IAsyncDisposable
         lock (_gate)
         {
             workspacePath = _workspacePath;
+            _approvalStartedAt = 0;
+            _approvalWaitMilliseconds = 0;
             messageText = messageText.Trim();
             var requestText = BuildUserRequestText(messageText);
             _history.Add(new ChatMessage(ChatRole.User, requestText));
+            _sessionRounds++;
             _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText,
                 isPlatformNotice: isPlatformNotice, requestText: requestText);
             TrimHistory();
@@ -829,6 +865,7 @@ public sealed class ChatSession : IAsyncDisposable
                         break;
 
                     case LlmToolCallStartedEvent started:
+                        toolStartedAt = Stopwatch.GetTimestamp();
                         var bubble = NewMessage(
                             ChatMessageKinds.Tool,
                             FormatToolStarted(started),
@@ -840,6 +877,12 @@ public sealed class ChatSession : IAsyncDisposable
                         break;
 
                     case LlmToolCallEvent call:
+                        if (toolStartedAt != 0)
+                        {
+                            toolMilliseconds += Stopwatch.GetElapsedTime(toolStartedAt).TotalMilliseconds;
+                            toolStartedAt = 0;
+                        }
+
                         var toolText = FormatToolCall(call);
                         var toolLabel = call.Label ?? ToolDisplay.Describe(call.Name, call.Arguments);
                         var toolDiffs = TakePendingDiffs(call.CallId);
@@ -942,6 +985,27 @@ public sealed class ChatSession : IAsyncDisposable
                 TrimHistory();
             }
 
+            if (toolStartedAt != 0)
+            {
+                toolMilliseconds += Stopwatch.GetElapsedTime(toolStartedAt).TotalMilliseconds;
+                toolStartedAt = 0;
+            }
+
+            // 扣掉审批等待：工具耗时只统计真正执行的时间（被打断时仍在等待的审批也要结算）
+            double approvalWait;
+            lock (_gate)
+            {
+                if (_approvalStartedAt != 0)
+                {
+                    _approvalWaitMilliseconds += Stopwatch.GetElapsedTime(_approvalStartedAt).TotalMilliseconds;
+                    _approvalStartedAt = 0;
+                }
+
+                approvalWait = _approvalWaitMilliseconds;
+            }
+
+            toolMilliseconds = Math.Max(0, toolMilliseconds - approvalWait);
+
             var committed = CommitSegment(withReasoning: true);
             _memory.SaveWindowTurns(CountHistoryUserTurns());
 
@@ -953,7 +1017,7 @@ public sealed class ChatSession : IAsyncDisposable
                         usage.CachedInputTokens, FormatModelLabel(model));
                 }
 
-                RecordUsage(model, usage, answered);
+                RecordUsage(model, usage, answered, toolMilliseconds);
             }
 
             lock (_gate)
@@ -972,7 +1036,8 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
-    private void RecordUsage(ChatModelConfig model, LlmUsageEvent usage, MessageState? bubble)
+    private void RecordUsage(ChatModelConfig model, LlmUsageEvent usage, MessageState? bubble,
+        double toolMilliseconds)
     {
         var label = FormatModelLabel(model);
         if (bubble is not null)
@@ -988,8 +1053,17 @@ public sealed class ChatSession : IAsyncDisposable
             var input = (_usage?.InputTokens ?? 0) + usage.InputTokens;
             var output = (_usage?.OutputTokens ?? 0) + usage.OutputTokens;
             var cached = (_usage?.CachedInputTokens ?? 0) + usage.CachedInputTokens;
+
+            _sessionSteps += usage.Steps;
+            _sessionModelMilliseconds += usage.ModelMilliseconds;
+            _sessionToolMilliseconds += toolMilliseconds;
+            _sessionFirstTokenMilliseconds += usage.FirstTokenMilliseconds;
+            _sessionFirstTokenSamples += usage.FirstTokenSamples;
+            _sessionGenerationMilliseconds += usage.GenerationMilliseconds;
+
             _usage = new ChatUsageState(input, output, cached, label, DateTimeOffset.Now);
-            cumulative = _usage;
+            cumulative = BuildUsageLocked()!;
+            _usage = cumulative;
             EmitLocked(new ChatOpUsage(cumulative));
         }
 
@@ -1110,6 +1184,7 @@ public sealed class ChatSession : IAsyncDisposable
             _messages.Insert(index, message);
             _approvalRequest = request;
             _approvalMessageId = message.Id;
+            _approvalStartedAt = Stopwatch.GetTimestamp();
             EmitLocked(new ChatOpMessageInsert(index, message.ToState()));
         }
 
@@ -1121,6 +1196,13 @@ public sealed class ChatSession : IAsyncDisposable
     {
         lock (_gate)
         {
+            // 审批等待时间不计入工具执行耗时：用户在确认框上挂机多久都与工具本身无关
+            if (_approvalStartedAt != 0)
+            {
+                _approvalWaitMilliseconds += Stopwatch.GetElapsedTime(_approvalStartedAt).TotalMilliseconds;
+                _approvalStartedAt = 0;
+            }
+
             if (!ReferenceEquals(_approvalRequest, request)) return;
 
             var message = _messages.FirstOrDefault(m => string.Equals(m.Id, _approvalMessageId, StringComparison.Ordinal));
@@ -1263,6 +1345,9 @@ public sealed class ChatSession : IAsyncDisposable
         var recent = _memory.RecentTurns(RestoreWindowTurns(), includeTools: true);
         if (recent.Count == 0) return;
 
+        // 索引里已有累计用量时不再按窗口重建，否则会把历史用量重复累加
+        var hasPersistedUsage = _usage is not null;
+
         void AddReasoning(string? reasoning, DateTimeOffset time)
         {
             if (string.IsNullOrEmpty(reasoning)) return;
@@ -1275,7 +1360,7 @@ public sealed class ChatSession : IAsyncDisposable
         for (var i = 0; i < recent.Count; i++)
         {
             var turn = recent[i];
-            if (turn.InputTokens is { } accumulatedInput)
+            if (!hasPersistedUsage && turn.InputTokens is { } accumulatedInput)
             {
                 _usage = new ChatUsageState(
                     (_usage?.InputTokens ?? 0) + accumulatedInput,
@@ -1509,8 +1594,39 @@ public sealed class ChatSession : IAsyncDisposable
         _approvalMode,
         ToWorkspace(_workspacePath),
         SnapshotWorkspacesLocked(),
-        _usage,
+        BuildUsageLocked(),
         _ask);
+
+    private ChatUsageState? BuildUsageLocked()
+    {
+        if (_usage is null) return null;
+
+        var averageFirstTokenSeconds = _sessionFirstTokenSamples > 0
+            ? _sessionFirstTokenMilliseconds / _sessionFirstTokenSamples / 1000d
+            : 0d;
+        var tokensPerSecond = _sessionGenerationMilliseconds > 0
+            ? _usage.OutputTokens / (_sessionGenerationMilliseconds / 1000d)
+            : 0d;
+
+        return _usage with
+        {
+            Rounds = _sessionRounds,
+            Steps = _sessionSteps,
+            ModelSeconds = _sessionModelMilliseconds / 1000d,
+            ToolSeconds = _sessionToolMilliseconds / 1000d,
+            AverageFirstTokenSeconds = averageFirstTokenSeconds,
+            TokensPerSecond = tokensPerSecond,
+        };
+    }
+
+    private ChatSessionStatsState CaptureStatsLocked() => new(
+        _sessionRounds,
+        _sessionSteps,
+        _sessionModelMilliseconds,
+        _sessionToolMilliseconds,
+        _sessionFirstTokenMilliseconds,
+        _sessionFirstTokenSamples,
+        _sessionGenerationMilliseconds);
 
     private IReadOnlyList<ChatModelState> SnapshotModelsLocked() =>
         [.. _settings.ChatModels.Select(model => new ChatModelState(
@@ -1563,7 +1679,9 @@ public sealed class ChatSession : IAsyncDisposable
                 DateTimeOffset.Now,
                 _messages.Count,
                 lastUser?.Text,
-                _selectedModelKey);
+                _selectedModelKey,
+                BuildUsageLocked(),
+                CaptureStatsLocked());
         }
 
         try

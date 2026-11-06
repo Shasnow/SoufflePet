@@ -4,6 +4,7 @@
 using System;
 using System.ClientModel;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -47,10 +48,23 @@ public sealed record LlmToolCallEvent(string CallId, string Name, string Argumen
     : LlmStreamEvent;
 
 /// <summary>
-/// 本次回复为止累计的 token 用量（含多轮工具调用的总和）。每完成一轮就产出一份累计值，
+/// 本次回复为止累计的 token 用量与耗时（含多轮工具调用的总和）。每完成一轮就产出一份累计值，
 /// 这样中途取消 / 出错时，已完成轮次已经花掉的用量不会因为拿不到「结束事件」而丢失。
 /// </summary>
-public sealed record LlmUsageEvent(long InputTokens, long OutputTokens, long CachedInputTokens) : LlmStreamEvent;
+/// <param name="Steps">本次回复已发出的模型请求数（一个请求 = 一步）。</param>
+/// <param name="ModelMilliseconds">模型请求累计耗时（含等待首 token 的时间）。</param>
+/// <param name="FirstTokenMilliseconds">各次请求首 token 耗时之和，配合 <paramref name="FirstTokenSamples" /> 求平均。</param>
+/// <param name="FirstTokenSamples">产生过首 token 的请求数。</param>
+/// <param name="GenerationMilliseconds">首 token 到流结束的累计耗时，用于计算输出速度。</param>
+public sealed record LlmUsageEvent(
+    long InputTokens,
+    long OutputTokens,
+    long CachedInputTokens,
+    int Steps = 0,
+    double ModelMilliseconds = 0,
+    double FirstTokenMilliseconds = 0,
+    int FirstTokenSamples = 0,
+    double GenerationMilliseconds = 0) : LlmStreamEvent;
 
 /// <summary>LLM 对话服务：通过 Microsoft.Extensions.AI 的 IChatClient 流式请求回复。</summary>
 public interface ILlmChatService
@@ -224,6 +238,21 @@ public sealed class LlmChatService(
         var inputTokens = 0L;
         var outputTokens = 0L;
         var cachedInputTokens = 0L;
+        var steps = 0;
+        var modelMilliseconds = 0d;
+        var firstTokenMilliseconds = 0d;
+        var firstTokenSamples = 0;
+        var generationMilliseconds = 0d;
+        long requestStartedAt = 0;
+        long? firstTokenAt = null;
+
+        void MarkFirstToken()
+        {
+            if (firstTokenAt is not null) return;
+            firstTokenAt = Stopwatch.GetTimestamp();
+            firstTokenMilliseconds += Stopwatch.GetElapsedTime(requestStartedAt, firstTokenAt.Value).TotalMilliseconds;
+            firstTokenSamples++;
+        }
 
         for (var round = 0;; round++)
         {
@@ -238,6 +267,8 @@ public sealed class LlmChatService(
             // 文本增量即时产出，同时留存完整流以便汇总工具调用。
             // 插件响应钩子每轮重新开始，状态不跨轮；处理失败由管线原样放行。
             var pipeline = plugins.CreateResponsePipeline(model.ModelId);
+            requestStartedAt = Stopwatch.GetTimestamp();
+            firstTokenAt = null;
             var updates = new List<ChatResponseUpdate>();
             // 上游可能把回复拆成大量碎片甚至空分片：这里自行合并成一条助手消息，
             // 正文只保留响应钩子输出的可见文本（DSML 等已在插件里剔除），思考原样保留。
@@ -261,11 +292,15 @@ public sealed class LlmChatService(
                     }
 
                     updates.Add(update);
+                    // 首个有效内容块到达即视为首 token：纯工具调用轮次同样计入生成耗时，
+                    // 否则它的输出 token 会进 TPS 的分子却缺少分母，速度虚高
+                    if (update.Contents.Count > 0) MarkFirstToken();
                     // 思考内容与正文分开产出，界面上各自展示
                     foreach (var content in update.Contents)
                     {
                         if (content is TextReasoningContent { Text: { Length: > 0 } reasoning })
                         {
+                            MarkFirstToken();
                             replyReasoning.Append(reasoning);
                             yield return new LlmReasoningDelta(reasoning);
                         }
@@ -276,6 +311,7 @@ public sealed class LlmChatService(
                         var visible = pipeline.Process(text);
                         if (visible.Length > 0)
                         {
+                            MarkFirstToken();
                             replyText.Append(visible);
                             yield return new LlmTextDelta(visible);
                         }
@@ -286,9 +322,16 @@ public sealed class LlmChatService(
             var tail = pipeline.Flush();
             if (tail.Length > 0)
             {
+                MarkFirstToken();
                 replyText.Append(tail);
                 yield return new LlmTextDelta(tail);
             }
+
+            var requestFinishedAt = Stopwatch.GetTimestamp();
+            steps++;
+            modelMilliseconds += Stopwatch.GetElapsedTime(requestStartedAt, requestFinishedAt).TotalMilliseconds;
+            if (firstTokenAt is { } tokenAt)
+                generationMilliseconds += Stopwatch.GetElapsedTime(tokenAt, requestFinishedAt).TotalMilliseconds;
 
             if (updates.Count == 0) break;
 
@@ -302,13 +345,16 @@ public sealed class LlmChatService(
                 outputTokens += usage.OutputTokenCount ?? 0;
                 cachedInputTokens += usage.CachedInputTokenCount ?? 0;
 
-                // 每完成一轮就产出一次累计用量：后续轮次可能被取消或抛错，届时已经花掉的 token 就再也报不出去了。
                 // 命中率是 prompt 结构是否稳定的直接指标：缓存命中的部分按缓存价计费。
                 Logger.Debug("LLM usage input={Input} output={Output} cached={Cached} hit={Hit:P0}",
                     inputTokens, outputTokens, cachedInputTokens,
                     inputTokens > 0 ? (double)cachedInputTokens / inputTokens : 0d);
-                yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens);
             }
+
+            // 每完成一轮都产出一次累计用量（模型不返回 usage 时也要发）：
+            // 后续轮次可能被取消或抛错，已采集的轮次与耗时不能因为拿不到 token 计数就一起丢掉。
+            yield return new LlmUsageEvent(inputTokens, outputTokens, cachedInputTokens,
+                steps, modelMilliseconds, firstTokenMilliseconds, firstTokenSamples, generationMilliseconds);
 
             var calls = response.Messages
                 .SelectMany(message => message.Contents)
