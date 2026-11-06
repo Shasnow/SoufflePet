@@ -32,7 +32,7 @@
 
 ### 消息气泡
 
-助手气泡的正文由 React 前端渲染 Markdown（GFM + 表格横滚 + KaTeX 公式 + Shiki 代码高亮）：段落、标题、有序 / 无序 / 任务列表、引用、围栏代码块、表格、分割线，以及粗体 / 斜体 / 删除线 / 行内代码 / 链接（点击用默认浏览器打开）。用户发言、平台提醒与工具审批气泡按纯文本原样展示，`*`、`#`、`@路径` 这类字符不会被当成语法改写。
+助手气泡的正文由 React 前端渲染 Markdown（GFM + 表格横滚 + KaTeX 公式 + Shiki 代码高亮）：段落、标题、有序 / 无序 / 任务列表、引用、围栏代码块、表格、分割线，以及粗体 / 斜体 / 删除线 / 行内代码 / 链接（点击用默认浏览器打开）。用户发言、平台消息与工具审批气泡按纯文本原样展示，`*`、`#`、`@路径` 这类字符不会被当成语法改写。
 
 消息区使用虚拟列表，只实例化视口附近的气泡，长会话不会随消息数量线性吃内存；会话状态机保留最近 300 条可见消息（更早的从界面裁剪，请求历史由上下文窗口单独维护）。思考、工具调用、审批、附件与用量都是独立气泡，按需展开；编辑文件的工具气泡会显示行级 diff 卡片（文件路径、增删统计、按 hunk 分组的 +/- 行）；卡片默认收起，点文件头才渲染具体行，大文件或差异过长时截断并提示。
 
@@ -128,6 +128,7 @@
 | `browser-use` | 自带浏览器窗口（与 React 主窗口共用 WebView2 用户数据目录）：打开网页、读取页面、点击、输入、按键、滚动、后退、关闭与截图；点击 / 输入 / 按键走审批 |
 | `dsml-cleaner` | 清理模型正文中泄漏的 DSML 工具调用标记 |
 | `napcat` | 通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ，被 @ 时提醒桌宠并按会话回复 |
+| `qqbot` | 通过 QQ 官方机器人 API v2 接入 QQ：群聊 @ 机器人与单聊消息会提醒桌宠并按会话回复；需要 AppID / Secret，被动回复窗口用尽时可回退主动消息。发送者显示事件的 `author.username`（群聊事件通常有值，单聊事件可能为空），为空时直接显示 openid |
 | `loopback` | 本机调试用的回环消息平台：监听 `127.0.0.1:18765`，`GET /send?text=…` 把消息推给桌宠，`GET /replies` 读取桌宠的回复 |
 
 > `loopback` 只监听回环地址，用于验证消息链路与缓存命中率；不需要时在插件窗口里停用即可。
@@ -246,7 +247,8 @@ SoufflePet.sln
 │  ├─ SoufflePet.Plugin.ComputerUse/   # 窗口 / 截屏与键鼠输入工具
 │  ├─ SoufflePet.Plugin.BrowserUse/    # 自带浏览器窗口与操作工具
 │  ├─ SoufflePet.Plugin.DsmlCleaner/   # DSML 标记清理
-│  └─ SoufflePet.Plugin.NapCat/        # NapCat QQ 消息平台
+│  ├─ SoufflePet.Plugin.NapCat/        # NapCat QQ 消息平台
+│  └─ SoufflePet.Plugin.QqBot/         # QQ 官方机器人消息平台
 ├─ Live2DCSharpSDK.Framework/    # Cubism 框架层（数学、Motion、模型解析）
 ├─ Live2DCSharpSDK.App/          # 应用封装（LAppDelegate、LAppModel、Live2dManager）
 ├─ Live2DCSharpSDK.OpenGL/        # OpenGL ES2 渲染后端（CubismRenderer_OpenGLES2）

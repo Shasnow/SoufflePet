@@ -100,7 +100,7 @@ public sealed class HelloPlugin : PluginBase
 {
     protected override void OnToolsBuilding(ICollection<AIFunction> tools)
     {
-        // 配置是 plugin.json 的 config 段，未声明时为 null
+        // 配置默认值来自 plugin.json 的 config 段；用户保存后由 ~/.souffle/plugin-configs/<id>.json 覆盖
         var greeting = Context.Configuration?.TryGetProperty("greeting", out var value) == true
             ? value.GetString()
             : "你好";
@@ -256,7 +256,7 @@ public interface IMessagePlatform
 
 ### 唤醒之后
 
-宿主收到 `OnMentioned` 后，会把消息以「平台提醒」气泡插入对话并生成一轮回复（不会自动弹出窗口）。模型可用下列工具按会话操作：
+宿主收到 `OnMentioned` 后，会把消息以「平台消息」气泡插入对话并生成一轮回复（不会自动弹出窗口）。模型可用下列工具按会话操作：
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
@@ -294,7 +294,7 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 }
 ```
 
-参考实现见 `Plugins/SoufflePet.Plugin.NapCat`：OneBot 11 正向 WebSocket，含群聊 / 私聊、被 @ 或引用时唤醒、附件下载与发送。
+参考实现见 `Plugins/SoufflePet.Plugin.NapCat`：OneBot 11 正向 WebSocket，含群聊 / 私聊、被 @ 或引用时唤醒、附件下载与发送。QQ 官方机器人插件 `Plugins/SoufflePet.Plugin.QqBot` 展示了另一套形态：OAuth access_token、WebSocket 网关鉴权/心跳/Resume，以及 `msg_id` / `msg_seq` 被动回复与主动消息回退。
 
 ## 6. 生命周期与线程约定
 
@@ -337,6 +337,7 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 | type | 界面控件 | JSON 值 |
 | --- | --- | --- |
 | `text` | 单行输入框 | 字符串 |
+| `password` | 密码输入框（界面掩码显示） | 字符串 |
 | `multiline` | 多行输入框 | 字符串 |
 | `number` | 单行输入框，保存时校验 | 数字 |
 | `boolean` | 勾选框 | 布尔 |
@@ -344,8 +345,8 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 | `list` | 多行输入框 | 字符串数组（每行一项） |
 
 - `key` 必须在 `configSchema` 内唯一，且与 `config` 的属性名**完全一致（大小写敏感）**；`label` 省略时显示 `key`。写成 `Models` 而 `config` 里是 `models` 时，界面读不到当前值，保存还会新增一个插件不会读取的键，因此请逐字对齐。
-- 未在 `configSchema` 中声明的 `config` 键仍会原样传给插件，只是界面上不可编辑。
-- 保存会重写整个 `plugin.json`（统一缩进，注释不保留）；插件目录不可写时保存失败，界面会提示原因。
+- `config` 段是默认值；用户保存的配置写到 `~/.souffle/plugin-configs/<id>.json`，与 `plugin.json` 分开，重新构建插件不会丢配置。
+- 保存只覆盖用户表单提交的键（未在 `configSchema` 中声明的键原样保留）；清单里的结构更新（新增配置项、调整默认值）仍会生效。
 - 插件在 `OnInitializedAsync` 中读取 `Context.Configuration`；保存后宿主自动卸载并按新配置重新加载。
 
 日志会带上插件 id 写入应用日志：

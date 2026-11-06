@@ -1,0 +1,98 @@
+{
+  "id": "qqbot",
+  "name": "QQ 官方机器人消息平台",
+  "version": "1.0.0",
+  "author": "SoufflePet",
+  "description": "通过 QQ 官方机器人 API v2 接入 QQ：群聊里 @ 机器人或单聊时提醒桌宠，并可在最近一次会话里回复消息。需要机器人 AppID 与 Secret，且机器人已加入目标群。",
+  "assembly": "SoufflePet.Plugin.QqBot.dll",
+  "entryType": "SoufflePet.Plugins.QqBot.QqBotPlugin",
+  "timeoutSeconds": 30,
+  "config": {
+    "appId": "",
+    "clientSecret": "",
+    "apiBaseUrl": "https://api.bot.qq.com",
+    "wsUrl": "wss://api.bot.qq.com/websocket/",
+    "allowedUsers": [],
+    "allowedGroups": [],
+    "wakeOnPrivateMessage": true,
+    "allowActiveMessage": true,
+    "maxReplyChars": 1500,
+    "downloadAttachments": true,
+    "attachmentCacheDir": "attachments",
+    "rolePrompt": ""
+  },
+  "configSchema": [
+    {
+      "key": "appId",
+      "label": "机器人 AppID",
+      "type": "text",
+      "description": "在 QQ 开放平台机器人管理端查看的 AppID；留空时插件保持停用状态，不会发起连接。"
+    },
+    {
+      "key": "clientSecret",
+      "label": "机器人 Secret",
+      "type": "password",
+      "description": "机器人管理端的密钥，用于换取 access_token；请勿泄露给他人。"
+    },
+    {
+      "key": "apiBaseUrl",
+      "label": "API 地址",
+      "type": "text",
+      "description": "正式环境 https://api.bot.qq.com；沙箱环境 https://sandbox.api.sgroup.qq.com。"
+    },
+    {
+      "key": "wsUrl",
+      "label": "WebSocket 地址",
+      "type": "text",
+      "description": "正式环境 wss://api.bot.qq.com/websocket/；沙箱环境 wss://sandbox.api.sgroup.qq.com/websocket/。"
+    },
+    {
+      "key": "allowedUsers",
+      "label": "允许的单聊用户 openid",
+      "type": "list",
+      "description": "每行一个 user_openid；留空表示不启用白名单，所有单聊都放行。openid 可从收到的消息日志或事件中获取。"
+    },
+    {
+      "key": "allowedGroups",
+      "label": "允许的群 openid",
+      "type": "list",
+      "description": "每行一个 group_openid；留空表示不启用白名单，所有群聊都放行。"
+    },
+    {
+      "key": "wakeOnPrivateMessage",
+      "label": "单聊消息提醒桌宠",
+      "type": "boolean",
+      "description": "收到允许用户的单聊时主动提醒桌宠；关闭后只记录、不唤醒。群聊只有 @ 机器人才会收到，始终提醒。"
+    },
+    {
+      "key": "allowActiveMessage",
+      "label": "允许主动消息回退",
+      "type": "boolean",
+      "description": "被动回复窗口过期或条数用尽时，改为发送主动消息。群聊需要群主开启「机器人主动在群聊内发言」，单聊每月 4 条，且受频控限制。"
+    },
+    {
+      "key": "maxReplyChars",
+      "label": "单条消息字数上限",
+      "type": "number",
+      "description": "超长回复会拆成多条发送，范围 200-4000。"
+    },
+    {
+      "key": "downloadAttachments",
+      "label": "附件写入本地文件",
+      "type": "boolean",
+      "description": "收到图片或文件时自动下载到缓存目录，并把本地路径写进消息正文，供桌宠直接读取。单个附件上限 20MB。"
+    },
+    {
+      "key": "attachmentCacheDir",
+      "label": "附件缓存目录",
+      "type": "text",
+      "description": "相对路径以插件目录为基准，也可以填绝对路径；默认 attachments。"
+    },
+    {
+      "key": "rolePrompt",
+      "label": "平台角色说明",
+      "type": "text",
+      "description": "注入系统提示词，告诉桌宠这个 QQ 机器人账号在它眼里的身份，例如「这是你自己的 QQ 机器人」；留空则不注入。"
+    }
+  ]
+}

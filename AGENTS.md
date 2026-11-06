@@ -41,7 +41,7 @@ pnpm --dir SoufflePet/web screenshots
 - React UI 构建依赖 **Node.js 22.12+ 与 pnpm 10+**；`dotnet build` 默认调用 `pnpm build`，缺依赖时会给出可操作错误。
 - 测试：Web 前端用 Vitest（`pnpm --dir SoufflePet/web test`）；领域层用 `dotnet test SoufflePet.Core.Tests`。改动后至少跑 `dotnet build SoufflePet.sln`（`-warnaserror` 未启用，但请勿引入新警告）。
 - `SoufflePet.Core` **不得引用 Avalonia**；平台能力（桌宠表情、UI 线程）通过 `IPetController` / `IUiDispatcher` 抽象注入。
-- 插件工程**不在解决方案内**，需单独构建（见下）。
+- 插件工程已包含在 `SoufflePet.sln` 中，会被整体构建；调试时仍可单独构建以部署到宿主插件目录（见下）。
 - **输出文件被占用**：构建时若报 MSB3026 错误（通常是运行中的 `.NET Host` 进程锁定了 dll），**改用 `.verifybuild` 作为输出目录重试**，不要终止用户进程：
 
   ```powershell
@@ -69,11 +69,12 @@ SoufflePet.sln
 │  └─ Chat/                        #   ChatSession / ChatSessionManager / 会话存储 / 触发路由
 ├─ SoufflePet.Core.Tests/          # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
 ├─ SoufflePet.Plugin.Sdk/          # 插件契约（PluginBase、清单、配置表单、IMessagePlatform）
-├─ Plugins/                        # 内置插件（独立构建，不在 sln 编译项）
+├─ Plugins/                        # 内置插件（在 sln 中，随解决方案一起构建）
 │  ├─ SoufflePet.Plugin.ComputerUse/
 │  ├─ SoufflePet.Plugin.BrowserUse/
 │  ├─ SoufflePet.Plugin.DsmlCleaner/
-│  └─ SoufflePet.Plugin.NapCat/
+│  ├─ SoufflePet.Plugin.NapCat/
+│  └─ SoufflePet.Plugin.QqBot/
 ├─ Live2DCSharpSDK.Framework/      # Cubism 框架层
 ├─ Live2DCSharpSDK.App/            # 应用封装
 └─ Live2DCSharpSDK.OpenGL/         # OpenGL ES2 渲染后端
@@ -109,7 +110,7 @@ SoufflePet.sln
 
 - **Live2D SDK 子项目为本地改造版**：来自上游 [Live2DCSharpSDK](https://github.com/Coloryr/Live2DCSharpSDK)（MIT），本仓库有大量适配桌宠的修改与 Bug 修复。改动前先读 README 的「对 Live2DCSharpSDK 的本地修改」一节，避免覆盖已有本地改动。源文件行尾为 CRLF，与上游 diff 需 `--strip-trailing-cr`。
 - **wwwroot 不入库**：`SoufflePet/wwwroot/` 下的 `app/`（构建产物）与 `models/`（模型资源）全部 gitignore；**不附带、不分发任何 Live2D 模型资源**，不要提交模型文件或把它当作可用资源断言。
-- **插件与宿主分开构建**：插件工程不在 `SoufflePet.sln` 中。
+- **插件与宿主分开部署**：插件工程虽在 `SoufflePet.sln` 中，但本地调试部署与发行打包仍按下面的单独命令操作。
 
   ```powershell
   # 本地调试：Debug 构建后自动部署到 SoufflePet/bin/Debug/net10.0/plugins/<id>/
@@ -120,8 +121,8 @@ SoufflePet.sln
   ```
 
   插件契约 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件**不要**自带副本。
-- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；用户级数据统一在 `~/.souffle`：MCP 配置 `~/.souffle/mcp.json`、长期记忆 `~/.souffle/memory.json`、统计 `~/.souffle/statistics.json`、调度日志 `~/.souffle/scheduled-tasks.log`、主窗口几何 `~/.souffle/ui-window.json`、附件 `~/.souffle/attachments`、会话 `~/.souffle/sessions`（`index.json` + 按工作区分组的 `<workspace-group>\<id>\conversation.jsonl`，编辑 diff 存同目录 `diffs\`，JSONL 只存引用；覆盖写入前的旧版本存 `backups\`）、插件 `~/.souffle/plugins/<id>`、技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
-- **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把用户数据根目录（会话、记忆、统计、调度日志、窗口几何、附件）指到临时目录；不设置时根目录为 `~/.souffle`。
+- **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；用户级数据统一在 `~/.souffle`：MCP 配置 `~/.souffle/mcp.json`、长期记忆 `~/.souffle/memory.json`、统计 `~/.souffle/statistics.json`、调度日志 `~/.souffle/scheduled-tasks.log`、主窗口几何 `~/.souffle/ui-window.json`、附件 `~/.souffle/attachments`、会话 `~/.souffle/sessions`（`index.json` + 按工作区分组的 `<workspace-group>\<id>\conversation.jsonl`，编辑 diff 存同目录 `diffs\`，JSONL 只存引用；覆盖写入前的旧版本存 `backups\`）、插件 `~/.souffle/plugins/<id>`、插件配置 `$SOUFFLEPET_DATA_DIR`（默认 `~/.souffle`）下的 `plugin-configs/<id>.json`（用户保存值，覆盖 `plugin.json` 的 `config` 默认段；独立存放以免重新构建插件时被清单覆盖）、技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
+- **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把用户数据根目录（会话、记忆、统计、调度日志、窗口几何、附件、插件配置）指到临时目录；不设置时根目录为 `~/.souffle`。
 - **UI 架构**：React SPA 是唯一对话/设置界面；桌宠只有 `NativePetWindow` 一个原生渲染窗口。WebView2 初始化失败会记录错误并弹一次系统提示，**不再回退旧 Avalonia 窗口**；`--legacy-ui`、`--react-ui`、`--webview` 等迁移期开关已删除。
 - **不做向后兼容**：当前项目未正式发布，且处于快速迭代阶段，不做向后兼容。
 

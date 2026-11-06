@@ -231,7 +231,7 @@ export interface SkillDto {
   content?: string
 }
 
-export type ConfigFieldKind = 'text' | 'multiline' | 'number' | 'boolean' | 'select' | 'list'
+export type ConfigFieldKind = 'text' | 'password' | 'multiline' | 'number' | 'boolean' | 'select' | 'list'
 
 export interface ConfigFieldDto {
   key: string

@@ -135,7 +135,7 @@ export function PluginConfigForm({
                 <input
                   id={`plugin-${pluginId}-${field.key}`}
                   className="input"
-                  type={field.kind === 'number' ? 'number' : 'text'}
+                  type={field.kind === 'number' ? 'number' : field.kind === 'password' ? 'password' : 'text'}
                   value={displayValue(value)}
                   onChange={(event) =>
                     setValues({

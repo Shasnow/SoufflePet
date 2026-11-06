@@ -45,7 +45,7 @@ public sealed class ChatSession : IAsyncDisposable
     private const int TitleLength = 30;
     private const int WorkspaceNameLength = 40;
     private const string SystemPrefix = "[系统消息]";
-    private const string PlatformNoticePrefix = "[平台提醒]";
+    private const string PlatformNoticePrefix = "[平台消息]";
 
     private static readonly string AttachmentDirectory = Path.Combine(
         ChatMemory.SouffleHome, "attachments");
@@ -288,7 +288,7 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
-    /// <summary>排入一轮由桌宠自主发起的对话（平台提醒 / 定时任务 / 戳一戳 / 摸头）。</summary>
+    /// <summary>排入一轮由桌宠自主发起的对话（平台消息 / 定时任务 / 戳一戳 / 摸头）。</summary>
     public Task EnqueueSystemTurnAsync(string prompt, string display, bool isPlatformNotice)
     {
         if (_disposed) return Task.CompletedTask;
@@ -684,7 +684,7 @@ public sealed class ChatSession : IAsyncDisposable
 
     /// <summary>
     /// 一轮对话：写历史/长期记忆、插入占位气泡、流式消费事件。
-    /// 手输发送（用户气泡已插入）与平台提醒/定时任务共用这条链路。
+    /// 手输发送（用户气泡已插入）与平台消息/定时任务共用这条链路。
     /// </summary>
     private async Task RunTurnAsync(
         ChatModelConfig model,
@@ -1070,7 +1070,7 @@ public sealed class ChatSession : IAsyncDisposable
         _statistics.AddUsage(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens);
     }
 
-    // ===== 平台提醒 / 定时任务 =====
+    // ===== 平台消息 / 定时任务 =====
 
     private void StartPendingTurns()
     {

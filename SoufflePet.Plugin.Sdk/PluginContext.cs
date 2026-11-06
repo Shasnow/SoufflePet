@@ -19,7 +19,7 @@ public sealed class PluginContext(
     /// <summary>插件所在目录的绝对路径。</summary>
     public string PluginDirectory { get; } = pluginDirectory;
 
-    /// <summary>plugin.json 里的 config 段；未声明时为 null。</summary>
+    /// <summary>插件配置：默认值来自 plugin.json 的 config 段，用户保存后由 ~/.souffle/plugin-configs/&lt;id&gt;.json 覆盖。</summary>
     public JsonElement? Configuration { get; } = configuration;
 
     /// <summary>已按插件 id 分类的日志出口，转发到应用日志。</summary>

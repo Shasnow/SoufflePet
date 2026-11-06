@@ -9,7 +9,7 @@ using SoufflePet.Plugin.Sdk;
 
 namespace SoufflePet.Services;
 
-/// <summary>一条需要桌宠处理的平台提醒；由插件推送后、交给对话层之前生成。</summary>
+/// <summary>一条需要桌宠处理的平台消息；由插件推送后、交给对话层之前生成。</summary>
 public sealed record PlatformNotification(string PlatformId, string Content, string? Sender = null);
 
 /// <summary>

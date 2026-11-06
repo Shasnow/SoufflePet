@@ -17,6 +17,7 @@ public sealed class PluginConfigField
     public static readonly IReadOnlySet<string> SupportedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "text",
+        "password",
         "multiline",
         "number",
         "boolean",
@@ -33,7 +34,7 @@ public sealed class PluginConfigField
     /// <summary>控件下方的说明文字。</summary>
     public string? Description { get; set; }
 
-    /// <summary>控件类型：text / multiline / number / boolean / select / list，默认 text。</summary>
+    /// <summary>控件类型：text / password / multiline / number / boolean / select / list，默认 text。</summary>
     public string Type { get; set; } = "text";
 
     /// <summary>select 的可选项。</summary>

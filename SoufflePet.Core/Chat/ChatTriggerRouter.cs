@@ -17,7 +17,7 @@ public sealed class ChatTriggerRouter : IDisposable
     private static readonly ILogger Logger = Log.ForContext<ChatTriggerRouter>();
 
     private const int PreviewLength = 80;
-    private const string PlatformNoticePrefix = "[平台提醒]";
+    private const string PlatformNoticePrefix = "[平台消息]";
     private const string SystemPrefix = "[系统消息]";
 
     private readonly ChatSessionManager _sessions;

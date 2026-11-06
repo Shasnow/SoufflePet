@@ -53,7 +53,7 @@ public interface IPluginService : IDisposable
     /// <summary>启用或禁用插件：启用立即加载，禁用依次 Shutdown → Unload。</summary>
     Task SetEnabledAsync(string pluginId, bool enabled, CancellationToken cancellationToken = default);
 
-    /// <summary>保存插件配置：写回 plugin.json 的 config 段，并让运行中的实例按新配置重新加载。</summary>
+    /// <summary>保存插件配置：写入用户数据目录的插件配置，并让运行中的实例按新配置重新加载。</summary>
     Task SaveConfigAsync(string pluginId, JsonElement config, CancellationToken cancellationToken = default);
 
     /// <summary>重新扫描插件目录（保留已加载实例的状态）。</summary>
@@ -76,7 +76,7 @@ public sealed class PluginService : IPluginService
 
     private const string ManifestFileName = "plugin.json";
 
-    /// <summary>写回 plugin.json 时保持缩进与中文原样，方便用户直接查看。</summary>
+    /// <summary>写入插件配置文件时保持缩进与中文原样，方便用户直接查看。</summary>
     private static readonly JsonSerializerOptions ManifestWriteOptions = new()
     {
         WriteIndented = true,
@@ -87,6 +87,7 @@ public sealed class PluginService : IPluginService
     private readonly ILoggerFactory _loggerFactory;
     private readonly PlatformService _platformService;
     private readonly ChatToolAccess _toolAccess;
+    private readonly string _configDirectory;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly List<PluginDescriptor> _descriptors = [];
@@ -106,6 +107,9 @@ public sealed class PluginService : IPluginService
         BuiltInDirectory = Path.Combine(AppContext.BaseDirectory, "plugins");
         InstallDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".souffle", "plugins");
+        // 配置独立存放：插件目录（尤其是内置插件的 bin/plugins）会在重新构建时被覆盖；
+        // 与其它用户数据一样走 SOUFFLEPET_DATA_DIR，便于验收隔离。
+        _configDirectory = Path.Combine(ChatMemory.SouffleHome, "plugin-configs");
         Discover();
         _ = Task.Run(PreloadEnabledAsync);
     }
@@ -307,21 +311,14 @@ public sealed class PluginService : IPluginService
                 .FirstOrDefault(d => string.Equals(d.Manifest.Id, pluginId, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException($"找不到插件「{pluginId}」");
 
-            // 只替换 config 段，保留清单里的其它字段；JSON 注释会在重写时丢失
-            var manifestPath = Path.Combine(descriptor.Directory, ManifestFileName);
-            var root = JsonNode.Parse(
-                await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false),
-                documentOptions: new JsonDocumentOptions
-                {
-                    CommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true,
-                }) as JsonObject ?? throw new InvalidDataException("plugin.json 根节点不是对象");
-
+            // 配置独立存放，避免重新构建插件时被清单覆盖；只覆盖表单提交的键，
+            // 保留未在 configSchema 中声明的配置。
             var incoming = JsonNode.Parse(config.GetRawText());
             JsonNode? mergedConfig;
-            if (root["config"] is JsonObject existing && incoming is JsonObject patch)
+            if (descriptor.Manifest.Config is { } current
+                && JsonNode.Parse(current.GetRawText()) is JsonObject existing
+                && incoming is JsonObject patch)
             {
-                // 只覆盖表单提交的键，保留未在 configSchema 中声明的配置
                 foreach (var (key, value) in patch)
                     existing[key] = value?.DeepClone();
                 mergedConfig = existing;
@@ -329,12 +326,12 @@ public sealed class PluginService : IPluginService
             else
             {
                 mergedConfig = incoming;
-                root["config"] = mergedConfig;
             }
 
+            Directory.CreateDirectory(_configDirectory);
             await File.WriteAllTextAsync(
-                manifestPath,
-                root.ToJsonString(ManifestWriteOptions),
+                ConfigPath(descriptor.Manifest.Id),
+                mergedConfig?.ToJsonString(ManifestWriteOptions) ?? "null",
                 cancellationToken).ConfigureAwait(false);
 
             descriptor.Manifest.Config = mergedConfig is null
@@ -505,6 +502,11 @@ public sealed class PluginService : IPluginService
                         continue;
                     }
 
+                    // 独立配置文件只保存用户改动过的值，加载时与清单默认值合并：
+                    // 这样清单后续新增配置项或调整默认值仍然生效。
+                    if (LoadStoredConfig(manifest.Id) is { } storedConfig)
+                        manifest.Config = MergeConfig(manifest.Config, storedConfig);
+
                     if (!seen.Add(manifest.Id))
                     {
                         Logger.Debug("duplicate plugin {Plugin} ignored ({Directory})", manifest.Id, directory);
@@ -531,6 +533,52 @@ public sealed class PluginService : IPluginService
         }
 
         return found;
+    }
+
+    /// <summary>插件配置文件的路径：用户数据目录下的 plugin-configs/&lt;id&gt;.json。</summary>
+    private string ConfigPath(string pluginId)
+        => Path.Combine(_configDirectory, pluginId + ".json");
+
+    /// <summary>
+    /// 把用户保存的配置叠加到清单默认值上：只为用户改过的键覆盖默认值，
+    /// 清单新增的键仍使用新默认值，不会因旧的配置文件而缺失。
+    /// </summary>
+    private static JsonElement? MergeConfig(JsonElement? defaults, JsonElement stored)
+    {
+        if (defaults is not { ValueKind: JsonValueKind.Object } baseConfig
+            || stored.ValueKind != JsonValueKind.Object)
+        {
+            return stored;
+        }
+
+        var merged = JsonNode.Parse(baseConfig.GetRawText()) as JsonObject ?? new JsonObject();
+        if (JsonNode.Parse(stored.GetRawText()) is JsonObject overlay)
+        {
+            foreach (var (key, value) in overlay)
+                merged[key] = value?.DeepClone();
+        }
+
+        return JsonSerializer.SerializeToElement(merged);
+    }
+
+    /// <summary>读取用户保存的插件配置；文件不存在或无法解析时返回 null，回退到清单里的默认配置。</summary>
+    private JsonElement? LoadStoredConfig(string pluginId)
+    {
+        var path = ConfigPath(pluginId);
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? document.RootElement.Clone()
+                : null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "读取插件配置 {Path} 失败", path);
+            return null;
+        }
     }
 
     /// <summary>加载并初始化单个插件；失败只标记该插件（调用方须持有 <see cref="_gate"/>）。</summary>

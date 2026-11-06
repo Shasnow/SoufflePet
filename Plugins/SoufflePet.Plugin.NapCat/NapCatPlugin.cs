@@ -1337,7 +1337,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         }
         catch (Exception ex)
         {
-            Context.Logger.LogWarning(ex, "向宿主转发 NapCat 平台提醒失败");
+            Context.Logger.LogWarning(ex, "向宿主转发 NapCat 平台消息失败");
         }
     }
 

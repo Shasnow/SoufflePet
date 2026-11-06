@@ -168,7 +168,7 @@ export function PluginsSettings() {
           if (!open) setConfigPlugin(null)
         }}
         title={`配置「${configPlugin?.name ?? ''}」`}
-        description="字段来自插件清单的 configSchema；保存后写入 plugin.json 并重载插件。"
+        description="字段来自插件清单的 configSchema；保存后写入 ~/.souffle/plugin-configs 并重载插件。"
         className="settings-dialog"
       >
         {configPlugin ? (
