@@ -6,29 +6,34 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Serilog;
-using SoufflePet.Utils;
+using Avalonia.Platform;
 
-namespace SoufflePet.Views;
+namespace SoufflePet.Plugins.BrowserUse.Browser;
 
 /// <summary>
-/// AI 可控的内置浏览器窗口：纯代码构建（与 NativePetWindow 风格一致），
-/// 内嵌 <see cref="NativeWebView" />（Windows 上即 WebView2/Chromium）加载网页。
+/// 插件自带的浏览器窗口：纯代码构建，内嵌 <see cref="NativeWebView" />（Windows 上即 WebView2/Chromium）。
 /// 顶部工具栏给用户手动接管的入口——AI 操作与用户点击作用在同一视图上，可随时切换。
-/// 窗口标题固定为 <see cref="WindowTitle" />：截图工具按标题找窗口，标题跟着页面变化会找不到。
+/// 窗口标题固定为 <see cref="WindowTitle" />：截图按标题找窗口，标题跟着页面变化会找不到。
 /// </summary>
-public sealed class BrowserWindow : Window
+internal sealed class BrowserWindow : Window
 {
-    private static readonly ILogger Logger = Log.ForContext<BrowserWindow>();
-
-    /// <summary>窗口标题（固定值）：按标题截图/找窗口时用它精确定位本窗口。</summary>
+    /// <summary>窗口标题（固定值）：截图时按标题精确定位本窗口。</summary>
     public const string WindowTitle = "SoufflePet 浏览器";
+
+    /// <summary>
+    /// WebView2 用户数据目录：与宿主 React 主窗口共用 <c>%LocalAppData%\SoufflePet\WebView2</c>，
+    /// Cookie、登录态与缓存互通；同进程多个 WebView 共用同一目录是 WebView2 支持的用法。
+    /// </summary>
+    private static readonly string UserDataFolder = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SoufflePet",
+        "WebView2");
 
     private readonly TextBox _address;
 
     private readonly TextBlock _status;
 
-    /// <summary>关闭按钮/Alt+F4 只隐藏窗口，应用退出时由服务调 CloseForShutdown 真正关闭。</summary>
+    /// <summary>关闭按钮/Alt+F4 只隐藏窗口，插件停用时再真正关闭。</summary>
     private bool _allowClose;
 
     /// <summary>内嵌浏览器视图（WebView2）：AI 工具与用户操作都作用在它上面。</summary>
@@ -60,7 +65,7 @@ public sealed class BrowserWindow : Window
         };
 
         View = new NativeWebView();
-        View.EnvironmentRequested += (_, e) => WebViewProfile.Apply(e);
+        View.EnvironmentRequested += OnEnvironmentRequested;
         View.NavigationCompleted += OnNavigationCompleted;
         View.NewWindowRequested += OnNewWindowRequested;
 
@@ -94,7 +99,7 @@ public sealed class BrowserWindow : Window
         };
     }
 
-    /// <summary>应用退出时真正关闭窗口（平时关闭只隐藏，便于再次呼出）。</summary>
+    /// <summary>插件停用时真正关闭窗口（平时关闭只隐藏，便于再次呼出）。</summary>
     public void CloseForShutdown()
     {
         _allowClose = true;
@@ -116,12 +121,24 @@ public sealed class BrowserWindow : Window
             {
                 action();
             }
-            catch (Exception ex)
+            catch
             {
-                Logger.Debug(ex, "browser toolbar action failed");
+                // 工具栏只是辅助入口，失败不打断 AI 操作
             }
         };
         return button;
+    }
+
+    private static void OnEnvironmentRequested(object? sender, WebViewEnvironmentRequestedEventArgs e)
+    {
+        if (e is not WindowsWebView2EnvironmentRequestedEventArgs webView2)
+            return;
+
+        webView2.UserDataFolder = UserDataFolder;
+#if DEBUG
+        // 与宿主 AppWebWindow 保持相同的环境选项，确保共用目录时复用同一个 WebView2 环境
+        webView2.EnableDevTools = true;
+#endif
     }
 
     private void NavigateToAddress()
@@ -149,7 +166,7 @@ public sealed class BrowserWindow : Window
 
     private void OnNavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
     {
-        _address.Text = View.Source.ToString();
+        _address.Text = View.Source?.ToString() ?? string.Empty;
         if (e.IsSuccess) HideStatus();
         else ShowStatus($"网页加载失败（{View.Source}），可以试试刷新或换个地址。");
     }

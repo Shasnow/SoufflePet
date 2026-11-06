@@ -10,20 +10,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
-using Serilog;
-using SoufflePet.Utils;
-using SoufflePet.Views;
 
-namespace SoufflePet.Services;
+namespace SoufflePet.Plugins.BrowserUse.Browser;
 
 /// <summary>
-/// 内置浏览器服务（DI 单例）：懒创建窗口、串行化操作、把页面脚本的结果整理成模型可读的文本。
-/// 窗口关闭只隐藏，登录态与浏览历史保留在会话里；应用退出时统一销毁。
+/// 插件自带的浏览器控制器：懒创建窗口、串行化操作、把页面脚本的结果整理成模型可读的文本。
+/// 窗口关闭只隐藏，登录态与浏览历史保留在会话里；插件停用时统一销毁。
 /// </summary>
-public sealed class BrowserService : IBrowserService, IDisposable
+internal sealed class BrowserHost
 {
-    private static readonly ILogger Logger = Log.ForContext<BrowserService>();
-
     /// <summary>单次页面脚本的执行上限（秒）：脚本卡住时不能把对话一起拖死。</summary>
     private const int ScriptTimeoutSeconds = 20;
 
@@ -72,9 +67,9 @@ public sealed class BrowserService : IBrowserService, IDisposable
         var uri = NormalizeUrl(url);
         return RunExclusiveAsync(async () =>
         {
-            var window = await EnsureWindowAsync(cancellationToken).ConfigureAwait(false);
+            await EnsureWindowAsync(cancellationToken).ConfigureAwait(false);
             var wait = BeginNavigation(cancellationToken);
-            await Dispatcher.UIThread.InvokeAsync(() => window.View.Navigate(uri));
+            await Dispatcher.UIThread.InvokeAsync(() => _window!.View.Navigate(uri));
             if (!await wait.ConfigureAwait(false))
                 throw new InvalidOperationException(
                     $"打开「{uri}」超时（{NavigationTimeoutSeconds} 秒）。可能是网络不可达，或系统缺少 WebView2 运行时。");
@@ -262,12 +257,11 @@ public sealed class BrowserService : IBrowserService, IDisposable
             Interlocked.Exchange(ref _navigation, null)?.TrySetResult(false);
 
             var window = _window;
-            if (window is null) return "内置浏览器还没有打开过，不需要关闭。";
+            if (window is null) return "浏览器还没有打开过，不需要关闭。";
 
             _window = null;
             await Dispatcher.UIThread.InvokeAsync(() => DestroyWindow(window));
-            Logger.Information("browser window destroyed");
-            return "已关闭内置浏览器并释放其占用。下次 browser_open 会重新创建窗口，当前页面与浏览历史不保留。";
+            return "已关闭浏览器并释放其占用。下次 browser_open 会重新创建窗口，当前页面与浏览历史不保留。";
         }
         finally
         {
@@ -275,18 +269,7 @@ public sealed class BrowserService : IBrowserService, IDisposable
         }
     }
 
-    /// <summary>
-    /// 销毁窗口（必须在 UI 线程调用）：先把网页控件从窗口内容上摘下来，
-    /// 控件脱离可视树即销毁适配器，WebView2 进程不必等窗口关闭流程才退出。
-    /// </summary>
-    private void DestroyWindow(BrowserWindow window)
-    {
-        window.View.NavigationCompleted -= OnNavigationCompleted;
-        window.Content = null;
-        window.CloseForShutdown();
-    }
-
-    public async Task<MonitorScreenshot> ScreenshotAsync(CancellationToken cancellationToken)
+    public async Task<BrowserScreenshot> ScreenshotAsync(CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("浏览器截图仅支持 Windows。");
@@ -296,7 +279,7 @@ public sealed class BrowserService : IBrowserService, IDisposable
         {
             ThrowIfDisposed();
             var window = await EnsureWindowAsync(cancellationToken).ConfigureAwait(false);
-            // 截图用 PrintWindow 抓窗口内容：隐藏或最小化的窗口都抓不到画面，先让它以正常状态显示出来
+            // PrintWindow 抓不到隐藏或最小化的窗口，先让它以正常状态显示出来
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!window.IsVisible) window.Show();
@@ -304,12 +287,42 @@ public sealed class BrowserService : IBrowserService, IDisposable
             });
             await Task.Delay(SettleDelay, cancellationToken).ConfigureAwait(false);
 
-            // 按固定标题定位本窗口（窗口标题不随页面变化，否则会找不到）
-            return ScreenCapture.CaptureWindow(BrowserWindow.WindowTitle);
+            return WebCapture.CaptureWindow(BrowserWindow.WindowTitle);
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>插件停用时释放窗口与后台资源。</summary>
+    public async Task DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        Interlocked.Exchange(ref _navigation, null)?.TrySetResult(false);
+
+        var window = _window;
+        _window = null;
+        if (window is null) return;
+
+        try
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                // 宿主在 desktop.Exit 里同步等待 ShutdownAsync；此时已在 UI 线程，
+                // 直接销毁，避免「阻塞 UI 线程去等一个排队的 UI 任务」造成退出死锁。
+                DestroyWindow(window);
+            }
+            else
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => DestroyWindow(window));
+            }
+        }
+        catch
+        {
+            // 退出路径上 UI 线程可能已经关闭，忽略即可
         }
     }
 
@@ -356,8 +369,18 @@ public sealed class BrowserService : IBrowserService, IDisposable
         });
 
         _window = created ?? throw new InvalidOperationException("浏览器窗口创建失败。");
-        Logger.Information("browser window created");
         return _window;
+    }
+
+    /// <summary>
+    /// 销毁窗口（必须在 UI 线程调用）：先把网页控件从窗口内容上摘下来，
+    /// 控件脱离可视树即销毁适配器，WebView2 进程不必等窗口关闭流程才退出。
+    /// </summary>
+    private void DestroyWindow(BrowserWindow window)
+    {
+        window.View.NavigationCompleted -= OnNavigationCompleted;
+        window.Content = null;
+        window.CloseForShutdown();
     }
 
     /// <summary>导航完成回调（UI 线程）：只置位等待信号，不做别的。</summary>
@@ -376,8 +399,11 @@ public sealed class BrowserService : IBrowserService, IDisposable
 
         static async Task<bool> WaitAsync(Task<bool> navigation, CancellationToken token)
         {
-            var timeout = Task.Delay(TimeSpan.FromSeconds(NavigationTimeoutSeconds), token);
-            var completed = await Task.WhenAny(navigation, timeout).ConfigureAwait(false);
+            var timeout = Task.Delay(TimeSpan.FromSeconds(NavigationTimeoutSeconds), CancellationToken.None);
+            // 单独用取消任务参与竞争：调用方取消时立刻退出，而不是等导航超时后才返回 false
+            var canceled = Task.Delay(Timeout.InfiniteTimeSpan, token);
+            var completed = await Task.WhenAny(navigation, timeout, canceled).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             return completed == navigation && await navigation.ConfigureAwait(false);
         }
     }
@@ -563,7 +589,7 @@ public sealed class BrowserService : IBrowserService, IDisposable
 
     /// <summary>
     /// 网址规范化：没写协议时补 https；只放行 http/https，
-    /// file://、javascript: 这类地址不进浏览器（内置浏览器不应成为本地文件通道）。
+    /// file://、javascript: 这类地址不进浏览器（浏览器不应成为本地文件通道）。
     /// </summary>
     private static Uri NormalizeUrl(string url)
     {
@@ -581,26 +607,6 @@ public sealed class BrowserService : IBrowserService, IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(BrowserService));
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        var window = _window;
-        _window = null;
-        if (window is null) return;
-
-        // 退出路径上不能在这里等 UI 线程，交给消息泵收尾
-        try
-        {
-            Dispatcher.UIThread.Post(() => DestroyWindow(window));
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug(ex, "close browser window failed");
-        }
+        if (_disposed) throw new ObjectDisposedException(nameof(BrowserHost));
     }
 }

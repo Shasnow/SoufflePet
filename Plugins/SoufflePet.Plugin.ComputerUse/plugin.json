@@ -1,0 +1,18 @@
+{
+  "id": "computer-use",
+  "name": "电脑操作工具",
+  "version": "2.0.0",
+  "author": "SoufflePet",
+  "description": "列出窗口、截屏，以及鼠标点击、拖拽、滚轮与键盘按键、组合键、文本输入",
+  "assembly": "SoufflePet.Plugin.ComputerUse.dll",
+  "entryType": "SoufflePet.Plugins.ComputerUse.ComputerUsePlugin",
+  "timeoutSeconds": 30,
+  "approvalTools": [
+    "mouse_click",
+    "mouse_drag",
+    "keyboard_press",
+    "keyboard_hotkey",
+    "keyboard_type"
+  ],
+  "config": {}
+}

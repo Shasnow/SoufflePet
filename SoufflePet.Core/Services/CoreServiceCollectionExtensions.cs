@@ -9,7 +9,7 @@ namespace SoufflePet.Services;
 /// <summary>
 /// Core 组合根：注册与 UI 无关的模型/服务。宿主必须先注册
 /// <c>SouffleSettings</c>、<c>IHttpClientFactory</c>、<c>IUiDispatcher</c>、
-/// <c>IPetController</c>、<c>IScreenCapture</c>、<c>IBrowserService</c> 这些平台实现。
+/// <c>IPetController</c> 这些平台实现。
 /// </summary>
 public static class CoreServiceCollectionExtensions
 {

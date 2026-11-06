@@ -7,7 +7,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SoufflePet.Plugins.InputKit.Win32;
+namespace SoufflePet.Plugins.ComputerUse.Win32;
 
 /// <summary>鼠标按键。</summary>
 public enum MouseButton

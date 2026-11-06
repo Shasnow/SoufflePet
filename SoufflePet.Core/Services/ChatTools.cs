@@ -112,8 +112,6 @@ public sealed class ChatTools
     private readonly ChatFileService _files;
     private readonly IScheduledTaskService _scheduledTasks;
     private readonly IStatisticsService _statistics;
-    private readonly IBrowserService _browser;
-    private readonly IScreenCapture _screen;
 
     public ChatTools(
         SouffleSettings settings,
@@ -128,9 +126,7 @@ public sealed class ChatTools
         PlatformService platforms,
         ChatFileService files,
         IScheduledTaskService scheduledTasks,
-        IStatisticsService statistics,
-        IBrowserService browser,
-        IScreenCapture screen)
+        IStatisticsService statistics)
     {
         _settings = settings;
         _httpClientFactory = httpClientFactory;
@@ -145,8 +141,6 @@ public sealed class ChatTools
         _files = files;
         _scheduledTasks = scheduledTasks;
         _statistics = statistics;
-        _browser = browser;
-        _screen = screen;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -174,18 +168,10 @@ public sealed class ChatTools
                 "run_shell_command",
                 "执行 PowerShell 命令，返回退出码与输出"),
             AIFunctionFactory.Create(
-                ListWindows,
-                "list_windows",
-                "列出当前屏幕上的可见窗口"),
-            AIFunctionFactory.Create(
                 AskUser,
                 "ask_user",
                 "向用户提问以补全信息：每个问题给 2-5 个预设选项，"
                 + "界面会附带一个「其他」选项；用户全部回答后返回结果"),
-            AIFunctionFactory.Create(
-                TakeScreenshot,
-                "take_screenshot",
-                "截取屏幕或窗口画面"),
             AIFunctionFactory.Create(
                 Remember,
                 "remember",
@@ -245,43 +231,7 @@ public sealed class ChatTools
             AIFunctionFactory.Create(
                 GetStatistics,
                 "get_statistics",
-                "查询统计信息"),
-            AIFunctionFactory.Create(
-                BrowserOpen,
-                "browser_open",
-                "在内置浏览器窗口里打开网址"),
-            AIFunctionFactory.Create(
-                BrowserSnapshot,
-                "browser_snapshot",
-                "读取内置浏览器当前网页的标题、可交互元素和正文"),
-            AIFunctionFactory.Create(
-                BrowserClick,
-                "browser_click",
-                "点击内置浏览器网页上的某个元素"),
-            AIFunctionFactory.Create(
-                BrowserType,
-                "browser_type",
-                "向内置浏览器网页的输入框写入文本，可选择先清空原有内容、写入后直接提交所在表单"),
-            AIFunctionFactory.Create(
-                BrowserPressKey,
-                "browser_press_key",
-                "向内置浏览器网页派发按键事件，作用于当前焦点元素或指定引用"),
-            AIFunctionFactory.Create(
-                BrowserScroll,
-                "browser_scroll",
-                "滚动内置浏览器网页或其中某个元素"),
-            AIFunctionFactory.Create(
-                BrowserBack,
-                "browser_back",
-                "内置浏览器返回上一页"),
-            AIFunctionFactory.Create(
-                BrowserClose,
-                "browser_close",
-                "关闭内置浏览器窗口并释放内存"),
-            AIFunctionFactory.Create(
-                BrowserScreenshot,
-                "browser_screenshot",
-                "截取内置浏览器窗口画面。")
+                "查询统计信息")
         ];
         LocalToolNames = [.. Tools.Select(t => t.Name)];
     }
@@ -1394,125 +1344,6 @@ public sealed class ChatTools
         >= 1024 => $"{bytes / 1024d:0.#} KB",
         _ => $"{bytes} 字节"
     };
-
-    /// <summary>
-    /// 截图结果直接以 AIContent 集合返回：AIFunctionFactory 对可赋值给 IEnumerable&lt;T&gt; 的声明类型
-    /// 不做 JSON 序列化，对话服务能据此把图片拆出来走多模态通道。
-    /// </summary>
-    private AIContent[] TakeScreenshot(
-        [Description("窗口标题，可只写一部分；不传则截取光标所在显示器")]
-        string? window = null)
-    {
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("截图工具仅支持 Windows。");
-
-        var target = window?.Trim();
-        var shot = string.IsNullOrEmpty(target)
-            ? _screen.CaptureCurrentMonitor()
-            : _screen.CaptureWindow(target);
-        var label = string.IsNullOrEmpty(target) ? "当前显示器" : $"窗口「{target}」";
-        return
-        [
-            new TextContent(
-                $"已截取{label}：{shot.Width}×{shot.Height} 像素，左上角屏幕坐标 ({shot.ScreenLeft}, {shot.ScreenTop})，"
-                + $"文件 {shot.FilePath}。图片可能被缩小，鼠标坐标需按比例换算后加偏移。"),
-            new DataContent(shot.Image, shot.MediaType)
-        ];
-    }
-
-    /// <summary>列出可截图的窗口，让模型知道 window 参数该填什么。</summary>
-    private string ListWindows()
-    {
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("窗口列表仅支持 Windows。");
-
-        var windows = _screen.GetWindows();
-        if (windows.Count == 0) return "当前没有可见的窗口。";
-
-        var builder = new StringBuilder("当前可见窗口：\n");
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            builder.Append(i + 1).Append(". ").Append(window.Title)
-                .Append('（').Append(string.IsNullOrEmpty(window.ProcessName) ? "未知进程" : window.ProcessName).Append('）');
-            if (window.IsMinimized) builder.Append("（已最小化）");
-            builder.Append('\n');
-        }
-
-        return builder.ToString().TrimEnd();
-    }
-
-    /// <summary>打开内置浏览器并访问网址（服务内部懒创建窗口，只放行 http/https）。</summary>
-    private Task<string> BrowserOpen(
-        [Description("要打开的网址，例如 example.com、https://example.com/page")]
-        string url,
-        CancellationToken cancellationToken = default)
-        => _browser.OpenAsync(url, cancellationToken);
-
-    /// <summary>读取当前网页：标题、可交互元素（带引用编号）与正文。</summary>
-    private Task<string> BrowserSnapshot(CancellationToken cancellationToken = default)
-        => _browser.SnapshotAsync(cancellationToken);
-
-    /// <summary>点击网页元素。</summary>
-    private Task<string> BrowserClick(
-        [Description("元素引用，如 e3")]
-        string reference,
-        CancellationToken cancellationToken = default)
-        => _browser.ClickAsync(reference, cancellationToken);
-
-    /// <summary>向网页输入框写入文本，可选择清空原值与直接提交。</summary>
-    private Task<string> BrowserType(
-        [Description("元素引用，如 e3")]
-        string reference,
-        [Description("要写入的文本")]
-        string text,
-        [Description("是否先清空原有内容，默认 true")]
-        bool clear = true,
-        [Description("是否在写入后提交所在表单，默认 false")]
-        bool submit = false,
-        CancellationToken cancellationToken = default)
-        => _browser.TypeAsync(reference, text, clear, submit, cancellationToken);
-
-    /// <summary>向网页派发按键事件。</summary>
-    private Task<string> BrowserPressKey(
-        [Description("按键名：Enter、Tab、Escape、Backspace、Delete、Home、End、PageUp、PageDown、方向键或单个字符")]
-        string key,
-        [Description("作用元素的引用，如 e3；不传则作用于当前焦点元素")]
-        string? reference = null,
-        CancellationToken cancellationToken = default)
-        => _browser.PressKeyAsync(key, reference, cancellationToken);
-
-    /// <summary>滚动网页或指定元素。</summary>
-    private Task<string> BrowserScroll(
-        [Description("滚动像素数，正数向下、负数向上")]
-        int deltaY,
-        [Description("要滚动的元素引用，如 e3；不传则滚动整个页面")]
-        string? reference = null,
-        CancellationToken cancellationToken = default)
-        => _browser.ScrollAsync(deltaY, reference, cancellationToken);
-
-    /// <summary>返回浏览器上一页。</summary>
-    private Task<string> BrowserBack(CancellationToken cancellationToken = default)
-        => _browser.BackAsync(cancellationToken);
-
-    /// <summary>关闭内置浏览器窗口并释放其占用。</summary>
-    private Task<string> BrowserClose(CancellationToken cancellationToken = default)
-        => _browser.CloseAsync(cancellationToken);
-
-    /// <summary>
-    /// 截取内置浏览器窗口：与 take_screenshot 一样以 AIContent 集合返回，
-    /// 对话服务据此把图片拆出来走多模态通道。
-    /// </summary>
-    private async Task<AIContent[]> BrowserScreenshot(CancellationToken cancellationToken = default)
-    {
-        var shot = await _browser.ScreenshotAsync(cancellationToken).ConfigureAwait(false);
-        return
-        [
-            new TextContent(
-                $"已截取内置浏览器窗口：{shot.Width}×{shot.Height} 像素，文件 {shot.FilePath}。图片可能被缩小。"),
-            new DataContent(shot.Image, shot.MediaType)
-        ];
-    }
 
     private async Task<string> RunShellCommand(
         [Description(

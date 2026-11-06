@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using SoufflePet.Models;
+using SoufflePet.Plugin.Sdk;
 using SoufflePet.Services;
 using SoufflePet.Utils;
 using Xunit;
@@ -260,5 +261,33 @@ public sealed class FileTokenStoreTests
         {
             try { File.Delete(file); } catch { /* ignore */ }
         }
+    }
+}
+
+public sealed class PluginManifestTests
+{
+    [Fact]
+    public void ParsesApprovalToolsAndValidatesThem()
+    {
+        var manifest = PluginManifest.Parse(
+            """
+            {
+              "id": "demo",
+              "assembly": "Demo.dll",
+              "approvalTools": ["mouse_click", "keyboard_type"]
+            }
+            """);
+
+        Assert.Equal(["mouse_click", "keyboard_type"], manifest.ApprovalTools);
+        Assert.Null(manifest.Validate());
+    }
+
+    [Fact]
+    public void RejectsBlankApprovalToolName()
+    {
+        var manifest = PluginManifest.Parse(
+            """{"id":"demo","assembly":"Demo.dll","approvalTools":[" "] }""");
+
+        Assert.Equal("approvalTools 中存在空工具名", manifest.Validate());
     }
 }

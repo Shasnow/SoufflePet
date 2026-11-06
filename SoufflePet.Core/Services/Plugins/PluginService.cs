@@ -86,6 +86,7 @@ public sealed class PluginService : IPluginService
     private readonly SouffleSettings _settings;
     private readonly ILoggerFactory _loggerFactory;
     private readonly PlatformService _platformService;
+    private readonly ChatToolAccess _toolAccess;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly List<PluginDescriptor> _descriptors = [];
@@ -95,11 +96,13 @@ public sealed class PluginService : IPluginService
     public PluginService(
         SouffleSettings settings,
         ILoggerFactory loggerFactory,
-        PlatformService platformService)
+        PlatformService platformService,
+        ChatToolAccess toolAccess)
     {
         _settings = settings;
         _loggerFactory = loggerFactory;
         _platformService = platformService;
+        _toolAccess = toolAccess;
         BuiltInDirectory = Path.Combine(AppContext.BaseDirectory, "plugins");
         InstallDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".souffle", "plugins");
@@ -186,10 +189,15 @@ public sealed class PluginService : IPluginService
                 if (!_loaded.TryGetValue(descriptor.Manifest.Id, out var loaded)) continue;
 
                 var timeout = TimeSpan.FromSeconds(Math.Clamp(descriptor.Manifest.TimeoutSeconds, 1, 300));
+                var approvalTools = descriptor.Manifest.ApprovalTools is { Count: > 0 } declared
+                    ? new HashSet<string>(declared, StringComparer.OrdinalIgnoreCase)
+                    : null;
                 foreach (var tool in loaded.Tools)
                 {
                     var name = UniqueToolName(descriptor.Manifest.Id, tool.Name, usedNames);
-                    tools.Add(new PluginToolGuard(tool, name, this, descriptor.Manifest.Id, timeout));
+                    var requiresApproval = approvalTools?.Contains(tool.Name) == true;
+                    tools.Add(new PluginToolGuard(
+                        tool, name, this, descriptor.Manifest.Id, timeout, _toolAccess, requiresApproval));
                 }
             }
 
@@ -748,17 +756,29 @@ public sealed class PluginService : IPluginService
 }
 
 /// <summary>
-/// 插件工具守卫：透传工具名与参数 schema，只负责超时与异常兜底——
-/// 插件工具挂起或抛异常时返回错误文本给模型，并把失败计数记到插件上，不影响主程序。
+/// 插件工具守卫：透传工具名与参数 schema，负责审批、超时与异常兜底——
+/// 清单声明需要审批的工具按 <c>ToolApproval</c> 规则询问用户；插件工具挂起或抛异常时
+/// 返回错误文本给模型，并把失败计数记到插件上，不影响主程序。
 /// </summary>
 internal sealed class PluginToolGuard(
     AIFunction inner,
     string name,
     PluginService owner,
     string pluginId,
-    TimeSpan timeout)
+    TimeSpan timeout,
+    ChatToolAccess toolAccess,
+    bool requiresApproval)
     : DelegatingAIFunction(inner)
 {
+    /// <summary>审批气泡里参数预览的最大长度。</summary>
+    private const int ApprovalDetailMaxLength = 2000;
+
+    private static readonly JsonSerializerOptions ApprovalDetailJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     /// <summary>实际暴露给模型的工具名（冲突时带插件前缀）。</summary>
     public override string Name => name;
 
@@ -766,21 +786,41 @@ internal sealed class PluginToolGuard(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        var task = base.InvokeCoreAsync(arguments, cancellationToken).AsTask();
+        if (requiresApproval
+            && !await toolAccess.RequestApprovalAsync(
+                name, FormatApprovalDetail(pluginId, arguments), cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return $"用户未允许调用 {name}，工具未执行。";
+        }
 
-        using var delayCts = new CancellationTokenSource();
-        var finished = await Task.WhenAny(task, Task.Delay(timeout, delayCts.Token)).ConfigureAwait(false);
-        await delayCts.CancelAsync();
+        // 用可取消的派生 token 调用插件：超时后必须真正取消底层操作，
+        // 否则它可能继续持有自己的锁（例如 browser-use 的串行闸门），拖住下一次调用。
+        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var task = base.InvokeCoreAsync(arguments, timeoutCts.Token).AsTask();
+
+        var finished = await Task.WhenAny(task, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
 
         if (finished != task)
         {
-            // 超时后不再等待结果；观察后续可能出现的异常，避免未观察的任务异常
-            _ = task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            await timeoutCts.CancelAsync().ConfigureAwait(false);
+            // 等底层任务结束后再释放 token 源：立刻 Dispose 会让仍在运行的插件注册回调时抛异常。
+            // 同时观察后续异常，避免未观察的任务异常。
+            _ = task.ContinueWith(
+                completed =>
+                {
+                    _ = completed.Exception;
+                    timeoutCts.Dispose();
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
             cancellationToken.ThrowIfCancellationRequested();
             owner.RecordFailure(pluginId, $"{name} 执行超时");
-            return $"工具 {name} 执行超时（{timeout.TotalSeconds:0} 秒），已放弃等待。";
+            return $"工具 {name} 执行超时（{timeout.TotalSeconds:0} 秒），已取消执行。";
         }
 
+        timeoutCts.Dispose();
         try
         {
             return await task.ConfigureAwait(false);
@@ -794,5 +834,25 @@ internal sealed class PluginToolGuard(
             owner.RecordFailure(pluginId, $"{name} 执行失败：{ex.Message}");
             return $"插件 {pluginId} 的工具 {name} 执行失败：{ex.Message}";
         }
+    }
+
+    /// <summary>审批气泡里展示的调用参数：插件 id + 参数 JSON，过长截断。</summary>
+    private static string FormatApprovalDetail(string pluginId, AIFunctionArguments arguments)
+    {
+        string body;
+        try
+        {
+            body = JsonSerializer.Serialize(
+                arguments.ToDictionary(pair => pair.Key, pair => pair.Value),
+                ApprovalDetailJsonOptions);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or JsonException)
+        {
+            body = string.Join(", ", arguments.Select(pair => $"{pair.Key}={pair.Value}"));
+        }
+
+        if (body.Length == 0) body = "（无参数）";
+        if (body.Length > ApprovalDetailMaxLength) body = body[..ApprovalDetailMaxLength] + "…";
+        return $"插件：{pluginId}\n参数：{body}";
     }
 }

@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace SoufflePet.Plugins.InputKit.Win32;
+namespace SoufflePet.Plugins.ComputerUse.Win32;
 
 /// <summary>
 /// 真实键盘输入（Win32 SendInput）：单键按下松开、组合键、文本输入。

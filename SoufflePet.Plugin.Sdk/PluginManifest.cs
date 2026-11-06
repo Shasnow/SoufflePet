@@ -44,6 +44,12 @@ public sealed class PluginManifest
     /// <summary>单个工具调用的超时（秒），宿主限制在 1–300，默认 30。</summary>
     public int TimeoutSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// 需要人工审批的工具名：这些工具每次执行前按设置里的 <c>ToolApproval</c> 规则询问用户。
+    /// 未列出的工具直接执行；插件程序集本身仍受信任，不能把这里当成安全沙箱。
+    /// </summary>
+    public List<string>? ApprovalTools { get; set; }
+
     /// <summary>插件自定义配置：原样交给 <see cref="PluginContext.Configuration" />。</summary>
     public JsonElement? Config { get; set; }
 
@@ -70,6 +76,8 @@ public sealed class PluginManifest
         if (string.IsNullOrWhiteSpace(Assembly)) return "plugin.json 缺少 assembly";
         if (Path.IsPathRooted(Assembly) || Assembly.Split('/', '\\').Any(part => part == ".."))
             return "assembly 必须是插件目录内的相对路径";
+        if (ApprovalTools is { Count: > 0 } && ApprovalTools.Any(string.IsNullOrWhiteSpace))
+            return "approvalTools 中存在空工具名";
 
         if (ConfigSchema is { Count: > 0 })
         {

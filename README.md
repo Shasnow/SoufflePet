@@ -66,14 +66,14 @@
 | `get_expressions` / `set_expression` | 列出与切换 Live2D 表情 |
 | `run_shell_command` | 执行 PowerShell 命令（超时与输出长度有上限） |
 | `write_file` / `edit_file` | 新建或整体覆盖文本文件 / 定向替换一段文本；写入前走审批，写入用临时文件 + `File.Replace` 原子替换，旧版本备份到会话目录，写入后在工具气泡显示行级 diff |
-| `list_windows` | 列出当前可见窗口 |
-| `take_screenshot` | 截取光标所在显示器，或按标题截取指定窗口（被遮挡也能截到） |
 | `ask_user` | 向用户提问：分页面板 + 预设选项（可带说明）+ 自由输入，全部作答后结果回传模型 |
 | `remember` / `forget` / `recall` | 长期记忆的写入、删除与关键词检索 |
 | `read_skill` | 读取某个技能的完整说明 |
 | `get_statistics` | 查询运行统计（陪伴时长、token 用量等），不传参返回全部、传名称返回单项 |
 
-每轮最多 `MaxToolRounds` 次工具调用（默认 10）。命令执行与文件写入受 `ToolApproval` 控制：`Manual` 每次在消息区弹出审批气泡等用户点「允许」（写入类审批会带上 diff 摘要），`FullAccess` 直接执行。工具调用与思考过程在消息里以折叠面板展示，展开可看参数与结果；折叠标题会按工具生成摘要（如「运行命令 · npm test」「读取 · a.txt」），插件可在 `AIFunction` 的 `display` 元数据里自定义模板，未知工具回退为「调用工具：名称」。
+窗口列表、截屏与键鼠操作由内置 `computer-use` 插件提供，浏览器操作由 `browser-use` 插件提供（见下文「插件」）。
+
+每轮最多 `MaxToolRounds` 次工具调用（默认 10）。命令执行与文件写入受 `ToolApproval` 控制：`Manual` 每次在消息区弹出审批气泡等用户点「允许」（写入类审批会带上 diff 摘要），`FullAccess` 直接执行。插件可在 `plugin.json` 的 `approvalTools` 里声明同样走审批的工具，内置的 `computer-use`（鼠标点击 / 拖拽、键盘按键 / 组合键 / 文本输入）与 `browser-use`（网页点击 / 输入 / 按键）已声明；**未声明的插件工具会直接执行**——插件是进程内受信任代码，`approvalTools` 只用于提醒用户，不是安全沙箱。工具调用与思考过程在消息里以折叠面板展示，展开可看参数与结果；折叠标题会按工具生成摘要（如「运行命令 · npm test」「读取 · a.txt」），插件可在 `AIFunction` 的 `display` 元数据里自定义模板，未知工具回退为「调用工具：名称」。
 
 当前时间不由工具提供，而是随消息下发：`TimeAwarenessEnabled` 打开时（默认），每轮把当前本地时间（含星期、UTC 偏移与时区）附加到本轮用户消息末尾，模型无需调用工具即可感知时间；关闭后模型看不到任何时间信息。附加的时间（以及相关回忆）会作为该条消息的请求文本保存在当前会话的 `conversation.jsonl` 里，但不进入界面历史、也不参与长期记忆检索——这样做是为了让重启后重建的请求与上一轮逐字节一致，继续命中前缀缓存。
 
@@ -122,7 +122,8 @@
 
 | 插件 id | 作用 |
 | --- | --- |
-| `input-kit` | 鼠标点击 / 拖拽 / 滚轮，键盘按键、组合键与文本输入 |
+| `computer-use` | 列出可见窗口、截取屏幕或指定窗口，鼠标点击 / 拖拽 / 滚轮，键盘按键、组合键与文本输入；输入类工具走审批 |
+| `browser-use` | 自带浏览器窗口（与 React 主窗口共用 WebView2 用户数据目录）：打开网页、读取页面、点击、输入、按键、滚动、后退、关闭与截图；点击 / 输入 / 按键走审批 |
 | `dsml-cleaner` | 清理模型正文中泄漏的 DSML 工具调用标记 |
 | `napcat` | 通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ，被 @ 时提醒桌宠并按会话回复 |
 | `loopback` | 本机调试用的回环消息平台：监听 `127.0.0.1:18765`，`GET /send?text=…` 把消息推给桌宠，`GET /replies` 读取桌宠的回复 |
@@ -222,14 +223,13 @@ dotnet run --project SoufflePet -- --web-dev
 ```
 SoufflePet.sln
 ├─ SoufflePet/                  # 主程序（Avalonia 桌面应用）
-│  ├─ Views/                     # 窗口层（原生桌宠、内置浏览器、React 主窗口）
+│  ├─ Views/                     # 窗口层（原生桌宠、React 主窗口）
 │  │  ├─ NativePetWindow.cs      #   原生桌宠（拖拽 / 穿透 / 全局光标 / 右键菜单）
-│  │  ├─ BrowserWindow.cs        #   内置浏览器窗口（WebView2）
 │  │  └─ Web/AppWebWindow.cs     #   React SPA 主窗口（自定义标题栏 / 8 向缩放 / 关闭隐藏）
 │  ├─ Services/                  # 宿主服务：窗口、托盘、热键、平台实现
 │  │  ├─ AppWindowService.cs     #   主窗口单例 / 热键 / 戳一戳与摸头唤醒
 │  │  └─ Web/                    #   React 桥：WebBridgeServer / ChatRpc / SettingsApi / ThemeService
-│  ├─ Utils/                     # 截图、窗口几何、WebView 配置等辅助代码
+│  ├─ Utils/                     # 窗口几何、WebView 配置等辅助代码
 │  ├─ native/                    # 原生渲染控件
 │  │  ├─ NativePetControl.cs     #   OpenGL 渲染循环、逐像素命中检测
 │  │  └─ AvaloniaApi.cs          #   Avalonia GlInterface → OpenGLApi 桥接
@@ -241,7 +241,8 @@ SoufflePet.sln
 ├─ SoufflePet.Core.Tests/        # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
 ├─ SoufflePet.Plugin.Sdk/        # 插件契约（清单、基类、配置表单、消息平台接口）
 ├─ Plugins/                      # 随主程序分发的内置插件
-│  ├─ SoufflePet.Plugin.InputKit/      # 键鼠输入工具
+│  ├─ SoufflePet.Plugin.ComputerUse/   # 窗口 / 截屏与键鼠输入工具
+│  ├─ SoufflePet.Plugin.BrowserUse/    # 自带浏览器窗口与操作工具
 │  ├─ SoufflePet.Plugin.DsmlCleaner/   # DSML 标记清理
 │  └─ SoufflePet.Plugin.NapCat/        # NapCat QQ 消息平台
 ├─ Live2DCSharpSDK.Framework/    # Cubism 框架层（数学、Motion、模型解析）

@@ -17,7 +17,7 @@ SoufflePet（宿主）
 - 契约程序集 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件不要自带这两个 dll 的副本。
 - 插件入口类型必须继承 `PluginBase`；宿主按它发现、实例化插件，并调用 `InitializeAsync` / `BuildTools` / `ShutdownAsync`。
 - 插件工具与主程序工具走同一条 `AIFunction` 调用通道：模型发起调用 → 宿主执行 → 结果回传模型。
-- 插件工具由宿主套上守卫：单次调用超时（`timeoutSeconds`）与异常捕获，失败只影响该次调用。
+- 插件工具由宿主套上守卫：单次调用超时（`timeoutSeconds`）、异常捕获与清单声明的审批，失败只影响该次调用。超时后宿主会取消传给工具的 `CancellationToken`，插件应把它继续传给内部等待与 I/O，否则已放弃的操作可能继续占着插件自己的锁或资源。
 - 插件响应钩子也有异常守卫：处理失败时原样放行文本，插件失败次数 +1，不影响本次回复。
 
 ## 2. 依赖要求
@@ -79,6 +79,7 @@ SoufflePet（宿主）
 | `version` / `author` / `description` | 否 | 界面展示信息 |
 | `entryType` | 否 | 入口类型全名；省略时取程序集内唯一的 `PluginBase` 子类 |
 | `timeoutSeconds` | 否 | 单个工具调用超时秒数，宿主限制 1–300，默认 30 |
+| `approvalTools` | 否 | 需要人工审批的工具名数组，见 3.2 节 |
 | `config` | 否 | 任意 JSON，原样交给 `PluginContext.Configuration` |
 | `configSchema` | 否 | 配置表单描述；声明后插件窗口会生成可视化配置，见第 6 节 |
 
@@ -146,6 +147,19 @@ tools.Add(AIFunctionFactory.Create(
 ```
 
 不设置 `display` 时，插件工具在气泡里回退为「调用工具：工具名」；模板展开为空时同样回退。内置工具与 MCP 工具不需要插件处理：宿主会按内置规则或 MCP 服务的 `title` 生成标题。
+
+### 3.2 工具审批（可选）
+
+有副作用、可能被网页正文或用户输入诱导的工具（点击、键盘输入、提交表单等），应在 `plugin.json` 的 `approvalTools` 里声明工具名：
+
+```json
+"approvalTools": ["browser_click", "browser_type", "browser_press_key"]
+```
+
+- 声明后，这些工具每次执行前都按设置里的 `ToolApproval` 走同一条审批气泡；`Manual` 等待用户点「允许」，`FullAccess` 直接执行。用户拒绝或取消时工具不会执行，模型会收到「用户未允许」的结果文本。
+- 工具名与 `OnToolsBuilding` 里注册的原名一致，宿主自动加 `{插件id}__` 前缀时无需修改声明。
+- **未声明的插件工具直接执行**。审批只是把调用交给用户确认，插件程序集仍在宿主进程内运行，不能作为安全沙箱；不要依赖它阻止恶意插件。
+- 审批气泡里会显示插件 id 与调用参数 JSON（超长截断），便于判断这次操作。
 
 ## 4. 响应后处理钩子（可选）
 
@@ -291,7 +305,7 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 | `OnInitializedAsync` | 初始化时 | 读取配置、准备资源；可用 `Context` 写日志 |
 | `BuildTools` | 初始化之后 | 宿主调用，传入空集合并触发 `OnToolsBuilding` |
 | `OnToolsBuilding` | 工具收集时 | 用 `tools.Add(...)` 添加工具；不提供工具时保持默认实现 |
-| 调用 | 每轮对话中模型发起 | 可能在后台线程执行；参数里的 `CancellationToken` 会随对话取消触发 |
+| 调用 | 每轮对话中模型发起 | 可能在后台线程执行；参数里的 `CancellationToken` 会随对话取消或工具超时触发，内部等待必须传递它 |
 | `BeginResponse` → `OnResponseStarting` | 每轮回复开始 | 返回 `true` 才参与本轮；参与前重置缓冲状态 |
 | `ProcessResponse` → `OnResponseDelta` | 每收到一段正文 | 返回可展示文本，空串表示暂存 |
 | `EndResponse` → `OnResponseCompleted` | 本轮正文结束 | 返回暂存文本；之后不会再收到增量 |
@@ -299,6 +313,7 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 
 - 初始化耗时过长会拖慢当轮对话；确有耗时工作请放到工具调用内部或后台任务。
 - 工具方法不要长时间占用同步阻塞；需要等待的操作使用 `async` + `await`。
+- 应用退出时，宿主可能在 UI 线程上同步等待 `ShutdownAsync`；若清理逻辑需要切回 UI 线程（关闭窗口、销毁 WebView 等），先判断当前是否已在 UI 线程并直接执行，不要无条件 `InvokeAsync`，否则会「UI 线程等自己排队的任务」而死锁。
 
 ## 7. 配置与日志
 
@@ -358,20 +373,20 @@ hello-kit/
 - 导入成功后默认启用。若同 id 插件正在运行，新程序集在重启应用后生效。
 - 随主程序发布的插件放在应用目录的 `plugins/<文件夹>/`，同 id 时内置版本优先。
 
-### 独立构建与发布（以 input-kit 为例）
+### 独立构建与发布（以 computer-use 为例）
 
 插件工程不在 `SoufflePet.sln` 中，与宿主分开构建、分开发布：
 
 ```powershell
-# 本地调试：Debug 构建后自动部署到 SoufflePet/bin/Debug/net10.0/plugins/input-kit/
-dotnet build Plugins\SoufflePet.Plugin.InputKit
+# 本地调试：Debug 构建后自动部署到 SoufflePet/bin/Debug/net10.0/plugins/computer-use/
+dotnet build Plugins\SoufflePet.Plugin.ComputerUse
 
 # 不需要自动部署时关闭
-dotnet build Plugins\SoufflePet.Plugin.InputKit -p:DeployToHost=false
+dotnet build Plugins\SoufflePet.Plugin.ComputerUse -p:DeployToHost=false
 
 # 发行：生成可导入的插件包
-# 产物：Plugins\SoufflePet.Plugin.InputKit\artifacts\input-kit-1.0.0.zip
-dotnet publish Plugins\SoufflePet.Plugin.InputKit -c Release
+# 产物：Plugins\SoufflePet.Plugin.ComputerUse\artifacts\computer-use-2.0.0.zip
+dotnet publish Plugins\SoufflePet.Plugin.ComputerUse -c Release
 ```
 
 插件包通过「插件…」→「导入」安装到 `~/.souffle/plugins/<id>`；也可以解压到应用目录的 `plugins/<id>/` 作为内置插件随应用分发。宿主发布不再自动构建或打包插件。
@@ -382,7 +397,8 @@ dotnet publish Plugins\SoufflePet.Plugin.InputKit -c Release
 
 - `InitializeAsync` 或 `OnToolsBuilding` 抛异常 → 该插件标记「加载失败」，其它插件与对话不受影响。
 - 工具抛异常 → 返回错误文本给模型，插件失败次数 +1，主程序不崩溃。
-- 工具超时 → 宿主放弃等待并返回超时文本（默认 30 秒）。
+- 工具超时 → 宿主取消传给插件的 `CancellationToken`，再返回超时文本（默认 30 秒）。
+- 工具审批 → 仅对 `approvalTools` 声明的工具生效；用户拒绝时返回「用户未允许」且不执行。
 - 禁用插件 → `ShutdownAsync` → 卸载程序集 → 尽力回收内存。
 
 进程内隔离无法防御以下进程级致命错误，插件必须自行避免：

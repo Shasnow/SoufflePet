@@ -2,8 +2,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <RootNamespace>SoufflePet.Plugins.InputKit</RootNamespace>
-    <PluginId>input-kit</PluginId>
+    <RootNamespace>SoufflePet.Plugins.BrowserUse</RootNamespace>
+    <PluginId>browser-use</PluginId>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
@@ -17,6 +17,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
+    <!-- 插件自带的浏览器窗口：Avalonia 与宿主共享同一份程序集 -->
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.1" />
+    <!-- 浏览器截图（GDI+ / PrintWindow） -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,10 +30,10 @@
     </None>
   </ItemGroup>
 
-  <!-- 本地调试：把 dll、pdb 与清单部署到宿主的 plugins/input-kit/ -->
+  <!-- 本地调试：把 dll、pdb 与清单部署到宿主的 plugins/browser-use/ -->
   <Target Name="DeployToHost" AfterTargets="Build" Condition="'$(DeployToHost)' == 'true'">
     <ItemGroup>
-      <PluginFile Include="$(TargetDir)SoufflePet.Plugin.InputKit.dll;$(TargetDir)SoufflePet.Plugin.InputKit.pdb;$(TargetDir)plugin.json" />
+      <PluginFile Include="$(TargetDir)SoufflePet.Plugin.BrowserUse.dll;$(TargetDir)SoufflePet.Plugin.BrowserUse.pdb;$(TargetDir)plugin.json" />
     </ItemGroup>
     <Copy SourceFiles="@(PluginFile)"
           DestinationFolder="$(MSBuildThisFileDirectory)..\..\SoufflePet\bin\$(Configuration)\$(TargetFramework)\plugins\$(PluginId)\"
@@ -38,7 +43,7 @@
   <!-- 独立发布：dotnet publish 后在 artifacts/ 生成可导入插件窗口的 zip 包 -->
   <Target Name="PackPlugin" AfterTargets="Publish">
     <ItemGroup>
-      <PluginPackageFile Include="$(PublishDir)SoufflePet.Plugin.InputKit.dll;$(PublishDir)plugin.json" />
+      <PluginPackageFile Include="$(PublishDir)SoufflePet.Plugin.BrowserUse.dll;$(PublishDir)plugin.json" />
     </ItemGroup>
     <RemoveDir Directories="$(PluginStageDir)" />
     <Copy SourceFiles="@(PluginPackageFile)" DestinationFolder="$(PluginStageDir)" />

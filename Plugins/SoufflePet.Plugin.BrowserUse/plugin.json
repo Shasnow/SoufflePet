@@ -1,0 +1,16 @@
+{
+  "id": "browser-use",
+  "name": "浏览器操作工具",
+  "version": "1.0.0",
+  "author": "SoufflePet",
+  "description": "打开网页、读取页面、点击、输入、按键、滚动、后退、关闭与截取内置浏览器窗口",
+  "assembly": "SoufflePet.Plugin.BrowserUse.dll",
+  "entryType": "SoufflePet.Plugins.BrowserUse.BrowserUsePlugin",
+  "timeoutSeconds": 120,
+  "approvalTools": [
+    "browser_click",
+    "browser_type",
+    "browser_press_key"
+  ],
+  "config": {}
+}

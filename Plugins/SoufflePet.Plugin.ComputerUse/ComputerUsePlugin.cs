@@ -4,23 +4,32 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using SoufflePet.Plugin.Sdk;
-using SoufflePet.Plugins.InputKit.Win32;
+using SoufflePet.Plugins.ComputerUse.Win32;
 
-namespace SoufflePet.Plugins.InputKit;
+namespace SoufflePet.Plugins.ComputerUse;
 
 /// <summary>
-/// 键鼠输入插件：向模型提供鼠标点击/拖拽/滚轮与键盘按键/组合键/文本输入六个工具。
+/// 电脑操作插件：向模型提供列出窗口、截屏，以及鼠标点击/拖拽/滚轮与键盘按键/组合键/文本输入工具。
 /// 坐标一律是屏幕物理像素（左上角为原点），与 take_screenshot 返回的分辨率一致。
 /// </summary>
-public sealed class InputKitPlugin : PluginBase
+public sealed class ComputerUsePlugin : PluginBase
 {
     protected override void OnToolsBuilding(ICollection<AIFunction> tools)
     {
+        tools.Add(AIFunctionFactory.Create(
+            ListWindows,
+            "list_windows",
+            "列出当前屏幕上的可见窗口"));
+        tools.Add(AIFunctionFactory.Create(
+            TakeScreenshot,
+            "take_screenshot",
+            "截取屏幕或窗口画面"));
         tools.Add(AIFunctionFactory.Create(
             MouseClick,
             "mouse_click",
@@ -47,6 +56,52 @@ public sealed class InputKitPlugin : PluginBase
             "向当前焦点窗口输入文本，支持中文等 Unicode 字符。"));
 
         Context.Logger.LogInformation("已就绪，共 {Count} 个工具", tools.Count);
+    }
+
+    /// <summary>
+    /// 截图结果直接以 AIContent 集合返回：对话服务会把图片拆出来走多模态通道。
+    /// </summary>
+    private static AIContent[] TakeScreenshot(
+        [Description("窗口标题，可只写一部分；不传则截取光标所在显示器")]
+        string? window = null)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("截图工具仅支持 Windows。");
+
+        var target = window?.Trim();
+        var shot = string.IsNullOrEmpty(target)
+            ? ScreenCapture.CaptureCurrentMonitor()
+            : ScreenCapture.CaptureWindow(target);
+        var label = string.IsNullOrEmpty(target) ? "当前显示器" : $"窗口「{target}」";
+        return
+        [
+            new TextContent(
+                $"已截取{label}：{shot.Width}×{shot.Height} 像素，左上角屏幕坐标 ({shot.ScreenLeft}, {shot.ScreenTop})，"
+                + $"文件 {shot.FilePath}。图片可能被缩小，鼠标坐标需按比例换算后加偏移。"),
+            new DataContent(shot.Image, shot.MediaType)
+        ];
+    }
+
+    /// <summary>列出可截图的窗口，让模型知道 window 参数该填什么。</summary>
+    private static string ListWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("窗口列表仅支持 Windows。");
+
+        var windows = ScreenCapture.GetWindows();
+        if (windows.Count == 0) return "当前没有可见的窗口。";
+
+        var builder = new StringBuilder("当前可见窗口：\n");
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var window = windows[i];
+            builder.Append(i + 1).Append(". ").Append(window.Title)
+                .Append('（').Append(string.IsNullOrEmpty(window.ProcessName) ? "未知进程" : window.ProcessName).Append('）');
+            if (window.IsMinimized) builder.Append("（已最小化）");
+            builder.Append('\n');
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     /// <summary>在屏幕坐标处单击/双击：Win32 鼠标事件会真的作用到光标下的程序上。</summary>

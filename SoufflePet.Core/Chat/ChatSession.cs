@@ -1704,17 +1704,26 @@ public sealed class ChatSession : IAsyncDisposable
     }
 
     /// <summary>审批气泡里的动作文案：不同工具用不同动词，未知工具回退到通用说法。</summary>
-    private static string ApprovalAction(string toolName) => toolName switch
+    private static string ApprovalAction(string toolName)
     {
-        "run_shell_command" => "执行命令",
-        "write_file" => "写入文件",
-        "edit_file" => "编辑文件",
-        "send_attachment" => "发送文件",
-        "create_scheduled_task" => "新建定时任务",
-        "update_scheduled_task" => "修改定时任务",
-        "delete_scheduled_task" => "删除定时任务",
-        _ => "调用工具",
-    };
+        // 插件工具重名时宿主会加「插件id__」前缀，判断动作时只取原工具名
+        var separator = toolName.LastIndexOf("__", StringComparison.Ordinal);
+        var name = separator >= 0 ? toolName[(separator + 2)..] : toolName;
+        return name switch
+        {
+            "run_shell_command" => "执行命令",
+            "write_file" => "写入文件",
+            "edit_file" => "编辑文件",
+            "send_attachment" => "发送文件",
+            "create_scheduled_task" => "新建定时任务",
+            "update_scheduled_task" => "修改定时任务",
+            "delete_scheduled_task" => "删除定时任务",
+            "mouse_click" or "mouse_drag" => "操作鼠标",
+            "keyboard_press" or "keyboard_hotkey" or "keyboard_type" => "发送键盘输入",
+            "browser_click" or "browser_type" or "browser_press_key" => "操作网页",
+            _ => "调用工具",
+        };
+    }
 
     private static string ApprovalModeString(ToolApprovalMode mode) =>
         mode == ToolApprovalMode.FullAccess ? ChatApprovalModes.Full : ChatApprovalModes.Manual;

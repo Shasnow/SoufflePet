@@ -40,7 +40,7 @@ pnpm --dir SoufflePet/web screenshots
 - 运行依赖 Windows 10+、.NET 10 SDK。React 主窗口需 WebView2 Runtime，桌宠需支持 OpenGL ES2 的显卡驱动。
 - React UI 构建依赖 **Node.js 22.12+ 与 pnpm 10+**；`dotnet build` 默认调用 `pnpm build`，缺依赖时会给出可操作错误。
 - 测试：Web 前端用 Vitest（`pnpm --dir SoufflePet/web test`）；领域层用 `dotnet test SoufflePet.Core.Tests`。改动后至少跑 `dotnet build SoufflePet.sln`（`-warnaserror` 未启用，但请勿引入新警告）。
-- `SoufflePet.Core` **不得引用 Avalonia**；平台能力（桌宠表情、截图、浏览器、UI 线程）通过 `IPetController` / `IScreenCapture` / `IBrowserService` / `IUiDispatcher` 抽象注入。
+- `SoufflePet.Core` **不得引用 Avalonia**；平台能力（桌宠表情、UI 线程）通过 `IPetController` / `IUiDispatcher` 抽象注入。
 - 插件工程**不在解决方案内**，需单独构建（见下）。
 - **输出文件被占用**：构建时若报 MSB3026 错误（通常是运行中的 `.NET Host` 进程锁定了 dll），**改用 `.verifybuild` 作为输出目录重试**，不要终止用户进程：
 
@@ -55,12 +55,12 @@ pnpm --dir SoufflePet/web screenshots
 ```
 SoufflePet.sln
 ├─ SoufflePet/                     # 主程序（Avalonia）
-│  ├─ Views/                       # 窗口（原生桌宠、内置浏览器、React 主窗口）
+│  ├─ Views/                       # 窗口（原生桌宠、React 主窗口）
 │  │  └─ Web/AppWebWindow.cs       #   React SPA 主窗口（WebView2、拖拽/缩放/隐藏）
 │  ├─ Services/                    # 宿主服务：窗口/托盘/热键/平台实现
 │  │  ├─ AppWindowService.cs       #   主窗口单例、Ctrl+Alt+Space、戳一戳/摸头唤醒
 │  │  └─ Web/                      #   WebBridgeServer / ChatRpc / SettingsApi / ThemeService
-│  ├─ Utils/                       # 截图、开机自启、全局光标、窗口几何等
+│  ├─ Utils/                       # 开机自启、全局光标、窗口几何等
 │  ├─ native/                      # 原生渲染控件与 Avalonia→OpenGL 桥接
 │  ├─ web/                         # React SPA 源码（Vite / React 19 / TS / Tailwind 4）
 │  ├─ wwwroot/                     # 前端产物（app/）与 Live2D 模型资源（均 gitignore）
@@ -70,7 +70,8 @@ SoufflePet.sln
 ├─ SoufflePet.Core.Tests/          # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
 ├─ SoufflePet.Plugin.Sdk/          # 插件契约（PluginBase、清单、配置表单、IMessagePlatform）
 ├─ Plugins/                        # 内置插件（独立构建，不在 sln 编译项）
-│  ├─ SoufflePet.Plugin.InputKit/
+│  ├─ SoufflePet.Plugin.ComputerUse/
+│  ├─ SoufflePet.Plugin.BrowserUse/
 │  ├─ SoufflePet.Plugin.DsmlCleaner/
 │  └─ SoufflePet.Plugin.NapCat/
 ├─ Live2DCSharpSDK.Framework/      # Cubism 框架层
@@ -112,10 +113,10 @@ SoufflePet.sln
 
   ```powershell
   # 本地调试：Debug 构建后自动部署到 SoufflePet/bin/Debug/net10.0/plugins/<id>/
-  dotnet build Plugins\SoufflePet.Plugin.InputKit
+  dotnet build Plugins\SoufflePet.Plugin.ComputerUse
 
   # 发行：生成可导入的 zip 到 Plugins\<项目>\artifacts\
-  dotnet publish Plugins\SoufflePet.Plugin.InputKit -c Release
+  dotnet publish Plugins\SoufflePet.Plugin.ComputerUse -c Release
   ```
 
   插件契约 `SoufflePet.Plugin.Sdk.dll` 与 `Microsoft.Extensions.AI.Abstractions.dll` 由宿主共享，插件**不要**自带副本。

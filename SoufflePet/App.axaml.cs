@@ -67,8 +67,6 @@ public class App : Application
             services.AddSingleton<PetExpressionService>();
             services.AddSingleton<IPetController>(sp => sp.GetRequiredService<PetExpressionService>());
             services.AddSingleton<IUiDispatcher, AvaloniaUiDispatcher>();
-            services.AddSingleton<IScreenCapture, ScreenCaptureService>();
-            services.AddSingleton<IBrowserService, BrowserService>(); // 内置浏览器：网页视图懒创建，窗口关闭只隐藏
 
             // 无 Avalonia 的 Core：模型、会话记忆、LLM/工具/MCP/技能/插件/调度、Live2D 文件操作
             services.AddSouffleCore();
