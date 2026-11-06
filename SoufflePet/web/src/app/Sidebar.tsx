@@ -18,12 +18,13 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { invoke } from '@/bridge/client'
 import type { SessionSummaryDto, WorkspaceDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { filterSessions, groupSessions, useSessionStore } from '@/stores/sessionStore'
-import { useUiStore } from '@/stores/uiStore'
+import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, useUiStore } from '@/stores/uiStore'
 import { Dialog } from '@/ui/Dialog'
 import { Popover } from '@/ui/Popover'
 import { chatRoute, navigate, settingsRoute, useRoute } from '@/app/router'
@@ -53,9 +54,12 @@ export function Sidebar() {
   const removeChat = useChatStore((state) => state.removeSession)
   const setActive = useSessionStore((state) => state.setActive)
   const setDrawerOpen = useUiStore((state) => state.setDrawerOpen)
+  const sidebarWidth = useUiStore((state) => state.sidebarWidth)
+  const setSidebarWidth = useUiStore((state) => state.setSidebarWidth)
   const route = useRoute()
 
   const [moreOpen, setMoreOpen] = useState(false)
+  const [resizing, setResizing] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [editing, setEditing] = useState<SessionSummaryDto | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -228,8 +232,56 @@ export function Sidebar() {
     }
   }
 
+  // 拖拽右边缘调整侧栏宽度：限制在 [SIDEBAR_MIN_W, SIDEBAR_MAX_W] 且给主内容留出空间
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    const maxWidth = Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, window.innerWidth - 420))
+    setResizing(true)
+    document.body.classList.add('is-resizing-sidebar')
+    const onMove = (moveEvent: PointerEvent) => {
+      const next = Math.min(maxWidth, Math.max(SIDEBAR_MIN_W, startWidth + moveEvent.clientX - startX))
+      setSidebarWidth(next)
+    }
+    const onEnd = () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onEnd)
+      document.removeEventListener('pointercancel', onEnd)
+      document.body.classList.remove('is-resizing-sidebar')
+      setResizing(false)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onEnd)
+    document.addEventListener('pointercancel', onEnd)
+  }
+
+  const resizeWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    setSidebarWidth(sidebarWidth + (event.key === 'ArrowRight' ? 16 : -16))
+  }
+
   return (
-    <aside className="sidebar" aria-label="侧边栏">
+    <aside
+      className="sidebar"
+      aria-label="侧边栏"
+      style={{ '--sidebar-w': `${sidebarWidth}px` } as CSSProperties}
+    >
+      <div
+        className={`sidebar-resizer${resizing ? ' is-active' : ''}`}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧边栏宽度"
+        aria-valuemin={SIDEBAR_MIN_W}
+        aria-valuemax={SIDEBAR_MAX_W}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onKeyDown={resizeWithKeyboard}
+      />
+
       <div className="sidebar-head">
         <button type="button" className="brand" onClick={() => openChat(activeId ?? undefined)}>
           <span className="brand-mark">
@@ -239,7 +291,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="sidebar-scroll">
+      <div className="sidebar-nav">
         <div className="nav-list">
           <button
             type="button"
@@ -301,63 +353,65 @@ export function Sidebar() {
             ))}
           </Popover>
         </div>
+      </div>
 
-        <section className="sidebar-section" aria-label="工作区与会话">
-          <div className="sidebar-section-head" data-searching={searchOpen ? 'true' : 'false'}>
-            {searchOpen ? (
-              <div className="sidebar-search">
-                <Search size={13} className="sidebar-search-icon" />
-                <input
-                  className="sidebar-search-input"
-                  value={query}
-                  placeholder="搜索会话名称"
-                  aria-label="搜索会话"
-                  autoFocus
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.stopPropagation()
-                      closeSearch()
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="关闭搜索"
-                  onClick={() => closeSearch()}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ) : (
-              <>
-                <span>工作区</span>
-                <span className="spacer" />
-                <button
-                  ref={searchButton}
-                  type="button"
-                  className="icon-btn"
-                  aria-label="搜索会话"
-                  onClick={openSearch}
-                >
-                  <Search size={14} />
-                </button>
-                <button type="button" className="icon-btn" aria-label="选择工作区" onClick={() => void pickWorkspace()}>
-                  <FolderOpen size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="新建会话"
-                  onClick={() => void createSession()}
-                >
-                  <Plus size={14} />
-                </button>
-              </>
-            )}
+      <div className="sidebar-section-head" data-searching={searchOpen ? 'true' : 'false'}>
+        {searchOpen ? (
+          <div className="sidebar-search">
+            <Search size={13} className="sidebar-search-icon" />
+            <input
+              className="sidebar-search-input"
+              value={query}
+              placeholder="搜索会话名称"
+              aria-label="搜索会话"
+              autoFocus
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation()
+                  closeSearch()
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="关闭搜索"
+              onClick={() => closeSearch()}
+            >
+              <X size={13} />
+            </button>
           </div>
+        ) : (
+          <>
+            <span>工作区</span>
+            <span className="spacer" />
+            <button
+              ref={searchButton}
+              type="button"
+              className="icon-btn"
+              aria-label="搜索会话"
+              onClick={openSearch}
+            >
+              <Search size={14} />
+            </button>
+            <button type="button" className="icon-btn" aria-label="选择工作区" onClick={() => void pickWorkspace()}>
+              <FolderOpen size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="新建会话"
+              onClick={() => void createSession()}
+            >
+              <Plus size={14} />
+            </button>
+          </>
+        )}
+      </div>
 
+      <div className="sidebar-scroll">
+        <section className="sidebar-section" aria-label="工作区与会话">
           {groups.length === 0 ? (
             <div className="sidebar-empty">
               {query ? '没有匹配的会话。' : '还没有会话，发出第一条消息后会出现在这里。'}

@@ -236,7 +236,9 @@
 /* ============================== 侧边栏 ============================== */
 
 .sidebar {
-  width: var(--sidebar-w);
+  /* 宽度由拖拽写入 --sidebar-w，并限制在 220~480px 之间 */
+  position: relative;
+  width: clamp(220px, var(--sidebar-w), 480px);
   flex: none;
   min-height: 0;
   display: flex;
@@ -245,6 +247,49 @@
   border-right: 1px solid var(--line);
   transition: width 160ms ease, transform 200ms ease;
   z-index: 30;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  transform: translateX(50%);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.sidebar-resizer.is-active::after {
+  background: var(--accent-line);
+}
+
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
+
+body.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-resizing-sidebar .sidebar {
+  transition: none;
 }
 
 .sidebar-head {
@@ -286,11 +331,17 @@
   letter-spacing: 0.01em;
 }
 
+/* 顶部导航固定，不随工作区/会话列表滚动 */
+.sidebar-nav {
+  flex: none;
+  padding: 4px 8px 0;
+}
+
 .sidebar-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 8px 12px;
+  padding: 0 8px 12px;
 }
 
 .nav-list {
@@ -343,10 +394,13 @@
 }
 
 .sidebar-section {
-  margin-top: 16px;
+  margin-top: 0;
 }
 
+/* 固定在滚动区上方，不随工作区/会话列表滚动 */
 .sidebar-section-head {
+  flex: none;
+  margin-top: 16px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -713,6 +767,10 @@
   pointer-events: none;
 }
 
+.app-shell[data-sidebar-collapsed='true'] .sidebar-resizer {
+  display: none;
+}
+
 .sidebar-scrim {
   display: none;
 }
@@ -732,6 +790,11 @@
     width: var(--sidebar-w);
     transform: translateX(-100%);
     box-shadow: var(--shadow-3);
+  }
+
+  /* 抽屉模式下不提供拖拽调宽 */
+  .sidebar-resizer {
+    display: none;
   }
 
   .app-shell[data-drawer-open='true'] .sidebar {

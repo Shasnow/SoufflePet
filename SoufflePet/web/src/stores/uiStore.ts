@@ -5,6 +5,7 @@ import { create } from 'zustand'
 
 interface UiState {
   sidebarCollapsed: boolean
+  sidebarWidth: number
   drawerOpen: boolean
   maximized: boolean
   visible: boolean
@@ -12,10 +13,36 @@ interface UiState {
   toggleDrawer: () => void
   setDrawerOpen: (open: boolean) => void
   setSidebarCollapsed: (collapsed: boolean) => void
+  setSidebarWidth: (width: number) => void
   setWindowState: (state: { visible?: boolean; maximized?: boolean }) => void
 }
 
 const SIDEBAR_KEY = 'soufflepet.sidebarCollapsed'
+const SIDEBAR_WIDTH_KEY = 'soufflepet.sidebarWidth'
+
+export const SIDEBAR_MIN_W = 220
+export const SIDEBAR_MAX_W = 480
+
+export function clampSidebarWidth(width: number): number {
+  return Math.round(Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, width)))
+}
+
+function readSidebarWidth(): number {
+  try {
+    const raw = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    return Number.isFinite(raw) && raw > 0 ? clampSidebarWidth(raw) : 280
+  } catch {
+    return 280
+  }
+}
+
+function persistSidebarWidth(width: number): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+  } catch {
+    // localStorage 不可用时只影响偏好记忆
+  }
+}
 
 function readSidebarCollapsed(): boolean {
   try {
@@ -39,6 +66,7 @@ function persistSidebarCollapsed(collapsed: boolean): void {
 
 export const useUiStore = create<UiState>()((set, get) => ({
   sidebarCollapsed: readSidebarCollapsed(),
+  sidebarWidth: readSidebarWidth(),
   drawerOpen: false,
   maximized: false,
   visible: true,
@@ -56,6 +84,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setSidebarCollapsed: (sidebarCollapsed) => {
     set({ sidebarCollapsed })
     persistSidebarCollapsed(sidebarCollapsed)
+  },
+  setSidebarWidth: (width) => {
+    const clamped = clampSidebarWidth(width)
+    set({ sidebarWidth: clamped })
+    persistSidebarWidth(clamped)
   },
   setWindowState: (state) =>
     set((current) => ({
