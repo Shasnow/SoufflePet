@@ -123,7 +123,7 @@ SoufflePet.sln
 - **配置落盘位置**：应用配置 `SoufflePet.json`（可执行文件同级，首次运行生成）；MCP 配置 `~/.souffle/mcp.json`；会话 `~/.souffle/sessions`（`index.json` + 按工作区分组的 `<workspace-group>\<id>\conversation.jsonl`，编辑 diff 存同目录 `diffs\`，JSONL 只存引用；覆盖写入前的旧版本存 `backups\`）；长期记忆/统计 `%AppData%\SoufflePet`；插件 `~/.souffle/plugins/<id>`；技能 `~/.souffle/skills`。修改配置相关逻辑时注意这些路径，不要把 MCP / 记忆写进 `SoufflePet.json`。
 - **验收/测试隔离用户数据**：设置环境变量 `SOUFFLEPET_DATA_DIR` 可把应用数据根目录（会话、记忆、统计、调度日志、窗口几何）指到临时目录；不设置时会话在 `~/.souffle/sessions`，其余数据仍为 `%AppData%\SoufflePet`。
 - **UI 架构**：React SPA 是唯一对话/设置界面；桌宠只有 `NativePetWindow` 一个原生渲染窗口。WebView2 初始化失败会记录错误并弹一次系统提示，**不再回退旧 Avalonia 窗口**；`--legacy-ui`、`--react-ui`、`--webview` 等迁移期开关已删除。
-- 模型在**启动时**加载，`Live2DModels` / `ModelsDirectory` 改后需重启生效；运行中可从桌宠右键菜单切换模型。
+- **不做向后兼容**：当前项目未正式发布，且处于快速迭代阶段，不做向后兼容。
 
 ## 快速定位
 

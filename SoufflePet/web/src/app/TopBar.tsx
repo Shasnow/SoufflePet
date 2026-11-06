@@ -26,7 +26,11 @@ export function TopBar() {
       ? activeTitle
       : route.kind === 'settings'
         ? SETTINGS_PANELS.find((panel) => panel.id === route.panel)?.label ?? '设置'
-        : 'SoufflePet'
+        : route.kind === 'extensions'
+          ? '插件与扩展'
+          : route.kind === 'tasks'
+            ? '自动化'
+            : 'SoufflePet'
 
   const clearTimer = () => {
     if (timer.current !== null) {

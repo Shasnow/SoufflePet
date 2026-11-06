@@ -27,19 +27,9 @@ import { filterSessions, groupSessions, useSessionStore } from '@/stores/session
 import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, useUiStore } from '@/stores/uiStore'
 import { Dialog } from '@/ui/Dialog'
 import { Popover } from '@/ui/Popover'
-import { chatRoute, navigate, settingsRoute, useRoute } from '@/app/router'
+import { chatRoute, extensionsRoute, navigate, SETTINGS_PANELS, settingsRoute, tasksRoute, useRoute } from '@/app/router'
 import type { SettingsPanel } from '@/app/router'
 import { SessionItem } from '@/features/sessions/SessionItem'
-
-type MorePanel = 'mcp' | 'skills' | 'llm' | 'models' | 'appearance'
-
-const MORE_ITEMS: { panel: MorePanel; label: string }[] = [
-  { panel: 'llm', label: '对话模型' },
-  { panel: 'mcp', label: 'MCP 服务器' },
-  { panel: 'skills', label: '技能' },
-  { panel: 'models', label: 'Live2D 模型' },
-  { panel: 'appearance', label: '外观' },
-]
 
 export function Sidebar() {
   const pet = useAppStore((state) => state.pet)
@@ -97,7 +87,7 @@ export function Sidebar() {
   )
 
   const currentPanel = route.kind === 'settings' ? route.panel : null
-  const moreActive = currentPanel !== null && MORE_ITEMS.some((item) => item.panel === currentPanel)
+  const moreActive = currentPanel !== null
 
   const closeDrawer = () => {
     if (window.innerWidth < 720) setDrawerOpen(false)
@@ -111,6 +101,17 @@ export function Sidebar() {
   const openSettings = (panel: SettingsPanel) => {
     navigate(settingsRoute(panel))
     setMoreOpen(false)
+    closeDrawer()
+  }
+
+  const openExtensions = () => {
+    // 已经在该页时停留在当前标签，否则默认打开插件标签
+    navigate(extensionsRoute(route.kind === 'extensions' ? route.tab : 'plugins'))
+    closeDrawer()
+  }
+
+  const openTasks = () => {
+    navigate(tasksRoute())
     closeDrawer()
   }
 
@@ -307,17 +308,17 @@ export function Sidebar() {
           <button
             type="button"
             className="nav-item"
-            data-active={currentPanel === 'plugins' ? 'true' : 'false'}
-            onClick={() => openSettings('plugins')}
+            data-active={route.kind === 'extensions' ? 'true' : 'false'}
+            onClick={() => openExtensions()}
           >
             <Blocks size={17} className="nav-icon" />
-            <span className="nav-label">插件</span>
+            <span className="nav-label">插件与扩展</span>
           </button>
           <button
             type="button"
             className="nav-item"
-            data-active={currentPanel === 'tasks' ? 'true' : 'false'}
-            onClick={() => openSettings('tasks')}
+            data-active={route.kind === 'tasks' ? 'true' : 'false'}
+            onClick={() => openTasks()}
           >
             <Clock size={17} className="nav-icon" />
             <span className="nav-label">自动化任务</span>
@@ -340,13 +341,13 @@ export function Sidebar() {
             }
           >
             <div className="menu-label">设置与工具</div>
-            {MORE_ITEMS.map((item) => (
+            {SETTINGS_PANELS.map((item) => (
               <button
-                key={item.panel}
+                key={item.id}
                 type="button"
                 className="menu-item"
-                data-active={currentPanel === item.panel ? 'true' : 'false'}
-                onClick={() => openSettings(item.panel)}
+                data-active={currentPanel === item.id ? 'true' : 'false'}
+                onClick={() => openSettings(item.id)}
               >
                 {item.label}
               </button>

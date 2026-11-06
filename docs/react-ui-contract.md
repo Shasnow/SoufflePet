@@ -481,7 +481,7 @@ type ChatOp =
 ## 9. 路由
 
 - `#/chat/:sessionId`；`#/chat` 自动跳到活动会话。
-- `#/settings/{llm,mcp,skills,plugins,tasks,models,appearance}`。
+- `#/settings/{llm,models,appearance}`；`#/extensions/{plugins,skills,mcp}`（插件、技能、MCP 合并页，页内标签切换）；`#/tasks/{tasks,history}`（自动化任务独立页，页内标签切换，缺省为 `tasks`）。
 - 页面启动时若 URL 无路由，用 snapshot 的 `activeSessionId` 替换；非法路由回落到 `#/chat`。
 - 宿主 `nav.goto` 只改 hash，不重建窗口；浏览器前进/后退可用。
 - 侧栏开合与抽屉是纯页面状态；开合偏好同步到 `UiSidebarCollapsed`（防抖 300 ms）。桌面宽度下收起即完全隐藏（宽度 0，不保留图标轨道），开关固定在标题栏最左侧；<720 px 使用抽屉，抽屉开合不写入折叠偏好。

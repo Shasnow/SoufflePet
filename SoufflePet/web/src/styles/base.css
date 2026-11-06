@@ -2004,6 +2004,34 @@ body.is-resizing-sidebar .sidebar {
   line-height: 1.6;
 }
 
+/* 独立页面（插件与扩展 / 自动化）的页内标签 */
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.page-tab {
+  height: 32px;
+  padding: 0 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.page-tab:hover {
+  color: var(--text-1);
+}
+
+.page-tab[data-active='true'] {
+  color: var(--text-1);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
 .card {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

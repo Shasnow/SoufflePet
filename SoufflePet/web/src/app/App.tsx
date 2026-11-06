@@ -4,10 +4,12 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { SETTINGS_PANELS, navigate, useRoute } from './router'
+import { navigate, useRoute } from './router'
 import { AppShell } from './AppShell'
 import { ChatPage } from '@/features/chat/ChatPage'
+import { ExtensionsPage } from '@/features/settings/ExtensionsPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
+import { TasksPage } from '@/features/settings/TasksPage'
 import { ToastHost } from '@/ui/ToastHost'
 import { ErrorBoundary } from '@/ui/ErrorBoundary'
 
@@ -41,6 +43,8 @@ function RouteView() {
   const route = useRoute()
 
   if (route.kind === 'settings') return <SettingsPage panel={route.panel} />
+  if (route.kind === 'extensions') return <ExtensionsPage tab={route.tab} />
+  if (route.kind === 'tasks') return <TasksPage tab={route.tab} />
   if (route.kind === 'chat') return <ChatPage sessionId={route.sessionId} />
   return <ChatPage />
 }
@@ -59,9 +63,6 @@ export function App() {
     }
     if (route.kind === 'chat' && !route.sessionId && activeId) {
       navigate({ kind: 'chat', sessionId: activeId }, true)
-    }
-    if (route.kind === 'settings' && !SETTINGS_PANELS.some((panel) => panel.id === route.panel)) {
-      navigate({ kind: 'settings', panel: 'appearance' }, true)
     }
   }, [ready, route, activeId])
 

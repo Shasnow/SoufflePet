@@ -43,7 +43,7 @@ function toInput(task: TaskDto | null): TaskInputDto {
   }
 }
 
-export function TasksSettings() {
+export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }) {
   const pushToast = useToastStore((state) => state.push)
   const [data, setData] = useState<TasksListPayload | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -143,6 +143,7 @@ export function TasksSettings() {
     <div className="settings-stack">
       <SettingsError message={error} />
 
+      {view === 'tasks' ? (
       <div className="settings-split">
         <div className="settings-list">
           <div className="settings-list-head">
@@ -329,7 +330,7 @@ export function TasksSettings() {
           )}
         </div>
       </div>
-
+      ) : (
       <SettingsCard
         title="执行日志"
         desc="最近的任务触发与执行结果。"
@@ -352,6 +353,7 @@ export function TasksSettings() {
           </div>
         )}
       </SettingsCard>
+      )}
 
       <Dialog
         open={confirmDelete}

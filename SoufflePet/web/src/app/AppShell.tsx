@@ -19,7 +19,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       ? `chat:${route.sessionId ?? ''}`
       : route.kind === 'settings'
         ? `settings:${route.panel}`
-        : 'unknown'
+        : route.kind === 'extensions'
+          ? `extensions:${route.tab}`
+          : route.kind === 'tasks'
+            ? `tasks:${route.tab}`
+            : 'unknown'
 
   useEffect(() => {
     if (window.innerWidth >= 720) setDrawerOpen(false)
