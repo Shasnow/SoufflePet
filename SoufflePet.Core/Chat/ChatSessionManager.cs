@@ -51,6 +51,7 @@ public sealed class ChatSessionFactory(
 public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<ChatSessionManager>();
+    private const string PlatformInboxTitle = "平台消息";
 
     private readonly object _gate = new();
     /// <summary>索引落盘串行化：多会话并发生成会同时触发 Save，共享的 index.json.tmp 不能并发写。</summary>
@@ -290,6 +291,45 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         {
             lock (_gate) return [.. _open.Values];
         }
+    }
+
+    /// <summary>
+    /// 取平台消息专用会话；不存在时创建并立即写入索引。它不会切换当前活动会话，
+    /// 平台提醒固定进入同一个会话，避免打断用户正在看的对话，也让请求前缀保持稳定。
+    /// </summary>
+    public async Task<ChatSession> GetOrCreatePlatformInboxAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        SessionRecord record;
+        bool created = false;
+        lock (_gate)
+        {
+            var existing = _records.FirstOrDefault(item => item.IsPlatformInbox);
+            if (existing is not null)
+            {
+                record = existing;
+            }
+            else
+            {
+                record = _store.NewDraftRecord(null) with
+                {
+                    Title = PlatformInboxTitle,
+                    IsPlatformInbox = true,
+                };
+                _records.Add(record);
+                created = true;
+            }
+        }
+
+        if (created)
+        {
+            Save();
+            RaiseSessionsChanged();
+            Logger.Information("platform inbox session created id={Id}", record.Id);
+        }
+
+        return await ResolveAsync(record.Id, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ChatSession> OpenAsync(string sessionId, CancellationToken cancellationToken)

@@ -3,13 +3,16 @@
 
 using System;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Serilog;
 using SoufflePet.Services;
 
 namespace SoufflePet.Core.Chat;
 
 /// <summary>
-/// 把平台消息 / 定时任务 / 桌宠交互（戳一戳、摸头）路由到当前活动会话。
+/// 把平台消息 / 定时任务 / 桌宠交互（戳一戳、摸头）路由到会话：
+/// 平台消息固定进入「平台消息」专用会话，其余提醒进入当前活动会话。
 /// React SPA 是唯一界面，所有提醒都由这里消费，不会出现两条链路重复消费。
 /// </summary>
 public sealed class ChatTriggerRouter : IDisposable
@@ -45,10 +48,19 @@ public sealed class ChatTriggerRouter : IDisposable
 
     private void OnPlatformNotified(object? sender, PlatformNotification notification)
     {
+        _ = RoutePlatformNoticeAsync(notification);
+    }
+
+    /// <summary>平台消息固定投递到「平台消息」专用会话，不切换用户当前活动会话。</summary>
+    private async Task RoutePlatformNoticeAsync(PlatformNotification notification)
+    {
         try
         {
-            var session = _sessions.ActiveSession;
-            if (session is null) return;
+            if (_disposed) return;
+
+            var session = await _sessions
+                .GetOrCreatePlatformInboxAsync(CancellationToken.None)
+                .ConfigureAwait(false);
 
             var senderName = notification.Sender is { Length: > 0 } name ? name : "未知发送者";
             var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {senderName}：{Preview(notification.Content)}";

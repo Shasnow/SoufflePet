@@ -149,7 +149,9 @@ public sealed record SessionRecord(
     string? LastUserText,
     string? ModelKey,
     ChatUsageState? Usage = null,
-    ChatSessionStatsState? Stats = null);
+    ChatSessionStatsState? Stats = null,
+    /// <summary>是否为平台消息专用会话：所有平台提醒固定投递到它，不跟随用户当前选中的会话。</summary>
+    bool IsPlatformInbox = false);
 
 /// <summary>会话摘要变化（重命名/首条消息生成标题/一轮结束）。</summary>
 public sealed record ChatSessionSummary(
