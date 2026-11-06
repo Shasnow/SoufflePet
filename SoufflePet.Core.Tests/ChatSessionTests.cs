@@ -227,7 +227,103 @@ public sealed class ChatSessionTests : IAsyncLifetime
         var tool = messages.Single(message => message.Kind == ChatMessageKinds.Tool);
         Assert.Equal("read_file", tool.Tool!.Name);
         Assert.Contains("内容", tool.Tool.Result);
+        Assert.Equal("读取 · a.txt", tool.Tool.Label);
         Assert.Equal("读完了", messages.Last().Text);
+    }
+
+    [Fact]
+    public async Task ToolLabelIsPersistedAndRestored()
+    {
+        var llm = new FakeLlm((_, _, _) => Streams(
+            new LlmToolCallStartedEvent("call-1", "run_shell_command", "{\"command\":\"npm test\"}"),
+            new LlmToolCallEvent("call-1", "run_shell_command", "{\"command\":\"npm test\"}", "ok"),
+            new LlmTextDelta("完成")));
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync("跑测试", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var tool = session.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Tool);
+        Assert.Equal("运行命令 · npm test", tool.Tool!.Label);
+
+        var id = session.Id;
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(id, CancellationToken.None);
+            var restored = opened.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Tool);
+            Assert.Equal("运行命令 · npm test", restored.Tool!.Label);
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task FileEditDiffsAreAttachedToToolBubbleAndRestored()
+    {
+        var diff = new ChatFileDiffState("a.txt", 1, 1, false,
+        [
+            new ChatDiffHunkState(1, 1, 1, 1,
+            [
+                new ChatDiffLineState("del", "old"),
+                new ChatDiffLineState("add", "new"),
+            ]),
+        ]);
+        var llm = new FakeLlm((_, _, _) => DiffStreamAsync());
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+        string? backupDirectory = null;
+
+        async IAsyncEnumerable<LlmStreamEvent> DiffStreamAsync()
+        {
+            yield return new LlmToolCallStartedEvent("call-1", "edit_file", "{\"path\":\"a.txt\"}");
+            backupDirectory = ToolInvocationContext.BackupDirectory;
+            _files.RecordEdit(new ChatFileEdit("call-1", [diff]));
+            yield return new LlmToolCallEvent("call-1", "edit_file", "{\"path\":\"a.txt\"}", "已编辑");
+            yield return new LlmTextDelta("完成");
+        }
+
+        await session.SendAsync("改文件", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(_store.SessionDirectory(session.Id), backupDirectory);
+        var tool = session.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Tool);
+        var attached = Assert.Single(tool.Tool!.Diffs!);
+        Assert.Equal("a.txt", attached.Path);
+        Assert.Equal(1, attached.Added);
+        Assert.Equal(1, attached.Removed);
+        var hunk = Assert.Single(attached.Hunks);
+        Assert.Equal(("del", "old"), (hunk.Lines[0].Kind, hunk.Lines[0].Text));
+
+        var id = session.Id;
+        var conversation = await File.ReadAllTextAsync(_store.ConversationPath(id));
+        Assert.DoesNotContain("\"Hunks\"", conversation);
+        Assert.Contains("\"DiffFile\"", conversation);
+        var diffFile = Assert.Single(Directory.GetFiles(
+            Path.Combine(_store.SessionDirectory(id), "diffs"), "*.json"));
+        Assert.Contains("\"Lines\"", await File.ReadAllTextAsync(diffFile));
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(id, CancellationToken.None);
+            var restored = opened.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Tool);
+            var restoredDiff = Assert.Single(restored.Tool!.Diffs!);
+            Assert.Equal("a.txt", restoredDiff.Path);
+            Assert.Equal(("add", "new"), (restoredDiff.Hunks[0].Lines[1].Kind, restoredDiff.Hunks[0].Lines[1].Text));
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -361,6 +457,60 @@ public sealed class ChatSessionTests : IAsyncLifetime
         finally
         {
             await rebuilt.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WorkspaceSwitchMovesDiffSidecarAndKeepsItReadable()
+    {
+        var workspaceA = Path.Combine(_root, "diff-workspace-a");
+        var workspaceB = Path.Combine(_root, "diff-workspace-b");
+        Directory.CreateDirectory(workspaceA);
+        Directory.CreateDirectory(workspaceB);
+
+        var diff = new ChatFileDiffState("a.txt", 1, 0, false,
+        [
+            new ChatDiffHunkState(1, 0, 1, 1, [new ChatDiffLineState("add", "x")]),
+        ]);
+        var llm = new FakeLlm((_, _, _) => DiffStreamAsync());
+        var manager = CreateManager(llm);
+        var record = await manager.CreateAsync(workspaceA, CancellationToken.None);
+        var session = manager.ActiveSession!;
+
+        async IAsyncEnumerable<LlmStreamEvent> DiffStreamAsync()
+        {
+            yield return new LlmToolCallStartedEvent("call-1", "edit_file", "{\"path\":\"a.txt\"}");
+            _files.RecordEdit(new ChatFileEdit("call-1", [diff]));
+            yield return new LlmToolCallEvent("call-1", "edit_file", "{\"path\":\"a.txt\"}", "已编辑");
+            yield return new LlmTextDelta("完成");
+        }
+
+        await session.SendAsync("改文件", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var directoryA = _store.SessionDirectory(record.Id, workspaceA);
+        Assert.Single(Directory.GetFiles(Path.Combine(directoryA, "diffs"), "*.json"));
+
+        await session.SwitchWorkspaceAsync(workspaceB);
+
+        var directoryB = _store.SessionDirectory(record.Id, workspaceB);
+        Assert.False(Directory.Exists(directoryA));
+        Assert.Single(Directory.GetFiles(Path.Combine(directoryB, "diffs"), "*.json"));
+
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(record.Id, CancellationToken.None);
+            var tool = opened.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Tool);
+            var restored = Assert.Single(tool.Tool!.Diffs!);
+            Assert.Equal(("add", "x"), (restored.Hunks[0].Lines[0].Kind, restored.Hunks[0].Lines[0].Text));
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
         }
     }
 

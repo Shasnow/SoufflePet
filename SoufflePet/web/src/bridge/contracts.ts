@@ -61,10 +61,37 @@ export interface AskStateDto {
   questions: AskQuestionDto[]
 }
 
+export type DiffLineKind = 'add' | 'del' | 'ctx'
+
+export interface DiffLineDto {
+  kind: DiffLineKind
+  text: string
+}
+
+export interface DiffHunkDto {
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLineDto[]
+}
+
+export interface FileDiffDto {
+  path: string
+  added: number
+  removed: number
+  truncated?: boolean
+  hunks: DiffHunkDto[]
+}
+
 export interface ToolDetailDto {
   name: string
   args: string
   result: string
+  /** 气泡标题的展示文案，如「运行命令 · npm test」；无时界面回退到工具名。 */
+  label?: string
+  /** 编辑工具产生的文件差异；有值时显示 diff 卡片。 */
+  diffs?: FileDiffDto[]
 }
 
 export interface ApprovalDetailDto {

@@ -18,6 +18,7 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
 using Serilog;
+using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 using SoufflePet.Services.Plugins;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -36,10 +37,14 @@ public sealed record LlmTextDelta(string Text) : LlmStreamEvent;
 public sealed record LlmReasoningDelta(string Text) : LlmStreamEvent;
 
 /// <summary>模型发起一次工具调用：在真正执行前先产出，界面据此立即显示，避免耗时工具看起来没反应。</summary>
-public sealed record LlmToolCallStartedEvent(string CallId, string Name, string Arguments) : LlmStreamEvent;
+/// <param name="Label">气泡标题（如「运行命令 · npm test」）；为空时界面回退到工具名。</param>
+public sealed record LlmToolCallStartedEvent(string CallId, string Name, string Arguments, string? Label = null)
+    : LlmStreamEvent;
 
 /// <summary>一次工具调用已执行结束（CallId 与 Started 事件对应），附带参数与结果。</summary>
-public sealed record LlmToolCallEvent(string CallId, string Name, string Arguments, string Result) : LlmStreamEvent;
+/// <param name="Label">气泡标题；与 Started 事件一致。</param>
+public sealed record LlmToolCallEvent(string CallId, string Name, string Arguments, string Result, string? Label = null)
+    : LlmStreamEvent;
 
 /// <summary>
 /// 本次回复为止累计的 token 用量（含多轮工具调用的总和）。每完成一轮就产出一份累计值，
@@ -325,11 +330,12 @@ public sealed class LlmChatService(
                 foreach (var call in calls)
                 {
                     var arguments = FormatArguments(call.Arguments);
+                    var label = ToolDisplay.Describe(functions.GetValueOrDefault(call.Name), call.Name, arguments);
                     var limitText = $"未执行：本次对话已达到最大工具调用轮次（{settings.MaxToolRounds} 轮）。";
 
-                    yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
+                    yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments, label);
                     messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, limitText)]));
-                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, limitText);
+                    yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, limitText, label);
                 }
 
                 continue;
@@ -340,10 +346,15 @@ public sealed class LlmChatService(
             foreach (var call in calls)
             {
                 var arguments = FormatArguments(call.Arguments);
+                var label = ToolDisplay.Describe(functions.GetValueOrDefault(call.Name), call.Name, arguments);
                 // 先通知界面「开始调用」，长耗时工具（MCP、命令执行）也能立刻看到反馈
-                yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments);
+                yield return new LlmToolCallStartedEvent(call.CallId, call.Name, arguments, label);
 
-                var result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
+                object? result;
+                using (ToolInvocationContext.Enter(call.CallId))
+                {
+                    result = await InvokeToolAsync(call, functions, cancellationToken).ConfigureAwait(false);
+                }
 
                 // 工具返回 AIContent 集合（截图、read_file 的图片/音频、MCP 返回的媒体等）：
                 // 文本作为工具结果，媒体内容作为独立用户消息附加，让支持多模态的模型真正看到画面、听到声音。
@@ -358,7 +369,7 @@ public sealed class LlmChatService(
                         messages.Add(new ChatMessage(ChatRole.Tool,
                             [new FunctionResultContent(call.CallId, summary)]));
                         messages.Add(new ChatMessage(ChatRole.User, [.. media]));
-                        yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, summary);
+                        yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, summary, label);
                         continue;
                     }
 
@@ -367,7 +378,7 @@ public sealed class LlmChatService(
                 }
 
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
-                yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, FormatResult(result));
+                yield return new LlmToolCallEvent(call.CallId, call.Name, arguments, FormatResult(result), label);
             }
         }
     }

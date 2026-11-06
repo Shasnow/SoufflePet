@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using Serilog;
+using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 
 namespace SoufflePet.Services;
@@ -31,7 +32,9 @@ public readonly record struct MemoryTurn(
     long? InputTokens = null,
     long? OutputTokens = null,
     long? CachedInputTokens = null,
-    string? Model = null);
+    string? Model = null,
+    string? Label = null,
+    IReadOnlyList<ChatFileDiffState>? Diffs = null);
 
 /// <summary>
 /// 长期记忆：对话落盘、用户档案与关键词检索。
@@ -150,6 +153,9 @@ public sealed class ChatMemory
         LoadWindow();
     }
 
+    /// <summary>会话目录：conversation.jsonl / window.json / diffs / backups 都在这里。</summary>
+    public string SessionDirectory => _root;
+
     /// <summary>会话目录；首次写入时才真正创建（草稿会话保持在纯内存状态）。</summary>
     private void EnsureDirectory()
     {
@@ -189,6 +195,8 @@ public sealed class ChatMemory
                 Directory.CreateDirectory(target);
                 MoveFileIfExists(_conversationsPath, Path.Combine(target, Path.GetFileName(_conversationsPath)));
                 MoveFileIfExists(_windowPath, Path.Combine(target, "window.json"));
+                MoveDirectoryIfExists(Path.Combine(source, "diffs"), Path.Combine(target, "diffs"));
+                MoveDirectoryIfExists(Path.Combine(source, "backups"), Path.Combine(target, "backups"));
 
                 // 旧目录空了就顺手删掉，避免工作区切换留下空壳
                 if (Directory.Exists(source) && !Directory.EnumerateFileSystemEntries(source).Any())
@@ -202,6 +210,24 @@ public sealed class ChatMemory
             _root = target;
             _conversationsPath = Path.Combine(target, Path.GetFileName(_conversationsPath));
             _windowPath = Path.Combine(target, "window.json");
+        }
+    }
+
+    private static void MoveDirectoryIfExists(string from, string to)
+    {
+        if (!Directory.Exists(from) || string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            Directory.CreateDirectory(to);
+            foreach (var file in Directory.EnumerateFiles(from))
+                File.Move(file, Path.Combine(to, Path.GetFileName(file)), overwrite: true);
+
+            if (!Directory.EnumerateFileSystemEntries(from).Any()) Directory.Delete(from);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "move session diff directory failed from={From} to={To}", from, to);
         }
     }
 
@@ -243,7 +269,9 @@ public sealed class ChatMemory
         long? inputTokens = null,
         long? outputTokens = null,
         long? cachedInputTokens = null,
-        string? model = null)
+        string? model = null,
+        string? toolLabel = null,
+        IReadOnlyList<ChatFileDiffState>? diffs = null)
     {
         // 正文统一去空白：纯空白视作无正文，只有存在思考内容时才继续落库
         text = text.Trim();
@@ -265,10 +293,14 @@ public sealed class ChatMemory
             InputTokens = inputTokens,
             OutputTokens = outputTokens,
             CachedInputTokens = cachedInputTokens,
-            Model = string.IsNullOrWhiteSpace(model) ? null : model
+            Model = string.IsNullOrWhiteSpace(model) ? null : model,
+            Label = string.IsNullOrWhiteSpace(toolLabel) ? null : toolLabel.Trim()
         };
         lock (_gate)
         {
+            // 完整 diff 单独存文件：JSONL 只留引用，避免多次编辑后会话文件膨胀、拖慢启动
+            if (diffs is { Count: > 0 }) turn.DiffFile = SaveDiffFileLocked(diffs);
+
             _turns.Add(turn);
             if (_turns.Count > MaxTurnsInMemory)
                 _turns.RemoveRange(0, _turns.Count - MaxTurnsInMemory);
@@ -357,9 +389,7 @@ public sealed class ChatMemory
 
             var turns = _turns.Skip(start)
                 .Where(t => includeTools || !IsToolRole(t.Role))
-                .Select(t => new MemoryTurn(t.Time, t.Role, t.Text, t.CallId, t.ToolName, t.Arguments, t.Result,
-                    t.Reasoning, t.Display, t.IsPlatformNotice, t.RequestText,
-                    t.InputTokens, t.OutputTokens, t.CachedInputTokens, t.Model))
+                .Select(ToMemoryTurn)
                 .ToList();
 
             Logger.Debug("recent turns requested={Max} returned={Count}", maxTurns, turns.Count);
@@ -623,6 +653,53 @@ public sealed class ChatMemory
         return results;
     }
 
+    private MemoryTurn ToMemoryTurn(Turn turn) => new(
+        turn.Time, turn.Role, turn.Text, turn.CallId, turn.ToolName, turn.Arguments, turn.Result,
+        turn.Reasoning, turn.Display, turn.IsPlatformNotice, turn.RequestText,
+        turn.InputTokens, turn.OutputTokens, turn.CachedInputTokens, turn.Model, turn.Label,
+        turn.DiffFile is { Length: > 0 } file ? LoadDiffFile(file) : null);
+
+    /// <summary>把完整 diff 写到会话目录的 <c>diffs/</c>，返回 JSONL 里保存的文件名（调用方须持有锁）。</summary>
+    private string? SaveDiffFileLocked(IReadOnlyList<ChatFileDiffState> diffs)
+    {
+        try
+        {
+            EnsureDirectory();
+            var directory = Path.Combine(_root, "diffs");
+            Directory.CreateDirectory(directory);
+            var name = $"{Guid.NewGuid():N}.json";
+            File.WriteAllText(Path.Combine(directory, name), JsonSerializer.Serialize(diffs, LineJsonOptions));
+            return name;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "save conversation diff failed");
+            return null;
+        }
+    }
+
+    /// <summary>按文件名加载 diff；文件缺失或损坏时当作没有 diff，不影响会话恢复。</summary>
+    private IReadOnlyList<ChatFileDiffState>? LoadDiffFile(string fileName)
+    {
+        try
+        {
+            // 文件名来自会话文件，按不可信输入处理，禁止路径穿越
+            if (fileName != Path.GetFileName(fileName)
+                || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                return null;
+
+            var path = Path.Combine(_root, "diffs", fileName);
+            if (!File.Exists(path)) return null;
+
+            return JsonSerializer.Deserialize<List<ChatFileDiffState>>(File.ReadAllText(path), LineJsonOptions);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Logger.Warning(ex, "load conversation diff failed file={File}", fileName);
+            return null;
+        }
+    }
+
     private void LoadTurns()
     {
         try
@@ -810,6 +887,15 @@ public sealed class ChatMemory
 
         /// <summary>工具完整结果（仅 tool 记录）。</summary>
         public string? Result { get; set; }
+
+        /// <summary>工具气泡标题（仅 tool 记录），如「运行命令 · npm test」。</summary>
+        public string? Label { get; set; }
+
+        /// <summary>
+        /// 工具编辑文件产生的差异文件（仅 tool 记录），位于会话目录的 <c>diffs/</c> 下。
+        /// JSONL 只存文件名，完整 hunk 单独落盘，避免会话文件随编辑次数膨胀。
+        /// </summary>
+        public string? DiffFile { get; set; }
 
         /// <summary>该轮的思考内容（reasoning_content），用于请求时原样回传给推理模型。</summary>
         public string? Reasoning { get; set; }

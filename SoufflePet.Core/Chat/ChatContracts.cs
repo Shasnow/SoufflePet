@@ -58,8 +58,32 @@ public sealed record ChatAskQuestionState(string Text, IReadOnlyList<ChatAskOpti
 /// <summary>当前待回答的提问。</summary>
 public sealed record ChatAskState(string RequestId, IReadOnlyList<ChatAskQuestionState> Questions);
 
-/// <summary>工具调用明细（气泡展开后显示）。</summary>
-public sealed record ChatToolState(string Name, string Args, string Result);
+/// <summary>差异中的一行：kind 为 add / del / ctx。</summary>
+public sealed record ChatDiffLineState(string Kind, string Text);
+
+/// <summary>一个差异块（hunk）。行号从 1 开始；oldLines / newLines 是本块在两侧占的行数。</summary>
+public sealed record ChatDiffHunkState(
+    int OldStart,
+    int OldLines,
+    int NewStart,
+    int NewLines,
+    IReadOnlyList<ChatDiffLineState> Lines);
+
+/// <summary>一个文件的编辑差异；Truncated 表示文件过大或差异过多，只展示了一部分。</summary>
+public sealed record ChatFileDiffState(
+    string Path,
+    int Added,
+    int Removed,
+    bool Truncated,
+    IReadOnlyList<ChatDiffHunkState> Hunks);
+
+/// <summary>工具调用明细（气泡展开后显示）；Label 是气泡标题，Diffs 是编辑工具产生的文件差异。</summary>
+public sealed record ChatToolState(
+    string Name,
+    string Args,
+    string Result,
+    string? Label = null,
+    IReadOnlyList<ChatFileDiffState>? Diffs = null);
 
 /// <summary>审批气泡状态。</summary>
 public sealed record ChatApprovalState(string ToolName, string Detail, bool Pending, string? Outcome = null);

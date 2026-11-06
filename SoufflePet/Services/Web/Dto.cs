@@ -56,7 +56,28 @@ public sealed record AskQuestionDto(string Text, IReadOnlyList<AskOptionDto> Opt
 
 public sealed record AskStateDto(string RequestId, IReadOnlyList<AskQuestionDto> Questions);
 
-public sealed record ToolDetailDto(string Name, string Args, string Result);
+public sealed record DiffLineDto(string Kind, string Text);
+
+public sealed record DiffHunkDto(
+    int OldStart,
+    int OldLines,
+    int NewStart,
+    int NewLines,
+    IReadOnlyList<DiffLineDto> Lines);
+
+public sealed record FileDiffDto(
+    string Path,
+    int Added,
+    int Removed,
+    bool Truncated,
+    IReadOnlyList<DiffHunkDto> Hunks);
+
+public sealed record ToolDetailDto(
+    string Name,
+    string Args,
+    string Result,
+    string? Label = null,
+    IReadOnlyList<FileDiffDto>? Diffs = null);
 
 public sealed record ApprovalDetailDto(
     string ToolName,

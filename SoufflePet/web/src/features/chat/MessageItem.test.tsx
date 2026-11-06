@@ -32,4 +32,24 @@ describe('MessageItem', () => {
     expect(meta!.querySelector('[aria-label="复制消息"]')).not.toBeNull()
     expect(meta!.querySelector('.usage-capsule')).not.toBeNull()
   })
+
+  it('工具气泡显示自定义标题', () => {
+    const message: ChatMessageDto = {
+      id: 'm-tool',
+      kind: 'tool',
+      text: '调用工具 run_shell_command',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+      tool: {
+        name: 'run_shell_command',
+        args: '{"command":"npm test"}',
+        result: 'ok',
+        label: '运行命令 · npm test',
+      },
+    }
+
+    const { container } = render(<MessageItem message={message} streaming={false} />)
+    const title = container.querySelector('.bubble-tool .collapse-title')
+    expect(title?.textContent).toBe('运行命令 · npm test')
+    expect(title?.getAttribute('title')).toBe('run_shell_command')
+  })
 })

@@ -13,6 +13,7 @@ import {
 import { memo, useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { ChatMessageDto } from '@/bridge/contracts'
+import { DiffCard } from '@/features/chat/DiffCard'
 import { RenderMarkdown } from '@/ui/Markdown'
 import { UsageCapsule } from '@/ui/Usage'
 import { firstLine, formatClock, latestLine } from '@/ui/format'
@@ -121,7 +122,8 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
         </div>
       )
 
-    case 'tool':
+    case 'tool': {
+      const diffs = message.tool?.diffs ?? []
       return (
         <div className="message-row" data-kind="tool">
           <div className="bubble bubble-tool">
@@ -131,11 +133,21 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
                 style={{ transform: message.expanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
               />
               <Wrench size={13} />
-              <span className="collapse-title">{message.tool?.name ? `调用工具：${message.tool.name}` : '调用工具'}</span>
+              <span className="collapse-title" title={message.tool?.name}>
+                {message.tool?.label ??
+                  (message.tool?.name ? `调用工具：${message.tool.name}` : '调用工具')}
+              </span>
             </button>
+            {diffs.length > 0 ? (
+              <div className="diff-list">
+                {diffs.map((diff, index) => (
+                  <DiffCard key={`${diff.path}-${index}`} diff={diff} />
+                ))}
+              </div>
+            ) : null}
             {message.expanded ? (
               <div className="collapse-body">
-                {message.tool?.args ? (
+                {message.tool?.args && diffs.length === 0 ? (
                   <div className="tool-section">
                     <div className="tool-label">参数</div>
                     <pre className="tool-code">{message.tool.args}</pre>
@@ -151,6 +163,7 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
           {meta}
         </div>
       )
+    }
 
     case 'notice':
       return (

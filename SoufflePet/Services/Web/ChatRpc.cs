@@ -398,12 +398,35 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         message.Expanded,
         message.Pending,
         message.ReasoningDone,
-        message.Tool is { } tool ? new ToolDetailDto(tool.Name, tool.Args, tool.Result) : null,
+        message.Tool is { } tool
+            ? new ToolDetailDto(tool.Name, tool.Args, tool.Result, tool.Label, MapDiffs(tool.Diffs))
+            : null,
         MapUsage(message.Usage),
         MapAttachment(message.Attachment),
         message.Approval is { } approval
             ? new ApprovalDetailDto(approval.ToolName, approval.Detail, approval.Pending, approval.Outcome)
             : null);
+
+    private static IReadOnlyList<FileDiffDto>? MapDiffs(IReadOnlyList<ChatFileDiffState>? diffs)
+    {
+        if (diffs is not { Count: > 0 }) return null;
+
+        var result = new List<FileDiffDto>(diffs.Count);
+        foreach (var diff in diffs)
+        {
+            var hunks = new List<DiffHunkDto>(diff.Hunks.Count);
+            foreach (var hunk in diff.Hunks)
+            {
+                var lines = new List<DiffLineDto>(hunk.Lines.Count);
+                foreach (var line in hunk.Lines) lines.Add(new DiffLineDto(line.Kind, line.Text));
+                hunks.Add(new DiffHunkDto(hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines, lines));
+            }
+
+            result.Add(new FileDiffDto(diff.Path, diff.Added, diff.Removed, diff.Truncated, hunks));
+        }
+
+        return result;
+    }
 
     private IReadOnlyList<AttachmentDto> MapAttachments(IReadOnlyList<ChatAttachmentState> attachments) =>
         [.. attachments.Select(attachment => MapAttachment(attachment)!)];
@@ -509,7 +532,9 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         if (patch.Expanded is { } expanded) result["expanded"] = expanded;
         if (patch.Pending is { } pending) result["pending"] = pending;
         if (patch.ReasoningDone is { } reasoningDone) result["reasoningDone"] = reasoningDone;
-        if (patch.Tool is { } tool) result["tool"] = new ToolDetailDto(tool.Name, tool.Args, tool.Result);
+        if (patch.Tool is { } tool)
+            result["tool"] = new ToolDetailDto(tool.Name, tool.Args, tool.Result, tool.Label,
+                MapDiffs(tool.Diffs));
         if (patch.Usage is { } usage) result["usage"] = MapUsage(usage);
         if (patch.Attachment is { } attachment) result["attachment"] = MapAttachment(attachment);
         if (patch.Approval is { } approval)

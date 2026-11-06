@@ -37,6 +37,7 @@ public sealed class ChatSession : IAsyncDisposable
     private const string BlankText = "（空白内容）";
     private const string DefaultTitle = "新会话";
     private const int ToolResultMaxLength = 300;
+    private const int ToolArgumentsPreviewLength = 400;
     private const int PlatformNoticePreviewLength = 80;
     private const int MaxPendingTurns = 3;
     private const int MaxVisibleMessages = 300;
@@ -59,6 +60,8 @@ public sealed class ChatSession : IAsyncDisposable
     private readonly List<AttachmentEntry> _attachments = [];
     private readonly List<ChatMessage> _history = [];
     private readonly Queue<PendingTurn> _pendingTurns = new();
+    /// <summary>工具执行期间产生的文件差异：先按 callId 缓冲，等工具结束事件到达时并入气泡。</summary>
+    private readonly Dictionary<string, IReadOnlyList<ChatFileDiffState>> _pendingDiffs = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _sendGate = new(1, 1);
 
     private readonly SouffleSettings _settings;
@@ -74,7 +77,7 @@ public sealed class ChatSession : IAsyncDisposable
     private string? _selectedModelKey;
     private string _draft = string.Empty;
     private string _approvalMode;
-    private bool _generating;
+    private volatile bool _generating;
     private bool _processingPending;
     private bool _disposed;
     private ChatUsageState? _usage;
@@ -123,6 +126,7 @@ public sealed class ChatSession : IAsyncDisposable
         _toolAccess.ApprovalRequested += OnApprovalRequested;
         _questions.QuestionAsked += OnQuestionAsked;
         _files.FileShown += OnFileShown;
+        _files.FileEdited += OnFileEdited;
 
         LoadRecentHistory();
         TrimMessages();
@@ -778,6 +782,8 @@ public sealed class ChatSession : IAsyncDisposable
             // 本轮对话内的相对路径、AGENTS.md、技能目录、命令工作目录都按本会话的工作区解析；
             // 用异步上下文而非进程 cwd，多个会话并发生成时互不干扰
             using var workspaceScope = WorkspaceContext.Enter(workspacePath);
+            // 编辑工具覆盖文件前把旧版本备份到本轮会话目录，删除会话时随目录进入 .deleted
+            using var backupScope = ToolInvocationContext.EnterBackupDirectory(_memory.SessionDirectory);
             await foreach (var evt in _llm.StreamAsync(model, [.. _history], token)
                                .ConfigureAwait(false))
             {
@@ -826,7 +832,8 @@ public sealed class ChatSession : IAsyncDisposable
                         var bubble = NewMessage(
                             ChatMessageKinds.Tool,
                             FormatToolStarted(started),
-                            tool: new ChatToolState(started.Name, started.Arguments, "执行中…"));
+                            tool: new ChatToolState(started.Name, started.Arguments, "执行中…",
+                                started.Label ?? ToolDisplay.Describe(started.Name, started.Arguments)));
                         bubble.Expanded = false;
                         toolBubbles[started.CallId] = bubble;
                         AddToolBubble(bubble);
@@ -834,10 +841,14 @@ public sealed class ChatSession : IAsyncDisposable
 
                     case LlmToolCallEvent call:
                         var toolText = FormatToolCall(call);
+                        var toolLabel = call.Label ?? ToolDisplay.Describe(call.Name, call.Arguments);
+                        var toolDiffs = TakePendingDiffs(call.CallId);
                         if (toolBubbles.Remove(call.CallId, out var completed))
                         {
                             completed.Text = toolText;
-                            completed.Tool = new ChatToolState(call.Name, call.Arguments, call.Result);
+                            // 执行中气泡可能已经由 Started 事件算过标题，事件没带标题时优先保留它
+                            completed.Tool = new ChatToolState(call.Name, call.Arguments, call.Result,
+                                call.Label ?? completed.Tool?.Label ?? toolLabel, toolDiffs);
                             Emit(new ChatOpMessageText(completed.Id, "set", toolText));
                             Emit(new ChatOpMessagePatchOp(completed.Id,
                                 new ChatMessagePatch(Tool: completed.Tool)));
@@ -847,7 +858,7 @@ public sealed class ChatSession : IAsyncDisposable
                             var late = NewMessage(
                                 ChatMessageKinds.Tool,
                                 toolText,
-                                tool: new ChatToolState(call.Name, call.Arguments, call.Result));
+                                tool: new ChatToolState(call.Name, call.Arguments, call.Result, toolLabel, toolDiffs));
                             late.Expanded = false;
                             AddToolBubble(late);
                         }
@@ -859,7 +870,7 @@ public sealed class ChatSession : IAsyncDisposable
                         var assistantText = pendingToolText;
                         pendingToolText = null;
                         _memory.AddTurn(ChatMemory.ToolRole, toolText, call.CallId, call.Name, call.Arguments,
-                            call.Result, toolReasoning);
+                            call.Result, toolReasoning, toolLabel: toolLabel, diffs: toolDiffs);
                         AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, toolText,
                             toolReasoning, assistantText);
                         TrimHistory();
@@ -904,6 +915,7 @@ public sealed class ChatSession : IAsyncDisposable
         finally
         {
             CurrentTurn.Value = null;
+            lock (_gate) _pendingDiffs.Clear();
             CollapseThinking();
 
             // 停止或出错时仍在「执行中」的工具记录标记为中断
@@ -1087,7 +1099,7 @@ public sealed class ChatSession : IAsyncDisposable
                 return;
             }
 
-            var action = request.ToolName == "run_shell_command" ? "执行命令" : "发送文件";
+            var action = ApprovalAction(request.ToolName);
             message = NewMessage(
                 ChatMessageKinds.Approval,
                 $"模型请求{action}，等待你的确认",
@@ -1208,6 +1220,22 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
+    private void OnFileEdited(ChatFileEdit edit)
+    {
+        if (!ReferenceEquals(CurrentTurn.Value, this) || _disposed) return;
+
+        // 工具在返回前记录差异；这里按 callId 缓存，等 LlmToolCallEvent 到达时并入工具气泡
+        lock (_gate) _pendingDiffs[edit.CallId] = edit.Diffs;
+    }
+
+    private IReadOnlyList<ChatFileDiffState>? TakePendingDiffs(string callId)
+    {
+        lock (_gate)
+        {
+            return _pendingDiffs.Remove(callId, out var diffs) && diffs.Count > 0 ? diffs : null;
+        }
+    }
+
     private static IReadOnlyList<UserAnswer> ParseAnswers(JsonElement payload)
     {
         var answers = new List<UserAnswer>();
@@ -1270,7 +1298,9 @@ public sealed class ChatSession : IAsyncDisposable
                     expanded: false,
                     time: turn.Time,
                     tool: new ChatToolState(turn.ToolName ?? string.Empty, turn.Arguments ?? string.Empty,
-                        turn.Result ?? string.Empty));
+                        turn.Result ?? string.Empty,
+                        turn.Label ?? ToolDisplay.Describe(turn.ToolName, turn.Arguments),
+                        turn.Diffs));
                 if (turn.InputTokens is { } toolInput)
                     bubble.Usage = new ChatUsageState(toolInput, turn.OutputTokens ?? 0,
                         turn.CachedInputTokens ?? 0, turn.Model, turn.Time);
@@ -1465,7 +1495,7 @@ public sealed class ChatSession : IAsyncDisposable
 
     // ===== 快照 =====
 
-    /// <summary>是否正在生成回复（侧栏据此显示加载图标；单次 bool 读取无需加锁）。</summary>
+    /// <summary>是否正在生成回复（侧栏据此显示加载图标）。字段为 volatile，读取无需再加锁。</summary>
     public bool IsGenerating => _generating;
 
     private ChatSessionSnapshot BuildSnapshotLocked() => new(
@@ -1650,18 +1680,41 @@ public sealed class ChatSession : IAsyncDisposable
 
     private static string FormatToolStarted(LlmToolCallStartedEvent call)
     {
-        var arguments = call.Arguments.Length == 0 ? string.Empty : $" {call.Arguments}";
+        var arguments = PreviewArguments(call.Arguments);
         return $"调用工具 {call.Name}{arguments}\n执行中…";
     }
 
     private static string FormatToolCall(LlmToolCallEvent call)
     {
-        var arguments = call.Arguments.Length == 0 ? string.Empty : $" {call.Arguments}";
+        var arguments = PreviewArguments(call.Arguments);
         var result = call.Result.Length > ToolResultMaxLength
             ? call.Result[..ToolResultMaxLength] + "…"
             : call.Result;
         return $"调用工具 {call.Name}{arguments}\n结果：{result}";
     }
+
+    /// <summary>工具参数的展示预览：编辑类工具可能带上整份文件内容，不能原样塞进消息文本。</summary>
+    private static string PreviewArguments(string arguments)
+    {
+        if (arguments.Length == 0) return string.Empty;
+        var preview = arguments.Length <= ToolArgumentsPreviewLength
+            ? arguments
+            : arguments[..ToolArgumentsPreviewLength] + "…";
+        return $" {preview}";
+    }
+
+    /// <summary>审批气泡里的动作文案：不同工具用不同动词，未知工具回退到通用说法。</summary>
+    private static string ApprovalAction(string toolName) => toolName switch
+    {
+        "run_shell_command" => "执行命令",
+        "write_file" => "写入文件",
+        "edit_file" => "编辑文件",
+        "send_attachment" => "发送文件",
+        "create_scheduled_task" => "新建定时任务",
+        "update_scheduled_task" => "修改定时任务",
+        "delete_scheduled_task" => "删除定时任务",
+        _ => "调用工具",
+    };
 
     private static string ApprovalModeString(ToolApprovalMode mode) =>
         mode == ToolApprovalMode.FullAccess ? ChatApprovalModes.Full : ChatApprovalModes.Manual;
@@ -1702,6 +1755,7 @@ public sealed class ChatSession : IAsyncDisposable
         _toolAccess.ApprovalRequested -= OnApprovalRequested;
         _questions.QuestionAsked -= OnQuestionAsked;
         _files.FileShown -= OnFileShown;
+        _files.FileEdited -= OnFileEdited;
 
         if (_turnTask is { } task)
         {

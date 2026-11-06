@@ -127,6 +127,26 @@ private static string Echo(
 
 参数上的 `[Description]` 会进入工具的 JSON Schema，模型据此填写参数，务必写清楚。
 
+### 3.1 自定义工具气泡标题（可选）
+
+插件可以给工具配一个展示标题，聊天里会显示成「回显 · hello」而不是「调用工具：echo」。做法是给 `AIFunctionFactory.Create` 传 `AIFunctionFactoryOptions`，并在 `AdditionalProperties` 里写 `display` 模板；`{参数名}` 会替换成模型实际传入的字符串（折叠空白、超长截断）：
+
+```csharp
+tools.Add(AIFunctionFactory.Create(
+    Echo,
+    new AIFunctionFactoryOptions
+    {
+        Name = "echo",
+        Description = "回显文本。",
+        AdditionalProperties = new Dictionary<string, object?>
+        {
+            ["display"] = "回显 · {text}",
+        },
+    }));
+```
+
+不设置 `display` 时，插件工具在气泡里回退为「调用工具：工具名」；模板展开为空时同样回退。内置工具与 MCP 工具不需要插件处理：宿主会按内置规则或 MCP 服务的 `title` 生成标题。
+
 ## 4. 响应后处理钩子（可选）
 
 除了工具，插件还可以对模型正文做流式后处理，重写三个钩子即可：

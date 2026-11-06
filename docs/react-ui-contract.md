@@ -116,6 +116,22 @@ interface AskOptionDto { text: string; description?: string }
 interface AskQuestionDto { text: string; options: AskOptionDto[] }
 interface AskStateDto { requestId: string; questions: AskQuestionDto[] }
 
+interface DiffLineDto { kind: 'add' | 'del' | 'ctx'; text: string }
+interface DiffHunkDto {
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLineDto[]
+}
+interface FileDiffDto {
+  path: string
+  added: number
+  removed: number
+  truncated?: boolean            // 文件过大或差异过长，只展示了一部分
+  hunks: DiffHunkDto[]
+}
+
 interface ChatMessageDto {
   id: string
   kind: ChatMessageKind
@@ -124,7 +140,13 @@ interface ChatMessageDto {
   expanded?: boolean            // 思考/工具折叠态
   pending?: boolean             // 审批等待中
   reasoningDone?: boolean
-  tool?: { name: string; args: string; result: string }
+  tool?: {
+    name: string
+    args: string
+    result: string
+    label?: string               // 气泡标题，如「运行命令 · npm test」；无时回退到「调用工具：name」
+    diffs?: FileDiffDto[]        // 编辑工具产生的文件差异；有值时气泡内显示 diff 卡片
+  }
   usage?: UsageDto
   attachment?: AttachmentDto
   approval?: {
@@ -511,3 +533,7 @@ type ChatOp =
 22. 会话存储迁到 `%USERPROFILE%\.souffle\sessions`：按工作区分组为 `<workspace-group>/<id>/`，索引改为根目录 `index.json`；不做旧 `%AppData%\SoufflePet` 会话与旧 `conversations.jsonl` 的自动迁移。其余数据（`profile.json`、统计、调度日志、窗口几何）仍在应用数据根目录。
 23. 输入卡底部工具条：附件 → 审批模式（都在输入框内左侧），模型选择靠右、紧邻发送按钮；工作区选择仍留在输入卡上方的上下文行。
 24. 消息元信息（时间、复制按钮、本轮用量）放在气泡外、气泡下方，跟随气泡左右对齐；复制按钮在整行 hover/focus 时显示。
+25. 工具气泡标题改为可定制的 `tool.label`：内置工具按「动词 · 参数」生成（如 `运行命令 · npm test`、`读取 · a.txt`），插件可用 `AIFunction.AdditionalProperties["display"]` 模板覆盖，MCP 工具使用服务端 `title`；`label` 随工具记录落盘，刷新/重启后仍保留，缺失时界面回退到「调用工具：名称」。
+26. 新增 `write_file` / `edit_file` 工具与 diff 显示：写入前按 `ToolApproval` 审批（审批详情带 diff 摘要），写入后用 Myers 行级 diff 把结构化 `FileDiffDto[]` 挂到 `tool.diffs`；完整 hunk 存在会话目录 `diffs/<id>.json`，`conversation.jsonl` 只存 `DiffFile` 引用，恢复会话时按需加载，避免会话文件膨胀。文件超过 200 KB / 3000 行或差异超过展示上限时只给截断提示；`run_shell_command` 改文件无法可靠还原 diff，不做推断。
+27. 编辑工具保留原文件编码：读取时记录 BOM 与实际编码（UTF-8 / UTF-16 / UTF-32），写回沿用；无 BOM 只接受 UTF-8。Diff 卡片默认收起，只显示文件头与 `+N −M`，点击后才渲染 hunk 行，避免长会话里堆出大量 DOM。
+28. 写文件改为「同目录临时文件 + `File.Replace`」原子替换，`write_file` / `edit_file` 覆盖已有文件前把旧版本备份到会话目录 `backups/`（同一路径只保留最近一份），删除会话时随目录进入 `.deleted`；工具结果会带回备份路径。

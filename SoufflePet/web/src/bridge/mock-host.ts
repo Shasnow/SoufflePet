@@ -360,6 +360,41 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
           name: 'read_file',
           args: '{"path":"D:/notes/table.csv"}',
           result: '日期,输入,缓存命中,输出\n11-03,12480,12300,640\n11-04,15020,14880,720',
+          label: '读取 · table.csv',
+        },
+      },
+      {
+        id: 'm-tool-edit',
+        kind: 'tool',
+        text: '调用工具 edit_file',
+        time: timeLabel(22),
+        expanded: false,
+        tool: {
+          name: 'edit_file',
+          args: '{"path":"D:/notes/table.md"}',
+          result: '已编辑 D:/notes/table.md（+2 −1）。',
+          label: '编辑 · table.md',
+          diffs: [
+            {
+              path: 'D:/notes/table.md',
+              added: 2,
+              removed: 1,
+              hunks: [
+                {
+                  oldStart: 1,
+                  oldLines: 3,
+                  newStart: 1,
+                  newLines: 4,
+                  lines: [
+                    { kind: 'ctx', text: '# 整理结果' },
+                    { kind: 'del', text: '缓存命中率 = 缓存读取 / 输入 token' },
+                    { kind: 'add', text: '缓存命中率 = 缓存读取 / 输入 token（含缓存写入）' },
+                    { kind: 'add', text: '示例：12300 / 12480 = 98.6%' },
+                  ],
+                },
+              ],
+            },
+          ],
         },
       },
       {
