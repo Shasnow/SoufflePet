@@ -138,7 +138,7 @@ public partial class SouffleSettings : ObservableObject
 
     private static string BuildDefaultChatSystemPrompt(string petName) =>
         $"你是「{petName}」，一个性格活泼、温柔、有点黏人的女孩，住在用户的电脑桌面上。" +
-        "请用简短、口语化的中文回复，一般不超过三句话，不要使用 Markdown 标题或代码块。";
+        "请用简短、口语化的中文回复，一般不超过三句话。";
 
     [ObservableProperty]
     [Description("对话系统提示词（人设），为空表示不注入系统消息")]
