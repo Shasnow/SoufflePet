@@ -981,10 +981,10 @@ public sealed class ChatTools
     }
 
     /// <summary>
-/// 读取文本文件并带回原编码：支持 UTF-8（有无 BOM）、UTF-16、UTF-32；
-/// 写回时沿用该编码，避免只改一行却把整个文件换成 UTF-8 无 BOM。
-/// </summary>
-internal static bool TryReadTextFile(
+    /// 读取文本文件并带回原编码：支持 UTF-8（有无 BOM）、UTF-16、UTF-32；
+    /// 写回时沿用该编码，避免只改一行却把整个文件换成 UTF-8 无 BOM。
+    /// </summary>
+    internal static bool TryReadTextFile(
         string fullPath,
         out string text,
         out Encoding encoding,

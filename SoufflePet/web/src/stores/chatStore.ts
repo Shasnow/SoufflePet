@@ -111,8 +111,7 @@ interface ChatState {
   setSnapshot: (session: ChatSnapshotDto | null, activeId: string | null) => void
   upsertSnapshot: (session: ChatSnapshotDto) => void
   applyOps: (sessionId: string, ops: ChatOp[]) => void
-  setDraft: (text: string) => void
-  setAsk: (ask: ChatSnapshotDto['ask']) => void
+  setDraft: (sessionId: string, text: string) => void
   removeSession: (id: string) => void
 }
 
@@ -137,27 +136,14 @@ export const useChatStore = create<ChatState>()((set) => ({
       if (!current) return state
       return { bySession: { ...state.bySession, [sessionId]: reduceChatOps(current, ops) } }
     }),
-  setDraft: (text) =>
+  setDraft: (sessionId, text) =>
     set((state) => {
-      if (!state.activeId) return state
-      const current = state.bySession[state.activeId]
+      const current = state.bySession[sessionId]
       if (!current) return state
       return {
         bySession: {
           ...state.bySession,
-          [state.activeId]: { ...current, draft: text },
-        },
-      }
-    }),
-  setAsk: (ask) =>
-    set((state) => {
-      if (!state.activeId) return state
-      const current = state.bySession[state.activeId]
-      if (!current) return state
-      return {
-        bySession: {
-          ...state.bySession,
-          [state.activeId]: { ...current, ask },
+          [sessionId]: { ...current, draft: text },
         },
       }
     }),

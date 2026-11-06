@@ -12,7 +12,7 @@ export function WorkspacePicker({ chat }: { chat: ChatSnapshotDto }) {
 
   const select = async (workspace: WorkspaceDto | null) => {
     try {
-      await invoke('chat.workspace.switch', { path: workspace?.path ?? '' })
+      await invoke('chat.workspace.switch', { sessionId: chat.sessionId, path: workspace?.path ?? '' })
       setOpen(false)
     } catch (error) {
       console.warn('switch workspace failed', error)

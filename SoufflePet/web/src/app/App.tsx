@@ -10,7 +10,6 @@ import { ChatPage } from '@/features/chat/ChatPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { ToastHost } from '@/ui/ToastHost'
 import { ErrorBoundary } from '@/ui/ErrorBoundary'
-import { AskPanel } from '@/features/chat/AskPanel'
 
 function BootScreen() {
   return (
@@ -81,7 +80,6 @@ export function App() {
       <AppShell>
         <RouteView />
       </AppShell>
-      <AskPanel />
       <ToastHost />
     </ErrorBoundary>
   )

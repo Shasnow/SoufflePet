@@ -19,6 +19,7 @@ import { UsageCapsule } from '@/ui/Usage'
 import { firstLine, formatClock, latestLine } from '@/ui/format'
 
 interface MessageItemProps {
+  sessionId: string
   message: ChatMessageDto
   streaming: boolean
 }
@@ -29,7 +30,7 @@ function reasoningHeader(message: ChatMessageDto): string {
   return message.reasoningDone ? '思考' : '思考中…'
 }
 
-function MessageItemInner({ message, streaming }: MessageItemProps) {
+function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
   const [copied, setCopied] = useState(false)
   const [deciding, setDeciding] = useState(false)
 
@@ -44,7 +45,7 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
   }
 
   const toggleExpand = () => {
-    void invoke('chat.msg.expand', { messageId: message.id, expanded: !message.expanded }).catch(
+    void invoke('chat.msg.expand', { sessionId, messageId: message.id, expanded: !message.expanded }).catch(
       () => undefined,
     )
   }
@@ -53,7 +54,7 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
     if (deciding) return
     setDeciding(true)
     try {
-      await invoke('chat.approval.decide', { messageId: message.id, approve })
+      await invoke('chat.approval.decide', { sessionId, messageId: message.id, approve })
     } catch (error) {
       console.warn('approval failed', error)
     } finally {
@@ -234,7 +235,7 @@ function MessageItemInner({ message, streaming }: MessageItemProps) {
               style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left' }}
               onClick={() => {
                 if (message.attachment?.path) {
-                  void invoke('chat.file.open', { path: message.attachment.path }).catch(() => undefined)
+                  void invoke('chat.file.open', { sessionId, path: message.attachment.path }).catch(() => undefined)
                 }
               }}
               title={message.attachment?.path}

@@ -67,6 +67,12 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private readonly SettingsApi _settingsApi;
     private bool _disposed;
 
+    /// <summary>session.updated 合帧窗口：并发生成时各会话会连续改摘要，窗口内只推一次全量列表。</summary>
+    private const int SessionPushDelayMs = 40;
+
+    private readonly object _sessionPushGate = new();
+    private bool _sessionPushScheduled;
+
     public ChatRpc(
         IAppWindowCommands window,
         ChatSessionManager sessions,
@@ -154,8 +160,11 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 var result = await _settingsApi.HandleAsync(method, parameters, cancellationToken).ConfigureAwait(false);
 
                 // 提供商/模型清单变化后，对话页的模型选择器要立即跟上（不必等下一次快照）
+                // 多会话并行时每个已打开会话都要刷新，不能只刷活动会话
                 if (method.StartsWith("settings.llm.", StringComparison.Ordinal))
-                    _sessions.ActiveSession?.RefreshModels();
+                {
+                    foreach (var session in _sessions.OpenSessions) session.RefreshModels();
+                }
                 return result;
             }
 
@@ -214,22 +223,27 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
 
                 case "chat.send":
                 {
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var ids = GetStringArray(parameters, "attachmentIds");
                     await session.SendAsync(GetString(parameters, "text") ?? string.Empty, ids, cancellationToken)
                         .ConfigureAwait(false);
                     return null;
                 }
                 case "chat.stop":
-                    await RequireSession().StopAsync().ConfigureAwait(false);
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.StopAsync().ConfigureAwait(false);
                     return null;
+                }
                 case "chat.draft":
-                    await RequireSession().SetDraftAsync(GetString(parameters, "text") ?? string.Empty)
-                        .ConfigureAwait(false);
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.SetDraftAsync(GetString(parameters, "text") ?? string.Empty).ConfigureAwait(false);
                     return null;
+                }
                 case "chat.attach.pick":
                 {
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var paths = await _window.PickFilesAsync().ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
                     if (paths.Count > 0) await session.AddAttachmentsAsync(paths).ConfigureAwait(false);
@@ -237,7 +251,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 }
                 case "chat.attach.paste":
                 {
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var image = await _window.ReadClipboardImageAsync().ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
                     if (image is null) throw new BridgeRpcException("invalid_argument", "剪贴板里没有图片");
@@ -246,30 +260,37 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 }
                 case "chat.attach.remove":
                 {
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var list = await session.RemoveAttachmentAsync(RequireString(parameters, "id"))
                         .ConfigureAwait(false);
                     return new { attachments = MapAttachments(list) };
                 }
                 case "chat.model.select":
-                    await RequireSession().SelectModelAsync(RequireString(parameters, "key")).ConfigureAwait(false);
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.SelectModelAsync(RequireString(parameters, "key")).ConfigureAwait(false);
                     return null;
+                }
                 case "chat.approval.mode":
                 {
                     var mode = GetString(parameters, "mode");
                     if (mode is not ("manual" or "full"))
                         throw new BridgeRpcException("invalid_argument", "审批模式只能是 manual 或 full");
-                    await RequireSession().SetApprovalModeAsync(mode).ConfigureAwait(false);
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.SetApprovalModeAsync(mode).ConfigureAwait(false);
                     return null;
                 }
                 case "chat.approval.decide":
-                    await RequireSession().DecideApprovalAsync(
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.DecideApprovalAsync(
                         RequireString(parameters, "messageId"),
                         GetBool(parameters, "approve")).ConfigureAwait(false);
                     return null;
+                }
                 case "chat.workspace.switch":
                 {
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var workspace = await session.SwitchWorkspaceAsync(
                         GetString(parameters, "path") ?? string.Empty).ConfigureAwait(false);
                     ResetMcpIfNeeded();
@@ -308,7 +329,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                         };
                     }
 
-                    var session = RequireSession();
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var workspaces = await session.DeleteWorkspaceAsync(path).ConfigureAwait(false);
                     return new { workspaces = MapWorkspaces(workspaces) };
                 }
@@ -318,20 +339,27 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                         && parameters.TryGetProperty("payload", out var value)
                             ? value.Clone()
                             : default;
-                    await RequireSession().SubmitAskAsync(
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.SubmitAskAsync(
                         RequireString(parameters, "requestId"),
                         RequireString(parameters, "action"),
                         payload).ConfigureAwait(false);
                     return null;
                 }
                 case "chat.msg.expand":
-                    await RequireSession().ExpandMessageAsync(
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    await session.ExpandMessageAsync(
                         RequireString(parameters, "messageId"),
                         GetBool(parameters, "expanded")).ConfigureAwait(false);
                     return null;
+                }
                 case "chat.file.open":
-                    OpenFile(RequireString(parameters, "path"));
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    OpenFile(session, RequireString(parameters, "path"));
                     return null;
+                }
                 case "chat.link.open":
                     OpenLink(RequireString(parameters, "url"));
                     return null;
@@ -349,6 +377,17 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private ChatSession RequireSession() =>
         _sessions.ActiveSession ?? throw new BridgeRpcException("not_found", "当前没有活动会话");
 
+    /// <summary>
+    /// chat.* 的目标会话：显式 sessionId 优先，缺省回退到活动会话（v1 向后兼容）。
+    /// 按 id 解析不会改变宿主的活动会话，多个会话可以并行交互。
+    /// </summary>
+    private async Task<ChatSession> ResolveSessionAsync(JsonElement parameters, CancellationToken cancellationToken)
+    {
+        var sessionId = GetString(parameters, "sessionId");
+        if (string.IsNullOrWhiteSpace(sessionId)) return RequireSession();
+        return await _sessions.ResolveAsync(sessionId, cancellationToken).ConfigureAwait(false);
+    }
+
     private void OnSessionOps(ChatOpBatch batch)
     {
         // 注意：这里由 ChatSession 在持锁（_gate）状态下同步调用。
@@ -357,8 +396,41 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         Raise("chat.ops", new { sessionId = batch.SessionId, ops = MapOps(batch.Ops) });
     }
 
-    private void OnSessionsChanged(ChatSessionListPayload payload) =>
-        Raise("session.updated", new { sessions = MapSessions(payload.Sessions), activeId = payload.ActiveId });
+    /// <summary>
+    /// 会话摘要变化（标题/消息数/更新时间…）只做「待推送」标记，40ms 内合并成一次全量推送。
+    /// 多会话并发时每轮会触发多次摘要变化，逐个推送会让序列化次数随会话数线性增长。
+    /// </summary>
+    private void OnSessionsChanged(ChatSessionListPayload payload)
+    {
+        lock (_sessionPushGate)
+        {
+            if (_disposed || _sessionPushScheduled) return;
+            _sessionPushScheduled = true;
+        }
+
+        _ = PushSessionsAsync();
+    }
+
+    private async Task PushSessionsAsync()
+    {
+        try
+        {
+            await Task.Delay(SessionPushDelayMs).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_sessionPushGate) _sessionPushScheduled = false;
+        }
+
+        if (_disposed) return;
+
+        // 推送时再取最新快照：合帧期间可能有更多摘要变化，payload 参数只是变更通知
+        Raise("session.updated", new
+        {
+            sessions = MapSessions(_sessions.Sessions),
+            activeId = _sessions.ActiveSessionId,
+        });
+    }
 
     private void Raise(string name, object? payload)
     {
@@ -610,10 +682,10 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     }
 
     /// <summary>
-    /// 只允许打开当前会话已登记的附件，或当前会话工作区内的文件。
+    /// 只允许打开该会话已登记的附件，或该会话工作区内的文件。
     /// 这是网页层唯一能触发本机 ShellExecute 的入口，必须比 settings/文件选择收得更窄。
     /// </summary>
-    private void OpenFile(string path)
+    private void OpenFile(ChatSession session, string path)
     {
         string full;
         try
@@ -625,7 +697,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
             throw new BridgeRpcException("invalid_argument", $"路径无效：{ex.Message}");
         }
 
-        if (!IsOpenablePath(full))
+        if (!IsOpenablePath(session, full))
             throw new BridgeRpcException("forbidden", "只能打开当前会话的附件或工作区内的文件");
         if (BlockedOpenExtensions.Contains(Path.GetExtension(full)))
             throw new BridgeRpcException("forbidden", "出于安全考虑，不能直接打开可执行/脚本文件");
@@ -640,11 +712,8 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         }
     }
 
-    private bool IsOpenablePath(string full)
+    private static bool IsOpenablePath(ChatSession session, string full)
     {
-        var session = _sessions.ActiveSession;
-        if (session is null) return false;
-
         var snapshot = session.Snapshot;
         foreach (var attachment in snapshot.Attachments)
         {

@@ -35,6 +35,12 @@ function Harness() {
   return <Composer chat={chat} hero />
 }
 
+// 指定会话渲染，用来验证「后台会话」的操作是否只落在自己身上
+function SessionHarness({ id }: { id: string }) {
+  const chat = useChatStore((state) => state.bySession[id])
+  return chat ? <Composer chat={chat} /> : null
+}
+
 describe('Composer', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockClear()
@@ -52,9 +58,47 @@ describe('Composer', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: false })
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('chat.send', {
+        sessionId: 's1',
         text: 'hello',
         attachmentIds: [],
       })
+    })
+  })
+
+  it('后台会话的发送只作用于自己的 sessionId', async () => {
+    const background: ChatSnapshotDto = { ...snapshot, sessionId: 's2' }
+    useChatStore.setState({
+      bySession: { s1: { ...snapshot, draft: '' }, s2: background },
+      activeId: 's2',
+    })
+    render(<SessionHarness id="s1" />)
+    const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+
+    fireEvent.change(input, { target: { value: '只给会话1' } })
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('chat.send', {
+        sessionId: 's1',
+        text: '只给会话1',
+        attachmentIds: [],
+      })
+    })
+    expect(useChatStore.getState().bySession.s2.draft).toBe('')
+  })
+
+  it('切换会话卸载时把防抖中的草稿补发给宿主', async () => {
+    useChatStore.setState({
+      bySession: { s1: { ...snapshot, draft: '' } },
+      activeId: 's1',
+    })
+    const { unmount } = render(<SessionHarness id="s1" />)
+    const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+
+    fireEvent.change(input, { target: { value: '草稿A' } })
+    unmount()
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('chat.draft', { sessionId: 's1', text: '草稿A' })
     })
   })
 
@@ -112,6 +156,34 @@ describe('Composer', () => {
     render(<Harness />)
     const chip = screen.getByLabelText('工作区')
     expect(chip.textContent).toContain('选择工作区')
+  })
+
+  it('询问工具内联在当前会话的输入卡上方，并带上 sessionId', async () => {
+    useChatStore.setState({
+      bySession: {
+        s1: {
+          ...snapshot,
+          ask: {
+            requestId: 'r1',
+            questions: [{ text: '选哪个？', options: [{ text: '选项A' }] }],
+          },
+        },
+      },
+      activeId: 's1',
+    })
+    render(<Harness />)
+
+    expect(document.querySelector('.composer-wrap .ask-card')).not.toBeNull()
+    expect(document.querySelector('.dialog-overlay')).toBeNull()
+
+    fireEvent.click(screen.getByText('选项A'))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        'chat.ask',
+        expect.objectContaining({ sessionId: 's1', requestId: 'r1', action: 'submit' }),
+      )
+    })
   })
 
   it('把审批放在附件右侧、模型放在发送左侧，且都在输入框内', () => {

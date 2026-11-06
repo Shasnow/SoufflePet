@@ -5,6 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useRef } from 'react'
 import type { SessionSummaryDto } from '@/bridge/contracts'
+import { useChatStore } from '@/stores/chatStore'
 import { formatRelative } from '@/ui/format'
 
 interface SessionItemProps {
@@ -18,6 +19,8 @@ interface SessionItemProps {
 export function SessionItem({ session, active, onOpen, onRename, onDelete }: SessionItemProps) {
   // 记录菜单是否由指针打开：关闭时据此决定是否把焦点还给触发按钮
   const menuByPointer = useRef(false)
+  // 询问工具在等这个会话回答时，用阻塞圆点替代加载图标
+  const blocked = useChatStore((state) => Boolean(state.bySession[session.id]?.ask))
 
   return (
     <div
@@ -34,7 +37,11 @@ export function SessionItem({ session, active, onOpen, onRename, onDelete }: Ses
         }
       }}
     >
-      {session.generating ? (
+      {blocked ? (
+        <span className="session-blocked" role="img" aria-label="等待你的回答" title="等待你的回答">
+          <span className="dot" />
+        </span>
+      ) : session.generating ? (
         <span className="session-spin" aria-hidden>
           <Loader2 size={12} />
         </span>

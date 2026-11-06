@@ -17,7 +17,7 @@ export function WelcomeHero({ chat }: { chat: ChatSnapshotDto }) {
       <div className="welcome-title">SoufflePet</div>
       <div className="welcome-tagline">和{pet.name}说点什么</div>
       <div className="welcome-composer">
-        <Composer chat={chat} hero />
+        <Composer key={`composer-${chat.sessionId}`} chat={chat} hero />
       </div>
     </div>
   )

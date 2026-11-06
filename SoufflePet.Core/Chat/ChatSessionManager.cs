@@ -51,6 +51,8 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     private static readonly ILogger Logger = Log.ForContext<ChatSessionManager>();
 
     private readonly object _gate = new();
+    /// <summary>索引落盘串行化：多会话并发生成会同时触发 Save，共享的 index.json.tmp 不能并发写。</summary>
+    private readonly object _saveGate = new();
     private readonly ChatSessionStore _store;
     private readonly ChatSessionFactory _factory;
     private readonly SouffleSettings _settings;
@@ -263,22 +265,34 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         return removed;
     }
 
+    /// <summary>
+    /// 按 id 取（必要时打开）会话，但不改变活动会话；<c>chat.*</c> 显式指定 sessionId 时用它。
+    /// 已打开的会话直接复用内存实例，不会重新读取对话文件。
+    /// </summary>
+    public async Task<ChatSession> ResolveAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ChatSession? session;
+        lock (_gate) _open.TryGetValue(sessionId, out session);
+        if (session is not null) return session;
+
+        return await Task.Run(() => OpenCore(sessionId), cancellationToken).ConfigureAwait(false)
+               ?? throw new ChatSessionException("not_found", "会话不存在");
+    }
+
+    /// <summary>当前已打开的会话快照（拷贝，调用方可在管理器锁外使用）。</summary>
+    public IReadOnlyList<ChatSession> OpenSessions
+    {
+        get
+        {
+            lock (_gate) return [.. _open.Values];
+        }
+    }
+
     public async Task<ChatSession> OpenAsync(string sessionId, CancellationToken cancellationToken)
     {
-        ChatSession? session;
-        lock (_gate)
-        {
-            _open.TryGetValue(sessionId, out session);
-            if (session is null && !_records.Any(record => record.Id == sessionId))
-                throw new ChatSessionException("not_found", "会话不存在");
-        }
-
-        if (session is null)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            session = await Task.Run(() => OpenCore(sessionId), cancellationToken).ConfigureAwait(false)
-                      ?? throw new ChatSessionException("not_found", "会话不存在");
-        }
+        var session = await ResolveAsync(sessionId, cancellationToken).ConfigureAwait(false);
 
         bool changed;
         lock (_gate)
@@ -567,14 +581,18 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
     private void Save()
     {
-        ChatSessionIndex index;
-        lock (_gate)
+        // 锁顺序固定为 _saveGate → _gate（所有 Save 调用点都在 _gate 之外）
+        lock (_saveGate)
         {
-            var active = _activeId is not null && !_drafts.Contains(_activeId) ? _activeId : null;
-            index = new ChatSessionIndex { ActiveSessionId = active, Sessions = PersistedLocked() };
-        }
+            ChatSessionIndex index;
+            lock (_gate)
+            {
+                var active = _activeId is not null && !_drafts.Contains(_activeId) ? _activeId : null;
+                index = new ChatSessionIndex { ActiveSessionId = active, Sessions = PersistedLocked() };
+            }
 
-        _store.Save(index);
+            _store.Save(index);
+        }
     }
 
     private static bool Contains(string? value, string query) =>

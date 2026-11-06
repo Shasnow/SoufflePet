@@ -235,32 +235,34 @@ interface AppSnapshotDto {
 | --- | --- | --- |
 | `session.list` | `{}` | `SessionSummaryDto[]` |
 | `session.new` | `{workspacePath?}` | `SessionSummaryDto`（草稿：不落盘、不进列表，首条消息后才出现在 `session.list`） |
-| `session.open` | `{sessionId}` | `ChatSnapshotDto` |
+| `session.open` | `{sessionId}` | `ChatSnapshotDto`（切换会话时页面应调用它来同步宿主活动会话；已打开的会话不会重新读盘） |
 | `session.rename` | `{sessionId,title}` | `SessionSummaryDto` |
 | `session.delete` | `{sessionId}` | `{sessions:SessionSummaryDto[],activeId:string|null}` |
 | `session.search` | `{query}` | `SessionSummaryDto[]` |
 
 #### 对话
 
+除 `chat.workspace.pick` / `chat.workspace.rename` / `chat.link.open` 外，对话方法都接受可选 `sessionId`：**显式 `sessionId` 决定操作对象，省略时回退宿主活动会话（v1 向后兼容）**。多个会话可以同时生成，`chat.ops` 按 `sessionId` 分发。
+
 | 方法 | 参数 | 返回 / 副作用 |
 | --- | --- | --- |
-| `chat.send` | `{text,attachmentIds?:string[]}` | `null`；事件 `chat.ops` |
-| `chat.stop` | `{}` | `null` |
-| `chat.draft` | `{text}` | `null`（100 ms 防抖） |
-| `chat.attach.pick` | `{}` | `{attachments:AttachmentDto[]}` |
-| `chat.attach.paste` | `{}` | `{attachments:AttachmentDto[]}` |
-| `chat.attach.remove` | `{id}` | `{attachments:AttachmentDto[]}` |
-| `chat.model.select` | `{key}` | `null` |
-| `chat.approval.mode` | `{mode:'manual'|'full'}` | `null` |
-| `chat.approval.decide` | `{messageId,approve:boolean}` | `null` |
-| `chat.workspace.switch` | `{path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
+| `chat.send` | `{sessionId?,text,attachmentIds?:string[]}` | `null`；事件 `chat.ops` |
+| `chat.stop` | `{sessionId?}` | `null` |
+| `chat.draft` | `{sessionId?,text}` | `null`（100 ms 防抖） |
+| `chat.attach.pick` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
+| `chat.attach.paste` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
+| `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
+| `chat.model.select` | `{sessionId?,key}` | `null` |
+| `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |
+| `chat.approval.decide` | `{sessionId?,messageId,approve:boolean}` | `null` |
+| `chat.workspace.switch` | `{sessionId?,path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
 | `chat.workspace.pick` | `{}` | `WorkspaceDto|null` |
-| `chat.workspace.delete` | `{path,deleteSessions?:boolean}` | `{workspaces:WorkspaceDto[]}` 或 `{sessions:SessionSummaryDto[],activeId:string\|null}`（`deleteSessions` 为 true 时组内会话一并移入回收站） |
+| `chat.workspace.delete` | `{sessionId?,path,deleteSessions?:boolean}` | `{workspaces:WorkspaceDto[]}` 或 `{sessions:SessionSummaryDto[],activeId:string\|null}`（`deleteSessions` 为 true 时组内会话一并移入回收站） |
 | `chat.workspace.rename` | `{path,name}` | `{workspaces:WorkspaceDto[]}`（仅改展示名，不改磁盘目录；`name` 为空则恢复目录名） |
-| `chat.ask` | `{requestId,action:'prev'|'next'|'select'|'custom'|'submit'|'cancel',payload?}` | `null` |
-| `chat.file.open` | `{path}` | `null`（仅存在文件；系统默认程序） |
+| `chat.ask` | `{sessionId?,requestId,action:'prev'|'next'|'select'|'custom'|'submit'|'cancel',payload?}` | `null` |
+| `chat.file.open` | `{sessionId?,path}` | `null`（仅存在文件；系统默认程序） |
 | `chat.link.open` | `{url}` | `null`（仅 http/https） |
-| `chat.msg.expand` | `{messageId,expanded:boolean}` | `null` |
+| `chat.msg.expand` | `{sessionId?,messageId,expanded:boolean}` | `null` |
 
 #### 窗口
 

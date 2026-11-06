@@ -18,7 +18,7 @@ const userMessage: ChatMessageDto = {
 
 describe('MessageItem', () => {
   it('把时间、复制按钮、用量放在气泡外', () => {
-    const { container } = render(<MessageItem message={userMessage} streaming={false} />)
+    const { container } = render(<MessageItem sessionId="s1" message={userMessage} streaming={false} />)
     const row = container.querySelector('.message-row')
     const bubble = row?.querySelector('.bubble')
     const meta = row?.querySelector('.bubble-meta')
@@ -47,7 +47,7 @@ describe('MessageItem', () => {
       },
     }
 
-    const { container } = render(<MessageItem message={message} streaming={false} />)
+    const { container } = render(<MessageItem sessionId="s1" message={message} streaming={false} />)
     const title = container.querySelector('.bubble-tool .collapse-title')
     expect(title?.textContent).toBe('运行命令 · npm test')
     expect(title?.getAttribute('title')).toBe('run_shell_command')

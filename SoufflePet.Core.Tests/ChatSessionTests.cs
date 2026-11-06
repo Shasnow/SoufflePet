@@ -364,6 +364,31 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ResolveAsyncDoesNotChangeActiveSession()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+
+        // 先让草稿发出一轮消息，得到一个已落盘的会话
+        var firstDraft = manager.ActiveSession!;
+        await firstDraft.SendAsync("旧会话", null, CancellationToken.None);
+        await firstDraft.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        var first = Assert.Single(manager.Sessions);
+
+        // 新建草稿会把活动会话切到草稿上
+        var draft = await manager.CreateAsync(null, CancellationToken.None);
+        var activeBefore = manager.ActiveSessionId;
+        Assert.Equal(draft.Id, activeBefore);
+
+        // 按 id 解析只返回目标实例，不改变活动会话（chat.* 带 sessionId 时走这条路）
+        var resolved = await manager.ResolveAsync(first.Id, CancellationToken.None);
+        Assert.Same(firstDraft, resolved);
+        Assert.Equal(activeBefore, manager.ActiveSessionId);
+
+        await manager.DisposeAsync();
+        _manager = null!;
+    }
+
+    [Fact]
     public async Task DraftSessionIsNotPersistedUntilFirstMessage()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));

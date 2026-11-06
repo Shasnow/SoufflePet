@@ -8,11 +8,12 @@ import type { ChatMessageDto } from '@/bridge/contracts'
 import { MessageItem } from './MessageItem'
 
 interface MessageListProps {
+  sessionId: string
   messages: ChatMessageDto[]
   generating: boolean
 }
 
-export function MessageList({ messages, generating }: MessageListProps) {
+export function MessageList({ sessionId, messages, generating }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   const lastMessage = messages[messages.length - 1]
@@ -74,6 +75,7 @@ export function MessageList({ messages, generating }: MessageListProps) {
                 }}
               >
                 <MessageItem
+                  sessionId={sessionId}
                   message={message}
                   streaming={generating && item.index === messages.length - 1 && message.kind === 'assistant'}
                 />

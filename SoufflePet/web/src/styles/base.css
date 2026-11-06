@@ -593,6 +593,24 @@
   }
 }
 
+/* 会话在等你回答（询问工具阻塞）时，用圆点替代加载图标 */
+.session-blocked {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-blocked .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--warning);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
 /* 空工作区里的占位新建入口 */
 .session-new {
   color: var(--text-3);
@@ -1575,6 +1593,63 @@
   gap: 6px;
   margin-bottom: 8px;
   flex-wrap: wrap;
+}
+
+/* 询问工具：内联在输入卡上方，只属于发起提问的会话，不遮罩整页 */
+.ask-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+  animation: slide-up 140ms ease;
+}
+
+.ask-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ask-card-title {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ask-card-step {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-card-question {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ask-card-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.ask-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ask-card-actions .spacer {
+  flex: 1;
 }
 
 .composer {

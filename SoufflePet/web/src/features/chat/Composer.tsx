@@ -9,6 +9,7 @@ import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useToastStore } from '@/stores/toastStore'
 import { ApprovalPicker } from './ApprovalPicker'
+import { AskPanel } from './AskPanel'
 import { ModelPicker } from './ModelPicker'
 import { WorkspacePicker } from './WorkspacePicker'
 
@@ -25,6 +26,8 @@ export function Composer({ chat, hero = false }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composing = useRef(false)
   const draftTimer = useRef<number | null>(null)
+  // 等待同步给宿主的草稿：卸载（切换会话）时补发一次，避免最后 100ms 的输入丢失
+  const pendingDraft = useRef<string | null>(null)
   const sessionId = chat.sessionId
 
   useEffect(() => {
@@ -37,22 +40,27 @@ export function Composer({ chat, hero = false }: ComposerProps) {
   useEffect(() => {
     return () => {
       if (draftTimer.current !== null) window.clearTimeout(draftTimer.current)
+      if (pendingDraft.current !== null) {
+        void invoke('chat.draft', { sessionId, text: pendingDraft.current }).catch(() => undefined)
+      }
     }
-  }, [])
+  }, [sessionId])
 
   const syncDraft = (value: string) => {
-    setDraft(value)
+    setDraft(sessionId, value)
+    pendingDraft.current = value
     if (draftTimer.current !== null) window.clearTimeout(draftTimer.current)
     draftTimer.current = window.setTimeout(() => {
       draftTimer.current = null
-      void invoke('chat.draft', { text: value }).catch(() => undefined)
+      pendingDraft.current = null
+      void invoke('chat.draft', { sessionId, text: value }).catch(() => undefined)
     }, 100)
   }
 
   const send = async () => {
     if (chat.generating) {
       try {
-        await invoke('chat.stop')
+        await invoke('chat.stop', { sessionId })
       } catch (error) {
         pushToast({ level: 'error', text: `停止失败：${error instanceof Error ? error.message : String(error)}` })
       }
@@ -64,6 +72,7 @@ export function Composer({ chat, hero = false }: ComposerProps) {
 
     try {
       await invoke('chat.send', {
+        sessionId,
         text,
         attachmentIds: chat.attachments.map((attachment) => attachment.id),
       })
@@ -72,7 +81,8 @@ export function Composer({ chat, hero = false }: ComposerProps) {
         window.clearTimeout(draftTimer.current)
         draftTimer.current = null
       }
-      setDraft('')
+      pendingDraft.current = null
+      setDraft(sessionId, '')
     } catch (error) {
       pushToast({ level: 'error', text: `发送失败：${error instanceof Error ? error.message : String(error)}` })
     }
@@ -82,6 +92,7 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     try {
       const result = await invoke<{ attachments: AttachmentDto[] }>(
         mode === 'pick' ? 'chat.attach.pick' : 'chat.attach.paste',
+        { sessionId },
       )
       applyOps(sessionId, [{ op: 'attachments', attachments: result.attachments }])
     } catch (error) {
@@ -91,7 +102,7 @@ export function Composer({ chat, hero = false }: ComposerProps) {
 
   const removeAttachment = async (id: string) => {
     try {
-      const result = await invoke<{ attachments: AttachmentDto[] }>('chat.attach.remove', { id })
+      const result = await invoke<{ attachments: AttachmentDto[] }>('chat.attach.remove', { sessionId, id })
       applyOps(sessionId, [{ op: 'attachments', attachments: result.attachments }])
     } catch (error) {
       pushToast({ level: 'error', text: `移除附件失败：${error instanceof Error ? error.message : String(error)}` })
@@ -110,6 +121,9 @@ export function Composer({ chat, hero = false }: ComposerProps) {
 
   return (
     <div className="composer-wrap">
+      {/* 询问工具属于当前会话：内联在输入卡上方，不遮罩页面 */}
+      {chat.ask ? <AskPanel sessionId={sessionId} ask={chat.ask} /> : null}
+
       {canPickWorkspace ? (
         <div className="composer-context">
           <WorkspacePicker chat={chat} />
@@ -181,7 +195,7 @@ export function Composer({ chat, hero = false }: ComposerProps) {
           <button type="button" className="composer-tool" aria-label="添加附件" onClick={() => void attach('pick')}>
             <Paperclip size={15} />
           </button>
-          <ApprovalPicker mode={chat.approvalMode} />
+          <ApprovalPicker sessionId={sessionId} mode={chat.approvalMode} />
           <span className="spacer" />
           <ModelPicker chat={chat} />
           <button

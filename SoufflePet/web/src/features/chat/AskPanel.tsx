@@ -4,30 +4,34 @@
 import { useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { AskStateDto } from '@/bridge/contracts'
-import { useChatStore } from '@/stores/chatStore'
-import { Dialog } from '@/ui/Dialog'
 
-export function AskPanel() {
-  const ask = useChatStore((state) =>
-    state.activeId ? state.bySession[state.activeId]?.ask ?? null : null,
-  )
-  if (!ask) return null
-  return <AskDialog key={ask.requestId} ask={ask} />
+interface AskPanelProps {
+  sessionId: string
+  ask: AskStateDto
 }
 
-function AskDialog({ ask }: { ask: AskStateDto }) {
+/**
+ * 询问工具的内联卡片：只渲染在发起提问的会话里，不遮罩整页。
+ * 切到其它会话时组件随对话区卸载，切回来再从该会话的 ask 状态恢复。
+ */
+export function AskPanel({ sessionId, ask }: AskPanelProps) {
+  return <AskCard key={ask.requestId} sessionId={sessionId} ask={ask} />
+}
+
+function AskCard({ sessionId, ask }: AskPanelProps) {
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
 
   const questions = ask.questions
   const current = questions[index]
-  const currentAnswer = answers[index]?.trim() ?? ''
+  const currentAnswer = answers[index] ?? ''
   const answered = questions.every((_, questionIndex) => (answers[questionIndex] ?? '').trim().length > 0)
   const label = current ? `${index + 1} / ${questions.length}` : ''
 
   const submit = async () => {
     try {
       await invoke('chat.ask', {
+        sessionId,
         requestId: ask.requestId,
         action: 'submit',
         payload: {
@@ -44,49 +48,24 @@ function AskDialog({ ask }: { ask: AskStateDto }) {
 
   const cancel = async () => {
     try {
-      await invoke('chat.ask', { requestId: ask.requestId, action: 'cancel' })
+      await invoke('chat.ask', { sessionId, requestId: ask.requestId, action: 'cancel' })
     } catch (error) {
       console.warn('cancel ask failed', error)
     }
   }
 
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) void cancel()
-      }}
-      title="需要你的确认"
-      description="回答完所有问题后提交给桌宠；也可以直接取消这次提问。"
-      className="ask-dialog"
-    >
+    <div className="ask-card" role="group" aria-label="需要你的确认">
+      <div className="ask-card-head">
+        <span className="ask-card-title">需要你的确认</span>
+        <span className="ask-card-step">{label}</span>
+      </div>
+
       {current ? (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
-            <div style={{ color: 'var(--text-2)', fontSize: 12.5 }}>{label}</div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                disabled={index === 0}
-                onClick={() => setIndex((value) => Math.max(0, value - 1))}
-              >
-                上一题
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                disabled={index >= questions.length - 1}
-                onClick={() => setIndex((value) => Math.min(questions.length - 1, value + 1))}
-              >
-                下一题
-              </button>
-            </div>
-          </div>
+          <div className="ask-card-question">{current.text}</div>
 
-          <div style={{ marginTop: 10, fontWeight: 600, color: 'var(--text-1)' }}>{current.text}</div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          <div className="ask-card-options">
             {current.options.map((option) => (
               <button
                 key={option.text}
@@ -112,30 +91,47 @@ function AskDialog({ ask }: { ask: AskStateDto }) {
             ))}
           </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label className="field-label" htmlFor="ask-custom">
-              或者自由输入
-            </label>
-            <textarea
-              id="ask-custom"
-              className="textarea"
-              rows={2}
-              value={currentAnswer}
-              placeholder="写下你的答案…"
-              onChange={(event) => setAnswers((previous) => ({ ...previous, [index]: event.target.value }))}
-            />
-          </div>
+          <textarea
+            className="textarea"
+            rows={2}
+            value={currentAnswer}
+            placeholder="或者自由输入答案…"
+            aria-label="自由输入答案"
+            onChange={(event) => setAnswers((previous) => ({ ...previous, [index]: event.target.value }))}
+          />
         </>
       ) : null}
 
-      <div className="dialog-actions">
-        <button type="button" className="btn btn-ghost" onClick={() => void cancel()}>
+      <div className="ask-card-actions">
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          disabled={index === 0}
+          onClick={() => setIndex((value) => Math.max(0, value - 1))}
+        >
+          上一题
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          disabled={!questions.length || index >= questions.length - 1}
+          onClick={() => setIndex((value) => Math.min(questions.length - 1, value + 1))}
+        >
+          下一题
+        </button>
+        <span className="spacer" />
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => void cancel()}>
           取消
         </button>
-        <button type="button" className="btn btn-primary" disabled={!answered} onClick={() => void submit()}>
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={!answered}
+          onClick={() => void submit()}
+        >
           提交
         </button>
       </div>
-    </Dialog>
+    </div>
   )
 }

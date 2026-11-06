@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { ChatSnapshotDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
@@ -23,6 +23,9 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
   const pushToast = useToastStore((state) => state.push)
   const [loading, setLoading] = useState(false)
   const [missing, setMissing] = useState(false)
+  // 已经向宿主确认过的会话：切换会话必须重新 open 一次，让宿主的活动会话与路由一致；
+  // 用 ref 去重，避免 upsertSnapshot 引起的重渲染再次触发 open。
+  const openedRef = useRef<string | null>(null)
 
   const targetId = sessionId ?? activeId ?? null
   const chat = useChatStore((state) =>
@@ -33,7 +36,8 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
     if (!targetId) return
     setActive(targetId)
     setChatActive(targetId)
-    if (chat?.sessionId === targetId) return
+    if (openedRef.current === targetId) return
+    openedRef.current = targetId
 
     let alive = true
     setLoading(true)
@@ -47,6 +51,8 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
       })
       .catch((error) => {
         if (!alive) return
+        // 允许下次重试同一个会话
+        openedRef.current = null
         setLoading(false)
         setMissing(true)
         pushToast({ level: 'error', text: `打开会话失败：${error instanceof Error ? error.message : String(error)}` })
@@ -54,7 +60,7 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
     return () => {
       alive = false
     }
-  }, [targetId, sessionId, chat?.sessionId, setActive, setChatActive, upsertSnapshot, pushToast])
+  }, [targetId, sessionId, setActive, setChatActive, upsertSnapshot, pushToast])
 
   if (!targetId) {
     return (
@@ -104,8 +110,13 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
         <WelcomeHero chat={chat} />
       ) : (
         <>
-          <MessageList key={chat.sessionId} messages={chat.messages} generating={chat.generating} />
-          <Composer chat={chat} />
+          <MessageList
+            key={`messages-${chat.sessionId}`}
+            sessionId={chat.sessionId}
+            messages={chat.messages}
+            generating={chat.generating}
+          />
+          <Composer key={`composer-${chat.sessionId}`} chat={chat} />
           <div className="composer-foot">
             <GlobalUsageButton usage={usage} />
           </div>

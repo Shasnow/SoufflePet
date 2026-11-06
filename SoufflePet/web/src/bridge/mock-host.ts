@@ -575,6 +575,12 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     draft = null
   }
 
+  // 与宿主一致：显式 sessionId 优先，缺省回退活动会话
+  function targetSessionId(payload: Record<string, unknown>): string | undefined {
+    const explicit = payload.sessionId
+    return typeof explicit === 'string' && explicit.length > 0 ? explicit : activeId ?? undefined
+  }
+
   function emitEvent(name: string, payload: Record<string, unknown>): void {
     rev += 1
     emit({ v: 1, type: 'event', name, payload: { ...payload, rev } })
@@ -856,7 +862,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.send': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             if (!sessionId) {
               fail(id, 'conflict', '没有活动会话')
               return
@@ -872,7 +878,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.stop': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             if (!sessionId) {
               response(id, null)
               return
@@ -907,7 +913,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
           }
           case 'chat.attach.pick':
           case 'chat.attach.paste': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -926,7 +932,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.attach.remove': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -938,7 +944,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.model.select': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -955,7 +961,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.approval.mode': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -968,7 +974,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.approval.decide': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             const message = chat?.messages.find((item) => item.id === payload.messageId)
             if (!chat || !message?.approval) {
@@ -984,7 +990,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.workspace.switch': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -1065,7 +1071,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
               return
             }
 
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -1080,7 +1086,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.ask': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             if (!chat) {
               fail(id, 'not_found', '会话不存在')
@@ -1099,7 +1105,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.msg.expand': {
-            const sessionId = activeId
+            const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined
             const message = chat?.messages.find((item) => item.id === payload.messageId)
             if (!chat || !message) {

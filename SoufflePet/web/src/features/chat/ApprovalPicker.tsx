@@ -22,14 +22,14 @@ const MODES: { id: ApprovalMode; label: string; description: string; icon: typeo
   },
 ]
 
-export function ApprovalPicker({ mode }: { mode: ApprovalMode }) {
+export function ApprovalPicker({ sessionId, mode }: { sessionId: string; mode: ApprovalMode }) {
   const [open, setOpen] = useState(false)
   const current = MODES.find((item) => item.id === mode) ?? MODES[0]
   const Icon = current.icon
 
   const select = async (next: ApprovalMode) => {
     try {
-      await invoke('chat.approval.mode', { mode: next })
+      await invoke('chat.approval.mode', { sessionId, mode: next })
       setOpen(false)
     } catch (error) {
       console.warn('set approval mode failed', error)

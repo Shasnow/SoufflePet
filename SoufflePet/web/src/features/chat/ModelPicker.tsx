@@ -19,7 +19,7 @@ export function ModelPicker({ chat }: { chat: ChatSnapshotDto }) {
 
   const select = async (key: string) => {
     try {
-      await invoke('chat.model.select', { key })
+      await invoke('chat.model.select', { sessionId: chat.sessionId, key })
       setOpen(false)
     } catch (error) {
       console.warn('select model failed', error)
