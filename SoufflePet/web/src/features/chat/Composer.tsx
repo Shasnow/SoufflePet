@@ -110,12 +110,9 @@ export function Composer({ chat, hero = false }: ComposerProps) {
 
   return (
     <div className="composer-wrap">
-      {canPickWorkspace || chat.generating ? (
+      {canPickWorkspace ? (
         <div className="composer-context">
-          {canPickWorkspace ? <WorkspacePicker chat={chat} /> : null}
-          {chat.generating ? (
-            <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>正在回复，可点右侧停止</span>
-          ) : null}
+          <WorkspacePicker chat={chat} />
         </div>
       ) : null}
 
