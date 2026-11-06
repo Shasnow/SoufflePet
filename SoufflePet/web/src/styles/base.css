@@ -1592,7 +1592,7 @@
   width: 100%;
   max-width: var(--composer-max);
   margin-inline: auto;
-  padding: 0 24px 14px;
+  padding: 0 24px;
 }
 
 .composer-context {
@@ -1790,7 +1790,7 @@
   width: 100%;
   max-width: var(--composer-max);
   margin-inline: auto;
-  padding: 8px 24px 4px;
+  padding: 6px 24px;
   color: var(--text-3);
   font-size: 11px;
 }
