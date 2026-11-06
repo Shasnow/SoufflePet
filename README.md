@@ -128,7 +128,7 @@
 | `browser-use` | 自带浏览器窗口（与 React 主窗口共用 WebView2 用户数据目录）：打开网页、读取页面、点击、输入、按键、滚动、后退、关闭与截图；点击 / 输入 / 按键走审批 |
 | `dsml-cleaner` | 清理模型正文中泄漏的 DSML 工具调用标记 |
 | `napcat` | 通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ，被 @ 时提醒桌宠并按会话回复 |
-| `qqbot` | 通过 QQ 官方机器人 API v2 接入 QQ：群聊 @ 机器人与单聊消息会提醒桌宠并按会话回复；需要 AppID / Secret，被动回复窗口用尽时可回退主动消息。发送者显示事件的 `author.username`（群聊事件通常有值，单聊事件可能为空），为空时直接显示 openid |
+| `qqbot` | 通过 QQ 官方机器人 API v2 接入 QQ：群聊 @ 机器人与单聊消息会提醒桌宠并按会话回复；需要 AppID / Secret，被动回复窗口用尽时可回退主动消息。发送者优先使用插件配置里的 `openid=昵称` 映射，其次事件的 `author.username`（群聊通常有值，单聊可能为空），都没有时显示 openid |
 | `loopback` | 本机调试用的回环消息平台：监听 `127.0.0.1:18765`，`GET /send?text=…` 把消息推给桌宠，`GET /replies` 读取桌宠的回复 |
 
 > `loopback` 只监听回环地址，用于验证消息链路与缓存命中率；不需要时在插件窗口里停用即可。

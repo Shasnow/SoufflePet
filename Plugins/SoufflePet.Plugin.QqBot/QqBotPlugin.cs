@@ -68,6 +68,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     private string _wsUrl = string.Empty;
     private HashSet<string> _allowedUsers = [];
     private HashSet<string> _allowedGroups = [];
+    private Dictionary<string, string> _openIdNames = new(StringComparer.Ordinal);
     private bool _wakeOnPrivateMessage = true;
     private bool _allowActiveMessage = true;
     private bool _downloadAttachments = true;
@@ -345,7 +346,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         var conversationId = $"private:{openId}";
         var messageId = RememberPassive(conversationId, QqJson.GetString(data, "id"));
         var content = QqJson.GetString(data, "content")?.Trim() ?? string.Empty;
-        var sender = EventUsername(data) ?? openId;
+        var sender = ResolveSender(openId, EventUsername(data));
         var line = await BuildLineAsync(conversationId, sender, content, data).ConfigureAwait(false);
 
         RecordMessage(conversationId, line, null);
@@ -362,7 +363,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
         var sender = QqJson.GetString(data, "author", "member_openid");
         var senderLabel = sender is { Length: > 0 }
-            ? EventUsername(data) ?? sender
+            ? ResolveSender(sender, EventUsername(data))
             : $"群#{ShortId(groupId)}";
         var conversationId = $"group:{groupId}";
         var messageId = RememberPassive(conversationId, QqJson.GetString(data, "id"));
@@ -413,6 +414,13 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
         if (additions.Count > 0) line = line + "\n" + string.Join('\n', additions);
         return line;
+    }
+
+    /// <summary>发送者显示名：手动映射优先，其次事件里的 username，最后回退 openid。</summary>
+    private string ResolveSender(string openId, string? username)
+    {
+        if (_openIdNames.TryGetValue(openId, out var mapped)) return mapped;
+        return username ?? openId;
     }
 
     /// <summary>
@@ -735,6 +743,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         _wsUrl = GetConfigString(config, "wsUrl", "wss://api.bot.qq.com/websocket/").Trim();
         _allowedUsers = ReadConfigList(config, "allowedUsers");
         _allowedGroups = ReadConfigList(config, "allowedGroups");
+        _openIdNames = ReadOpenIdNames(config);
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _allowActiveMessage = GetConfigBool(config, "allowActiveMessage", true);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
@@ -785,6 +794,35 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
             JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
             _ => fallback,
         };
+    }
+
+    /// <summary>读取 openid → 昵称映射：每行一个 openid=昵称，忽略空行与 # 开头的注释。</summary>
+    private static Dictionary<string, string> ReadOpenIdNames(JsonElement? config)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (config is not { ValueKind: JsonValueKind.Object } root
+            || !root.TryGetProperty("openIdNames", out var value)
+            || value.ValueKind != JsonValueKind.Array)
+        {
+            return map;
+        }
+
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) continue;
+
+            var text = item.GetString()?.Trim();
+            if (string.IsNullOrEmpty(text) || text.StartsWith('#')) continue;
+
+            var separator = text.IndexOf('=');
+            if (separator <= 0) continue;
+
+            var openId = text[..separator].Trim();
+            var name = text[(separator + 1)..].Trim();
+            if (openId.Length > 0 && name.Length > 0) map[openId] = name;
+        }
+
+        return map;
     }
 
     /// <summary>读取 openid 白名单：支持 config 里的数组，也兼容逗号或空白分隔的字符串。</summary>
