@@ -222,6 +222,30 @@ public sealed class ChatToolsTextFileTests : IDisposable
         Assert.Contains("已达到 1 条上限", limited);
     }
 
+    [Fact]
+    public void FindFilesMatchesByNameAndPathAndRespectsLimit()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "src", "deep"));
+        File.WriteAllText(Path.Combine(_root, "a.cs"), "x", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(_root, "b.txt"), "x", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(_root, "src", "c.cs"), "x", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(_root, "src", "deep", "d.cs"), "x", new UTF8Encoding(false));
+
+        var byName = ChatTools.FindFilesIn(_root, null, "*.cs", 10);
+        Assert.Contains("a.cs", byName);
+        Assert.Contains(Path.Combine("src", "c.cs"), byName);
+        Assert.Contains(Path.Combine("src", "deep", "d.cs"), byName);
+        Assert.DoesNotContain("b.txt", byName);
+
+        var byPath = ChatTools.FindFilesIn(_root, null, "src/**/*.cs", 10);
+        Assert.Contains(Path.Combine("src", "deep", "d.cs"), byPath);
+        Assert.DoesNotContain("a.cs", byPath);
+        Assert.DoesNotContain(Path.Combine("src", "c.cs"), byPath);
+
+        var limited = ChatTools.FindFilesIn(_root, null, "*.cs", 1);
+        Assert.Contains("已达到 1 个文件上限", limited);
+    }
+
     private static bool HasUtf8Bom(byte[] bytes) =>
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
 }

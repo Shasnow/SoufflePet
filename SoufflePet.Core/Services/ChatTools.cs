@@ -52,6 +52,10 @@ public sealed class ChatTools
     private const int SearchDefaultMaxResults = 60;
     private const int SearchMaxResults = 300;
 
+    /// <summary>文件名查找默认返回条数与上限。</summary>
+    private const int FindFilesDefaultMaxResults = 100;
+    private const int FindFilesMaxResults = 300;
+
     /// <summary>内容搜索最多扫描的文件数，防止在超大目录里长时间运行。</summary>
     private const int SearchMaxFiles = 4000;
 
@@ -243,6 +247,10 @@ public sealed class ChatTools
                 SearchFiles,
                 "search_files",
                 "在文件内容里查找关键词或正则，返回文件、行号与匹配行"),
+            AIFunctionFactory.Create(
+                FindFiles,
+                "find_files",
+                "按文件名/相对路径通配符查找文件，返回相对路径列表"),
             AIFunctionFactory.Create(
                 ListScheduledTasks,
                 "list_scheduled_tasks",
@@ -1108,6 +1116,98 @@ public sealed class ChatTools
         report.Append(builder);
         if (resultCapHit) report.Append($"\n…（已达到 {limit} 条上限，可能还有更多匹配）");
         if (regexTimedOut) report.Append("\n…（正则匹配超时，结果可能不完整）");
+        if (fileCapHit) report.Append($"\n…（已达到 {SearchMaxFiles} 个文件的扫描上限，结果可能不完整）");
+        return report.ToString();
+    }
+
+    /// <summary>
+    /// 按文件名/相对路径通配符查找文件：默认搜索整个会话工作区，只返回相对路径，不读文件内容。
+    /// </summary>
+    private string FindFiles(
+        [Description("文件名或相对路径通配符，支持 * 与 ?，如 *.cs、src/**/*.tsx")]
+        string pattern,
+        [Description("搜索根目录：目录或文件；相对路径按当前会话工作区解析，不传则搜索整个工作区")]
+        string? path = null,
+        [Description("最多返回多少个文件（默认 100，上限 300）")]
+        int maxResults = FindFilesDefaultMaxResults)
+    {
+        pattern = pattern.Trim();
+        if (pattern.Length == 0) return "文件匹配模式不能为空。";
+
+        var rawPath = string.IsNullOrWhiteSpace(path) ? WorkspaceContext.Current : path.Trim();
+        if (rawPath.StartsWith('@')) rawPath = rawPath[1..].Trim().Trim('"');
+
+        string root;
+        try
+        {
+            root = WorkspaceContext.Resolve(rawPath);
+        }
+        catch (Exception ex)
+        {
+            return $"搜索路径无效：{ex.Message}";
+        }
+
+        string? singleFile = null;
+        if (Directory.Exists(root))
+        {
+            // 目录：递归查找
+        }
+        else if (File.Exists(root))
+        {
+            singleFile = root;
+        }
+        else
+        {
+            return $"路径不存在：{root}";
+        }
+
+        return FindFilesIn(root, singleFile, pattern, maxResults);
+    }
+
+    /// <summary>文件名查找核心：root 为目录时递归遍历，singleFile 非空时只检查该文件。</summary>
+    internal static string FindFilesIn(string root, string? singleFile, string pattern, int maxResults)
+    {
+        var matcher = BuildGlobMatcher(pattern, caseSensitive: false);
+        if (matcher is null) return "文件匹配模式不能为空。";
+
+        var baseDirectory = singleFile is null ? root : Path.GetDirectoryName(singleFile) ?? root;
+        var limit = Math.Clamp(maxResults, 1, FindFilesMaxResults);
+        var builder = new StringBuilder();
+        var matches = 0;
+        var scanned = 0;
+        var resultCapHit = false;
+        var fileCapHit = false;
+
+        IEnumerable<string> candidates = singleFile is null ? EnumerateSearchFiles(root) : [singleFile];
+        foreach (var file in candidates)
+        {
+            if (scanned >= SearchMaxFiles)
+            {
+                fileCapHit = true;
+                break;
+            }
+
+            scanned++;
+            var relative = Path.GetRelativePath(baseDirectory, file);
+            if (!matcher(relative)) continue;
+
+            builder.Append('\n').Append(relative);
+            if (++matches >= limit)
+            {
+                resultCapHit = true;
+                break;
+            }
+        }
+
+        if (matches == 0)
+        {
+            var empty = $"没有找到匹配「{Truncate(pattern, 80)}」的文件（扫描 {scanned} 个文件）";
+            return empty + (fileCapHit ? $"\n…（最多只扫描 {SearchMaxFiles} 个文件）" : string.Empty);
+        }
+
+        var report = new StringBuilder($"找到 {matches} 个文件（扫描 {scanned} 个文件）：");
+        report.Append(builder);
+        if (resultCapHit) report.Append($"\n…（已达到 {limit} 个文件上限，可能还有更多）");
         if (fileCapHit) report.Append($"\n…（已达到 {SearchMaxFiles} 个文件的扫描上限，结果可能不完整）");
         return report.ToString();
     }

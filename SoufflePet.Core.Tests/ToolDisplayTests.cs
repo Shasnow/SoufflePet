@@ -24,6 +24,7 @@ public sealed class ToolDisplayTests
     [InlineData("write_file", "{\"path\":\"D:\\\\work\\\\a.txt\"}", "写入 · a.txt")]
     [InlineData("edit_file", "{\"path\":\"D:/work/b.cs\"}", "编辑 · b.cs")]
     [InlineData("search_files", "{\"query\":\"SearchText\"}", "查找 · SearchText")]
+    [InlineData("find_files", "{\"pattern\":\"*.cs\"}", "查找文件 · *.cs")]
     [InlineData("list_plugins", "{}", "列出插件")]
     [InlineData("set_plugin_enabled", "{\"pluginId\":\"browser-use\",\"enabled\":true}", "启用插件 · browser-use")]
     [InlineData("set_plugin_enabled", "{\"pluginId\":\"browser-use\",\"enabled\":false}", "停用插件 · browser-use")]

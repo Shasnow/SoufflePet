@@ -81,6 +81,7 @@ public static class ToolDisplay
             "write_file" => Compose("写入", FileName(ReadString(root, "path"))),
             "edit_file" => Compose("编辑", FileName(ReadString(root, "path"))),
             "search_files" => Compose("查找", ReadString(root, "query")),
+            "find_files" => Compose("查找文件", ReadString(root, "pattern")),
             "list_scheduled_tasks" => "列出定时任务",
             "create_scheduled_task" => Compose("新建任务", ReadString(root, "name")),
             "update_scheduled_task" => Compose("修改任务", ReadString(root, "id")),
