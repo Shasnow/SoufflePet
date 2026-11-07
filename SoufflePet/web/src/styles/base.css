@@ -1650,41 +1650,6 @@ body.is-resizing-sidebar .sidebar {
   margin-bottom: 4px;
 }
 
-/* 只有会话统计的标题需要在右侧补一块次要说明，其他 Popover 保持单行标题 */
-.usage-title-split {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.usage-title .meta {
-  color: var(--text-3);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.session-stats-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding-inline: 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-1);
-  color: var(--text-2);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.session-stats-btn:hover {
-  color: var(--text-1);
-  border-color: var(--line-strong);
-}
-
 /* ============================== 输入卡 ============================== */
 
 .composer-wrap {
@@ -1893,10 +1858,6 @@ body.is-resizing-sidebar .sidebar {
   padding: 6px 24px;
   color: var(--text-3);
   font-size: 11px;
-}
-
-.composer-foot.has-session-stats {
-  justify-content: space-between;
 }
 
 .usage-foot-btn {

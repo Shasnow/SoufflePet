@@ -39,9 +39,7 @@ public sealed class ChatSessionFactory(
         files,
         statistics,
         // 会话换工作区时，目录跟着换到对应工作区分组
-        workspacePath => store.SessionDirectory(record.Id, workspacePath),
-        record.Usage,
-        record.Stats);
+        workspacePath => store.SessionDirectory(record.Id, workspacePath));
 }
 
 /// <summary>
@@ -662,8 +660,6 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
                 MessageCount = summary.MessageCount,
                 LastUserText = summary.LastUserText,
                 ModelKey = summary.ModelKey,
-                Usage = summary.Usage,
-                Stats = summary.Stats,
             };
 
             // 草稿的第一条消息已经进了会话：落盘并进入侧栏列表

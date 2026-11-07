@@ -152,49 +152,6 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UsageIncludesSessionStats()
-    {
-        var llm = new FakeLlm((_, _, _) => Streams(
-            new LlmTextDelta("你好"),
-            new LlmUsageEvent(11, 3, 2, Steps: 2, ModelMilliseconds: 12_000,
-                FirstTokenMilliseconds: 5_000, FirstTokenSamples: 2, GenerationMilliseconds: 1_000)));
-        var manager = CreateManager(llm);
-        var session = manager.ActiveSession!;
-
-        await session.SendAsync("在吗", null, CancellationToken.None);
-        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
-
-        var usage = session.Snapshot.Usage!;
-        Assert.Equal(1, usage.Rounds);
-        Assert.Equal(2, usage.Steps);
-        Assert.Equal(12.0, usage.ModelSeconds, 3);
-        Assert.Equal(2.5, usage.AverageFirstTokenSeconds, 3);
-        Assert.Equal(3.0, usage.TokensPerSecond, 3);
-
-        // 累计统计随会话索引落盘，重启打开后继续可用
-        var id = session.Id;
-        await manager.DisposeAsync();
-        _manager = null!;
-
-        var reloaded = new ChatSessionManager(_settings, _factory, _store);
-        try
-        {
-            var opened = await reloaded.OpenAsync(id, CancellationToken.None);
-            var restored = opened.Snapshot.Usage!;
-            Assert.Equal(1, restored.Rounds);
-            Assert.Equal(2, restored.Steps);
-            Assert.Equal(11, restored.InputTokens);
-            Assert.Equal(12.0, restored.ModelSeconds, 3);
-            Assert.Equal(2.5, restored.AverageFirstTokenSeconds, 3);
-            Assert.Equal(3.0, restored.TokensPerSecond, 3);
-        }
-        finally
-        {
-            await reloaded.DisposeAsync();
-        }
-    }
-
-    [Fact]
     public async Task ApprovalDecisionAllowsToolToContinue()
     {
         var llm = new FakeLlm((_, _, ct) => ApprovalStreamAsync(ct));

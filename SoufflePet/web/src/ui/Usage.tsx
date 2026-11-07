@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-import { Activity, Gauge } from 'lucide-react'
+import { Gauge } from 'lucide-react'
 import type { GlobalUsageDto, UsageDto } from '@/bridge/contracts'
 import { Popover } from './Popover'
-import { formatCompactTokens, formatDuration, formatPercent, formatSeconds, formatTokens, formatTps } from './format'
+import { formatCompactTokens, formatDuration, formatPercent, formatTokens } from './format'
 
 function hitRate(usage: UsageDto): number {
   return usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : 0
@@ -30,35 +30,6 @@ export function UsageCapsule({ usage }: { usage: UsageDto }) {
       <UsageRow label="未缓存输入" value={formatTokens(Math.max(0, usage.inputTokens - usage.cachedInputTokens))} />
       <UsageRow label="缓存读取" value={formatTokens(usage.cachedInputTokens)} />
       <UsageRow label="输出" value={formatTokens(usage.outputTokens)} />
-    </Popover>
-  )
-}
-
-/** 会话统计：底部胶囊展示轮数/步数/速度，点开显示模型与工具耗时、TTFT、TPS。 */
-export function SessionStatsButton({ usage }: { usage: UsageDto }) {
-  const rounds = usage.rounds ?? 0
-  const steps = usage.steps ?? 0
-  const tpsLabel = formatTps(Math.max(0, usage.tokensPerSecond ?? 0))
-
-  return (
-    <Popover
-      side="top"
-      align="start"
-      trigger={
-        <button type="button" className="session-stats-btn" aria-label="会话统计">
-          <Activity size={11} />
-          {`${rounds} 轮 ${steps} 步 · ${tpsLabel}`}
-        </button>
-      }
-    >
-      <div className="usage-title usage-title-split">
-        <span>会话统计</span>
-        <span className="meta">{`${rounds} 轮 ${steps} 步`}</span>
-      </div>
-      <UsageRow label="模型用时" value={formatSeconds(usage.modelSeconds ?? 0)} />
-      <UsageRow label="工具调用用时" value={formatSeconds(usage.toolSeconds ?? 0)} />
-      <UsageRow label="首 token 平均（TTFT）" value={formatSeconds(usage.averageFirstTokenSeconds ?? 0)} />
-      <UsageRow label="输出速度（TPS）" value={tpsLabel} />
     </Popover>
   )
 }

@@ -532,8 +532,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
     private static UsageDto? MapUsage(ChatUsageState? usage) => usage is null
         ? null
         : new UsageDto(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.Model,
-            usage.Time?.ToString("O"), usage.Rounds, usage.Steps, usage.ModelSeconds, usage.ToolSeconds,
-            usage.AverageFirstTokenSeconds, usage.TokensPerSecond);
+            usage.Time?.ToString("O"));
 
     private static AskStateDto? MapAsk(ChatAskState? ask) => ask is null
         ? null

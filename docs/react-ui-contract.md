@@ -101,15 +101,6 @@ interface UsageDto {
   cachedInputTokens: number
   model?: string        // provider/modelId
   time?: string         // ISO
-  // 以下为会话级统计，随会话索引持久化、重启后继续累加。
-  // ChatRpc 用同一个 MapUsage 映射快照/气泡/事件，所以消息气泡的 usage 也会带上这些字段，
-  // 只是气泡只填 token：rounds/steps/各种耗时都是 0
-  rounds?: number                  // 用户轮数（累计）
-  steps?: number                   // 模型请求数（含工具循环，累计）
-  modelSeconds?: number            // 模型请求累计耗时
-  toolSeconds?: number             // 工具执行累计耗时（不含审批等待）
-  averageFirstTokenSeconds?: number
-  tokensPerSecond?: number         // 输出 token / 首 token 后的生成耗时
 }
 
 interface ChatModelDto {

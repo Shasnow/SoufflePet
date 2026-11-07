@@ -58,23 +58,6 @@ export function formatPercent(value: number, digits = 1): string {
   return `${(value * 100).toFixed(digits)}%`
 }
 
-/** 会话统计用的耗时：小于 1 分钟保留 1 位小数秒，更长换算成分钟/小时。 */
-export function formatSeconds(seconds: number): string {
-  const value = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
-  if (value < 60) return `${value.toFixed(1)} 秒`
-  if (value < 3600) return `${(value / 60).toFixed(1)} 分钟`
-  const hours = Math.floor(value / 3600)
-  const minutes = Math.round((value % 3600) / 60)
-  return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`
-}
-
-/** 输出速度：低速保留小数，避免把 0.4 tok/s 显示成 0 tok/s。 */
-export function formatTps(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 tok/s'
-  const speed = value < 1 ? value.toFixed(2) : value < 10 ? value.toFixed(1) : `${Math.round(value)}`
-  return `${speed} tok/s`
-}
-
 export function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0 秒'
   if (seconds < 60) return `${Math.round(seconds)} 秒`

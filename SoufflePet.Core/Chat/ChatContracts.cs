@@ -35,34 +35,13 @@ public sealed record ChatAttachmentState(
     string? Url = null,
     long? Size = null);
 
-/// <summary>
-/// 会话级累计计时的原始计数：持久化后重启可继续累加，派生值（TTFT 平均、TPS）在快照里现算。
-/// </summary>
-public sealed record ChatSessionStatsState(
-    int Rounds = 0,
-    int Steps = 0,
-    double ModelMilliseconds = 0,
-    double ToolMilliseconds = 0,
-    double FirstTokenMilliseconds = 0,
-    int FirstTokenSamples = 0,
-    double GenerationMilliseconds = 0);
-
-/// <summary>
-/// 一条消息的 token 用量；会话快照里还会带上会话级统计（轮数、步数、耗时、TTFT、TPS）。
-/// 消息气泡只读取 token 字段，其余字段默认为 0。
-/// </summary>
+/// <summary>一条消息的 token 用量。</summary>
 public sealed record ChatUsageState(
     long InputTokens,
     long OutputTokens,
     long CachedInputTokens,
     string? Model = null,
-    DateTimeOffset? Time = null,
-    int Rounds = 0,
-    int Steps = 0,
-    double ModelSeconds = 0,
-    double ToolSeconds = 0,
-    double AverageFirstTokenSeconds = 0,
-    double TokensPerSecond = 0);
+    DateTimeOffset? Time = null);
 
 /// <summary>模型选择项。</summary>
 public sealed record ChatModelState(string Key, string Provider, string Name, string ModelId);
@@ -161,8 +140,6 @@ public sealed record SessionRecord(
     int MessageCount,
     string? LastUserText,
     string? ModelKey,
-    ChatUsageState? Usage = null,
-    ChatSessionStatsState? Stats = null,
     /// <summary>会话用途；后台事件按用途查找专用会话，不再跟随用户当前选中的会话。</summary>
     SessionKind Kind = SessionKind.Normal);
 
@@ -173,9 +150,7 @@ public sealed record ChatSessionSummary(
     DateTimeOffset UpdatedAt,
     int MessageCount,
     string? LastUserText,
-    string? ModelKey,
-    ChatUsageState? Usage = null,
-    ChatSessionStatsState? Stats = null);
+    string? ModelKey);
 
 /// <summary>一批会话增量事件；宿主给整个事件加全局 rev。</summary>
 public sealed record ChatOpBatch(string SessionId, IReadOnlyList<ChatOp> Ops);

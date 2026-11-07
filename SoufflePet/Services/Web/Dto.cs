@@ -44,13 +44,7 @@ public sealed record UsageDto(
     long OutputTokens,
     long CachedInputTokens,
     string? Model = null,
-    string? Time = null,
-    int Rounds = 0,
-    int Steps = 0,
-    double ModelSeconds = 0,
-    double ToolSeconds = 0,
-    double AverageFirstTokenSeconds = 0,
-    double TokensPerSecond = 0);
+    string? Time = null);
 
 public sealed record ChatModelDto(string Key, string Provider, string Name, string ModelId);
 
