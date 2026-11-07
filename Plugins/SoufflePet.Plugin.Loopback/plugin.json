@@ -3,7 +3,7 @@
   "name": "本地回环消息平台（测试）",
   "version": "1.0.0",
   "author": "SoufflePet",
-  "description": "在 127.0.0.1 上监听一个极简 HTTP 端口：GET /send?text=… 把文本当作平台消息推给桌宠，桌宠用 send_message 发出的回复记录在 /replies 里。用于本机调试与缓存命中率测试。",
+  "description": "在 127.0.0.1 上监听一个极简 HTTP 端口：GET /send?text=… 把文本当作平台消息推给桌宠，桌宠用 send_platform_message 发出的回复记录在 /replies 里。用于本机调试与缓存命中率测试。",
   "assembly": "SoufflePet.Plugin.Loopback.dll",
   "entryType": "SoufflePet.Plugins.Loopback.LoopbackPlugin",
   "timeoutSeconds": 30,

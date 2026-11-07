@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
@@ -65,6 +66,43 @@ public class PlatformService : IDisposable
     {
         Detach(platform);
         lock (_sync) _platforms.RemoveAll(p => ReferenceEquals(p, platform));
+    }
+
+    /// <summary>列出所有消息平台当前已知的会话；返回可直接回传给模型的文本。</summary>
+    public async Task<string> ListConversationsAsync()
+    {
+        var available = Platforms;
+        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+
+        var builder = new StringBuilder();
+        foreach (var platform in available)
+        {
+            IReadOnlyList<PlatformConversation> conversations;
+            try
+            {
+                conversations = await platform.GetConversationsAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "list conversations from {Platform} failed", platform.Id);
+                builder.Append("平台「").Append(platform.Id).Append("」读取会话失败：")
+                    .Append(ex.Message).Append('\n');
+                continue;
+            }
+
+            builder.Append("平台「").Append(platform.Id).Append("」")
+                .Append(conversations.Count == 0 ? "暂无已知会话" : $"共 {conversations.Count} 个会话")
+                .Append("：\n");
+            foreach (var conversation in conversations)
+            {
+                builder.Append("- ").Append(conversation.ConversationId);
+                if (!string.IsNullOrWhiteSpace(conversation.DisplayName))
+                    builder.Append("（").Append(conversation.DisplayName.Trim()).Append('）');
+                builder.Append('\n');
+            }
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     /// <summary>读取指定平台某个会话的最近消息；返回可直接回传给模型的文本。</summary>

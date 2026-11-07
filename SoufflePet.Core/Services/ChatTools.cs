@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Serilog;
 using SoufflePet.Core.Chat;
@@ -201,16 +194,20 @@ public sealed class ChatTools
                 "reload_plugins",
                 "重新扫描插件目录，发现新增或移除的插件；已加载插件保持运行状态"),
             AIFunctionFactory.Create(
-                GetMessages,
-                "get_messages",
+                ListPlatformConversations,
+                "list_platform_conversations",
+                "列出所有消息平台上当前已知的会话（群聊 / 私聊）及其会话 id"),
+            AIFunctionFactory.Create(
+                GetPlatformMessages,
+                "get_platform_messages",
                 "读取消息平台某个会话的最近消息"),
             AIFunctionFactory.Create(
-                SendMessage,
-                "send_message",
+                SendPlatformMessage,
+                "send_platform_message",
                 "向消息平台的某个会话发送消息"),
             AIFunctionFactory.Create(
-                SendAttachment,
-                "send_attachment",
+                SendPlatformAttachment,
+                "send_platform_attachment",
                 "向消息平台的某个会话发送文件"),
             AIFunctionFactory.Create(
                 ShowFile,
@@ -752,8 +749,12 @@ public sealed class ChatTools
     private static string UnrecognizedKind(string? kind) =>
         $"无法识别的调度方式「{kind}」，请用 once / daily / weekly / interval。";
 
+    /// <summary>列出所有消息平台当前已知的会话（群聊 / 私聊）及其会话 id。</summary>
+    private Task<string> ListPlatformConversations()
+        => _platforms.ListConversationsAsync();
+
     /// <summary>读取指定会话的最近消息；会话 id 取自平台消息前缀（如 group:12345、private:777）。</summary>
-    private Task<string> GetMessages(
+    private Task<string> GetPlatformMessages(
         [Description("消息平台 id，例如 napcat")]
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777")]
@@ -763,7 +764,7 @@ public sealed class ChatTools
         => _platforms.GetMessagesAsync(platform, conversation, limit);
 
     /// <summary>向指定会话发送消息。</summary>
-    private Task<string> SendMessage(
+    private Task<string> SendPlatformMessage(
         [Description("消息平台 id，例如 napcat")]
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777")]
@@ -773,7 +774,7 @@ public sealed class ChatTools
         => _platforms.SendMessageAsync(platform, conversation, message);
 
     /// <summary>向指定会话发送图片或文件；发送前按审批规则向用户确认。</summary>
-    private async Task<string> SendAttachment(
+    private async Task<string> SendPlatformAttachment(
         [Description("消息平台 id，例如 napcat")]
         string platform,
         [Description("会话 id，形如 group:12345 或 private:777")]

@@ -88,6 +88,7 @@ public sealed class PluginService : IPluginService
     private readonly PlatformService _platformService;
     private readonly ChatToolAccess _toolAccess;
     private readonly string _configDirectory;
+    private readonly string _dataDirectory;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly List<PluginDescriptor> _descriptors = [];
@@ -110,6 +111,8 @@ public sealed class PluginService : IPluginService
         // 配置独立存放：插件目录（尤其是内置插件的 bin/plugins）会在重新构建时被覆盖；
         // 与其它用户数据一样走 SOUFFLEPET_DATA_DIR，便于验收隔离。
         _configDirectory = Path.Combine(ChatMemory.SouffleHome, "plugin-configs");
+        // 插件运行期数据（会话缓存等）与配置分开，重建插件或清空配置都不会丢缓存。
+        _dataDirectory = Path.Combine(ChatMemory.SouffleHome, "plugin-data");
         Discover();
         _ = Task.Run(PreloadEnabledAsync);
     }
@@ -604,6 +607,7 @@ public sealed class PluginService : IPluginService
             var pluginContext = new PluginContext(
                 descriptor.Manifest.Id,
                 descriptor.Directory,
+                Path.Combine(_dataDirectory, descriptor.Manifest.Id),
                 descriptor.Manifest.Config,
                 _loggerFactory.CreateLogger($"Plugin.{id}"));
             await instance.InitializeAsync(pluginContext, cancellationToken).ConfigureAwait(false);

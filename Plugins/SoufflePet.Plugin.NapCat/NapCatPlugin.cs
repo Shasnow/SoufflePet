@@ -129,6 +129,13 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private readonly Queue<string> _quoteLabelOrder = new();
     private readonly CancellationTokenSource _cts = new();
 
+    /// <summary>会话缓存落盘间隔；只在有变更时写文件。</summary>
+    private static readonly TimeSpan CacheSaveInterval = TimeSpan.FromSeconds(5);
+    private const string ConversationCacheFileName = "conversations.json";
+
+    private Timer? _cacheSaveTimer;
+    private volatile bool _cacheDirty;
+
     private ClientWebSocket? _socket;
     private Task? _pump;
 
@@ -173,6 +180,12 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     protected override Task OnInitializedAsync(CancellationToken cancellationToken)
     {
         ReadConfiguration();
+        LoadConversationCache();
+        _cacheSaveTimer = new Timer(
+            _ => SaveConversationCacheIfDirty(),
+            null,
+            CacheSaveInterval,
+            CacheSaveInterval);
 
         if (!Uri.TryCreate(_wsUrl, UriKind.Absolute, out var uri) || (uri.Scheme != "ws" && uri.Scheme != "wss"))
         {
@@ -524,6 +537,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         }
 
         foreach (var completion in pending) completion.TrySetCanceled();
+
+        _cacheSaveTimer?.Dispose();
+        _cacheSaveTimer = null;
+        SaveConversationCacheIfDirty();
 
         _cts.Dispose();
         try
@@ -1118,6 +1135,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             _lastActive[conversationId] = DateTimeOffset.Now;
             TrimConversations();
         }
+
+        _cacheDirty = true;
     }
 
     /// <summary>会话数超过上限时，淘汰最久未活跃的会话及其历史与名称（调用方需持有锁）。</summary>
@@ -1144,6 +1163,86 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             _history.Remove(oldest);
             _conversationNames.Remove(oldest);
             _lastActive.Remove(oldest);
+        }
+    }
+
+    /// <summary>会话缓存的落盘路径。</summary>
+    private string ConversationCachePath
+        => Path.Combine(Context.DataDirectory, ConversationCacheFileName);
+
+    /// <summary>启动时恢复会话列表、显示名与最近消息，重启后仍能按会话读取。</summary>
+    private void LoadConversationCache()
+    {
+        var path = ConversationCachePath;
+        if (!File.Exists(path)) return;
+
+        try
+        {
+            var cache = JsonSerializer.Deserialize<ConversationCache>(File.ReadAllText(path));
+            if (cache is null) return;
+
+            var restored = 0;
+            lock (_sync)
+            {
+                foreach (var entry in cache.Conversations)
+                {
+                    if (string.IsNullOrWhiteSpace(entry.Id)) continue;
+
+                    _history[entry.Id] = [.. (entry.Messages ?? [])];
+                    if (!string.IsNullOrWhiteSpace(entry.Name)) _conversationNames[entry.Id] = entry.Name;
+                    _lastActive[entry.Id] = entry.LastActive;
+                    restored++;
+                }
+
+                TrimConversations();
+            }
+
+            Context.Logger.LogInformation("已恢复 {Count} 个 NapCat 会话缓存", restored);
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogWarning(ex, "读取 NapCat 会话缓存失败，将使用空缓存");
+        }
+    }
+
+    /// <summary>有变更时把会话缓存写入磁盘；由定时器与关闭流程调用。</summary>
+    private void SaveConversationCacheIfDirty()
+    {
+        if (!_cacheDirty) return;
+        _cacheDirty = false;
+
+        ConversationCache cache;
+        lock (_sync)
+        {
+            cache = new ConversationCache
+            {
+                Conversations =
+                [
+                    .. _history
+                        .Where(pair => pair.Value.Count > 0)
+                        .Select(pair => new ConversationCacheEntry
+                        {
+                            Id = pair.Key,
+                            Name = _conversationNames.GetValueOrDefault(pair.Key),
+                            LastActive = _lastActive.GetValueOrDefault(pair.Key, DateTimeOffset.MinValue),
+                            Messages = [.. pair.Value],
+                        }),
+                ],
+            };
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Context.DataDirectory);
+            var cachePath = ConversationCachePath;
+            var temporary = cachePath + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(cache));
+            File.Move(temporary, cachePath, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            _cacheDirty = true;
+            Context.Logger.LogWarning(ex, "写入 NapCat 会话缓存失败");
         }
     }
 
@@ -1669,5 +1768,22 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             .Replace("&#93;", "]", StringComparison.Ordinal)
             .Replace("&#44;", ",", StringComparison.Ordinal)
             .Replace("&amp;", "&", StringComparison.Ordinal);
+    }
+
+    /// <summary>落盘的会话缓存。</summary>
+    private sealed class ConversationCache
+    {
+        public List<ConversationCacheEntry> Conversations { get; set; } = [];
+    }
+
+    private sealed class ConversationCacheEntry
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public string? Name { get; set; }
+
+        public DateTimeOffset LastActive { get; set; }
+
+        public List<string> Messages { get; set; } = [];
     }
 }

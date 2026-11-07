@@ -128,6 +128,8 @@ private static string Echo(
 
 参数上的 `[Description]` 会进入工具的 JSON Schema，模型据此填写参数，务必写清楚。
 
+插件需要缓存或其它运行期数据时，写入 `Context.DataDirectory`（`~/.souffle/plugin-data/<id>`，目录由插件按需创建）。不要写进插件目录或 `plugin-configs`，这样重建插件、重置配置都不会清掉这些数据。
+
 ### 3.1 自定义工具气泡标题（可选）
 
 插件可以给工具配一个展示标题，聊天里会显示成「回显 · hello」而不是「调用工具：echo」。做法是给 `AIFunctionFactory.Create` 传 `AIFunctionFactoryOptions`，并在 `AdditionalProperties` 里写 `display` 模板；`{参数名}` 会替换成模型实际传入的字符串（折叠空白、超长截断）：
@@ -260,8 +262,8 @@ public interface IMessagePlatform
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
-| `get_messages` | `platform`、`conversation`、`limit` | 读取该会话最近消息 |
-| `send_message` | `platform`、`conversation`、`message` | 向该会话发送文本 |
+| `get_platform_messages` | `platform`、`conversation`、`limit` | 读取该会话最近消息 |
+| `send_platform_message` | `platform`、`conversation`、`message` | 向该会话发送文本 |
 | `send_attachment` | `platform`、`conversation`、`path`、`display_name` | 发送本地图片或文件，按 `ToolApproval` 规则向用户确认 |
 
 ### 最小结构

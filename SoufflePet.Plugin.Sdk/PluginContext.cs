@@ -10,6 +10,7 @@ namespace SoufflePet.Plugin.Sdk;
 public sealed class PluginContext(
     string pluginId,
     string pluginDirectory,
+    string dataDirectory,
     JsonElement? configuration,
     ILogger logger)
 {
@@ -18,6 +19,9 @@ public sealed class PluginContext(
 
     /// <summary>插件所在目录的绝对路径。</summary>
     public string PluginDirectory { get; } = pluginDirectory;
+
+    /// <summary>插件可写的用户数据目录（~/.souffle/plugin-data/&lt;id&gt;），用于缓存等运行期数据；目录由插件按需创建。</summary>
+    public string DataDirectory { get; } = dataDirectory;
 
     /// <summary>插件配置：默认值来自 plugin.json 的 config 段，用户保存后由 ~/.souffle/plugin-configs/&lt;id&gt;.json 覆盖。</summary>
     public JsonElement? Configuration { get; } = configuration;
