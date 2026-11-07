@@ -32,7 +32,7 @@ public sealed class ChatTools
     private const int MaxShellTimeoutSeconds = 1800;
 
     /// <summary>命令输出回传给模型的最大长度，超出截断。</summary>
-    private const int ShellOutputMaxLength = 4000;
+    private const int ShellOutputMaxLength = 32768;
 
     /// <summary>
     /// 主进程退出后等待管道 EOF 的宽限时间：命令拉起后台进程（如浏览器 daemon）时，
@@ -44,10 +44,10 @@ public sealed class ChatTools
     private const long ReadFileMaxBytes = 20L * 1024 * 1024;
 
     /// <summary>文本文件回传给模型的最大字符数，超出截断。</summary>
-    private const int ReadFileMaxChars = 20_000;
+    private const int ReadFileMaxChars = 32768;
 
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
-    private const int SkillContentMaxLength = 8000;
+    private const int SkillContentMaxLength = 8192;
 
     /// <summary>本地展示文件的最大字节数，超出时只回报文件信息、不展示。</summary>
     private const long ShowFileMaxBytes = 50L * 1024 * 1024;
