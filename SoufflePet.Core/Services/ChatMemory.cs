@@ -527,7 +527,7 @@ public sealed class ChatMemory
         builder.AppendLine();
         builder.AppendLine("## 记忆系统");
         builder.AppendLine();
-        builder.AppendLine("使用remember/forget命令来添加/删除记忆，记忆跨会话共享。以下是之前对话里记忆的信息，回答时可以自然使用，不要生硬复述。");
+        builder.AppendLine("使用 remember/forget 命令来 记住/遗忘 记忆，记忆跨会话共享。以下是之前对话里记忆的信息，回答时可以自然使用，不要生硬复述。");
         builder.AppendLine();
         builder.AppendLine("### 长期记忆：");
         builder.AppendLine();
