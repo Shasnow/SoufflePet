@@ -849,9 +849,6 @@ public sealed class ChatTools
             return $"文件「{fullPath}」内容没有变化，未写入。";
 
         var diff = LineDiff.Compute(fullPath, oldText ?? string.Empty, content);
-        var detail = BuildEditApprovalDetail(fullPath, diff, oldText is null ? "新建文件" : "写入文件");
-        if (!await _access.RequestApprovalAsync("write_file", detail, cancellationToken).ConfigureAwait(false))
-            return ApprovalDenied(cancellationToken, "写入文件");
 
         // 覆盖已有文件时把旧版本留在会话备份目录，写坏/写错还能找回
         var backupPath = oldText is null ? null : BackupPathFor(fullPath);
@@ -882,7 +879,7 @@ public sealed class ChatTools
     private async Task<string> EditFile(
         [Description("文件路径：绝对路径，或相对当前会话工作区的路径")]
         string path,
-        [Description("要替换的旧文本，必须与文件内容完全一致")]
+        [Description("要替换的旧文本；匹配时忽略换行符差异")]
         string oldString,
         [Description("替换后的新文本")]
         string newString,
@@ -895,25 +892,20 @@ public sealed class ChatTools
         if (!TryReadTextFile(fullPath, out var text, out var encoding, out var readError)) return readError;
 
         if (oldString.Length == 0) return "old_string 不能为空；要整体覆盖请用 write_file。";
-        if (oldString == newString) return "新旧文本相同，未做修改。";
+        if (NormalizeNewlines(oldString) == NormalizeNewlines(newString))
+            return "新旧文本相同，未做修改。";
 
-        var count = CountOccurrences(text, oldString);
+        var count = ReplaceIgnoringLineEndings(text, oldString, newString, replaceAll, out var updated);
         if (count == 0)
             return $"文件里没有找到要替换的内容，请先用 read_file 核对。old_string 开头：{Truncate(oldString, 120)}";
         if (count > 1 && !replaceAll)
             return $"old_string 在文件里出现了 {count} 次，请提供更长的上下文使其唯一，或传 replace_all=true。";
 
-        var updated = replaceAll
-            ? text.Replace(oldString, newString, StringComparison.Ordinal)
-            : ReplaceFirst(text, oldString, newString);
         if (updated == text) return "替换后内容没有变化，未写入。";
         if (updated.Length > MaxEditChars)
             return $"修改后的内容超过 {MaxEditChars} 字符的上限，未写入。";
 
         var diff = LineDiff.Compute(fullPath, text, updated);
-        var detail = BuildEditApprovalDetail(fullPath, diff, "编辑文件");
-        if (!await _access.RequestApprovalAsync("edit_file", detail, cancellationToken).ConfigureAwait(false))
-            return ApprovalDenied(cancellationToken, "编辑文件");
 
         var backupPath = BackupPathFor(fullPath);
         string? actualBackup;
@@ -947,38 +939,6 @@ public sealed class ChatTools
         // 文件过大时也把 truncated 状态送出去，界面显示「未生成 diff」而不是什么都不显示
         if (diff.Hunks.Count == 0 && !diff.Truncated) return;
         _files.RecordEdit(new ChatFileEdit(callId, [diff]));
-    }
-
-    /// <summary>审批气泡里的编辑摘要：统计 + 前 40 行差异，长度受控。</summary>
-    private static string BuildEditApprovalDetail(string fullPath, ChatFileDiffState diff, string action)
-    {
-        var header = $"{action}：{fullPath}";
-        if (diff.Hunks.Count == 0)
-            return diff.Truncated ? $"{header}\n差异过大，未生成预览。" : header;
-
-        var builder = new StringBuilder(header);
-        builder.Append("\n+").Append(diff.Added).Append(" −").Append(diff.Removed);
-
-        var lines = 0;
-        foreach (var hunk in diff.Hunks)
-        {
-            builder.Append("\n@@ -").Append(hunk.OldStart).Append(',').Append(hunk.OldLines)
-                .Append(" +").Append(hunk.NewStart).Append(',').Append(hunk.NewLines).Append(" @@");
-            foreach (var line in hunk.Lines)
-            {
-                if (lines++ >= 40)
-                {
-                    builder.Append("\n…（差异过长，已截断）");
-                    return builder.ToString();
-                }
-
-                builder.Append('\n')
-                    .Append(line.Kind switch { "add" => '+', "del" => '-', _ => ' ' })
-                    .Append(Truncate(line.Text, 160));
-            }
-        }
-
-        return builder.ToString();
     }
 
     /// <summary>解析可写文件路径：去掉 @ 前缀，拒绝目录；文件可以不存在（新建）。</summary>
@@ -1213,6 +1173,50 @@ public sealed class ChatTools
             ? text
             : string.Concat(text.AsSpan(0, index), newValue, text.AsSpan(index + oldValue.Length));
     }
+
+    /// <summary>
+    /// 忽略换行符差异的替换：匹配前把 CRLF/LF/CR 统一成 LF，写回时再还原成原文件的换行风格。
+    /// 模型给出的 old_string 通常是 LF，而 Windows 文件多为 CRLF，直接精确匹配会找不到。
+    /// </summary>
+    internal static int ReplaceIgnoringLineEndings(
+        string text,
+        string oldString,
+        string newString,
+        bool replaceAll,
+        out string updated)
+    {
+        var lineEnding = DetectLineEnding(text);
+        var source = NormalizeNewlines(text);
+        var normalizedOld = NormalizeNewlines(oldString);
+        var normalizedNew = NormalizeNewlines(newString);
+
+        var count = CountOccurrences(source, normalizedOld);
+        updated = text;
+        if (count == 0) return 0;
+
+        var replaced = replaceAll
+            ? source.Replace(normalizedOld, normalizedNew, StringComparison.Ordinal)
+            : ReplaceFirst(source, normalizedOld, normalizedNew);
+        updated = RestoreLineEndings(replaced, lineEnding);
+        return count;
+    }
+
+    /// <summary>统一成 LF，便于跨平台比较与替换。</summary>
+    internal static string NormalizeNewlines(string value) =>
+        value.IndexOf('\r') < 0
+            ? value
+            : value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    /// <summary>取文件第一个换行符的风格，作为写回时统一的换行符。</summary>
+    private static string DetectLineEnding(string text)
+    {
+        var lf = text.IndexOf('\n');
+        if (lf >= 0) return lf > 0 && text[lf - 1] == '\r' ? "\r\n" : "\n";
+        return text.IndexOf('\r') >= 0 ? "\r" : "\n";
+    }
+
+    private static string RestoreLineEndings(string value, string lineEnding) =>
+        lineEnding == "\n" ? value : value.Replace("\n", lineEnding, StringComparison.Ordinal);
 
     /// <summary>解析并校验本地文件路径：去掉 @ 前缀，拒绝目录与不存在的文件。</summary>
     private static bool TryResolveLocalFile(

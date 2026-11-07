@@ -154,6 +154,42 @@ public sealed class ChatToolsTextFileTests : IDisposable
         Assert.Contains("NUL", error);
     }
 
+    [Fact]
+    public void CrlfFileMatchesLfOldStringAndKeepsCrlf()
+    {
+        var text = "第一行\r\n第二行\r\n第三行";
+
+        var count = ChatTools.ReplaceIgnoringLineEndings(
+            text, "第二行\n第三行", "第二行\n新第三行", false, out var updated);
+
+        Assert.Equal(1, count);
+        Assert.Equal("第一行\r\n第二行\r\n新第三行", updated);
+    }
+
+    [Fact]
+    public void LfFileMatchesCrlfOldStringAndKeepsLf()
+    {
+        var text = "a\nb\nc";
+
+        var count = ChatTools.ReplaceIgnoringLineEndings(
+            text, "a\r\nb", "a\r\nx", false, out var updated);
+
+        Assert.Equal(1, count);
+        Assert.Equal("a\nx\nc", updated);
+    }
+
+    [Fact]
+    public void ReplaceAllIgnoresLineEndingsAndKeepsOriginalStyle()
+    {
+        var text = "x\r\ny\r\nx\r\ny";
+
+        var count = ChatTools.ReplaceIgnoringLineEndings(
+            text, "x\ny", "z", true, out var updated);
+
+        Assert.Equal(2, count);
+        Assert.Equal("z\r\nz", updated);
+    }
+
     private static bool HasUtf8Bom(byte[] bytes) =>
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
 }
