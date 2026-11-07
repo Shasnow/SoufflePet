@@ -70,6 +70,10 @@ export function SessionItem({ session, active, onOpen, onRename, onDelete }: Ses
             className="popover menu-list"
             sideOffset={4}
             align="end"
+            // 菜单虽然通过 Portal 渲染到 body，React 事件仍会沿组件树冒泡到行容器，
+            // 这里拦一下，避免选择“重命名/删除”时顺带触发会话切换。
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
             onCloseAutoFocus={(event) => {
               // 鼠标关闭时不要让焦点退回触发按钮，否则操作按钮会一直处于显示态
               if (menuByPointer.current) event.preventDefault()
