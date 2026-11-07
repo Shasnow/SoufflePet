@@ -54,17 +54,17 @@ public sealed partial class ChatTools
     }
 
     /// <summary>
-    /// 读取本地文件并按类型返回合适的内容：文本走文本通道（支持 offset/limit 分段读取）；
+    /// 读取本地文件并按类型返回合适的内容：文本走文本通道（支持按行 offset/limit 分段读取）；
     /// 图片、音频作为 DataContent 返回，由对话服务拆成多模态内容，避免二进制被当成普通文本。
     /// 其余二进制文件只回报文件信息，不把乱码塞进提示词。
     /// </summary>
     private static AIContent[] ReadFile(
         [Description("文件绝对路径")]
         string path,
-        [Description("文本起始字符位置，默认 0")]
-        int offset = 0,
-        [Description("最多返回的字符数，默认 20000")]
-        int limit = ReadFileMaxChars)
+        [Description("文本起始行号（从 1 开始），默认 1")]
+        int offset = 1,
+        [Description("最多返回的行数，默认 2000")]
+        int limit = ReadFileDefaultLines)
     {
         var target = path.Trim();
         if (target.StartsWith('@')) target = target[1..].Trim().Trim('"');
@@ -94,36 +94,46 @@ public sealed partial class ChatTools
             return [new TextContent($"「{info.Name}」是视频（{FormatSize(info.Length)}，{videoType}），无法直接作为内容读取；"
                 + "如需分析，可用 run_shell_command 配合 ffmpeg 抽取关键帧或音频，再读取生成的文件。")];
 
-        offset = Math.Max(offset, 0);
-        limit = Math.Clamp(limit, 1, ReadFileMaxChars);
-        var start = offset;
+        offset = Math.Max(offset, 1);
+        limit = Math.Clamp(limit, 1, ReadFileMaxLines);
 
-        // 文本按分段流式读取：跳过 offset 个字符，再多读一个字符用于判断是否还有后续内容
+        // 文本按行流式读取：跳过起始行之前的内容，读取 limit 行，再多读一行判断是否还有后续内容
         var builder = new StringBuilder();
-        bool hasMore;
+        var lineNumber = 0;
+        var lastLine = 0;
+        var appended = 0;
+        var hasMore = false;
         try
         {
             using var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true);
 
-            var buffer = new char[4096];
-            var skip = start;
-            while (skip > 0)
+            while (lineNumber < offset - 1)
             {
-                var read = reader.Read(buffer, 0, Math.Min(buffer.Length, skip));
-                if (read <= 0) break;
-                skip -= read;
+                if (reader.ReadLine() is null) break;
+                lineNumber++;
             }
 
-            while (builder.Length <= limit)
+            while (true)
             {
-                var read = reader.Read(buffer, 0, Math.Min(buffer.Length, limit + 1 - builder.Length));
-                if (read <= 0) break;
-                builder.Append(buffer, 0, read);
-            }
+                var line = reader.ReadLine();
+                if (line is null) break;
 
-            hasMore = builder.Length > limit;
-            if (hasMore) builder.Length = limit;
+                lineNumber++;
+                if (lineNumber > offset + limit - 1)
+                {
+                    hasMore = true;
+                    break;
+                }
+
+                if (appended > 0) builder.Append('\n');
+                if (line.Length > ReadFileMaxLineChars)
+                    builder.Append(line, 0, ReadFileMaxLineChars).Append("…（该行过长已截断）");
+                else
+                    builder.Append(line);
+                appended++;
+                lastLine = lineNumber;
+            }
         }
         catch (DecoderFallbackException)
         {
@@ -133,14 +143,12 @@ public sealed partial class ChatTools
         if (builder.ToString().Contains('\0'))
             return [new TextContent($"「{info.Name}」是二进制文件（{FormatSize(info.Length)}），无法按文本读取。")];
 
-        if (builder.Length == 0)
-            return [new TextContent($"已到文件末尾：「{info.Name}」共 {FormatSize(info.Length)}，起始位置 {start} 之后没有内容。")];
+        if (appended == 0)
+            return [new TextContent($"已到文件末尾：「{info.Name}」共 {lineNumber} 行，第 {offset} 行之后没有内容。")];
 
-        var header = start == 0
-            ? $"文件 {info.FullName}（{FormatSize(info.Length)}）："
-            : $"文件 {info.FullName}（{FormatSize(info.Length)}，从第 {start} 个字符开始）：";
+        var header = $"文件 {info.FullName}（{FormatSize(info.Length)}，第 {offset}–{lastLine} 行）：";
         if (hasMore)
-            builder.Append($"\n…（已截断，本次返回 {limit} 字符；可传 offset={start + limit} 继续读取）");
+            builder.Append($"\n…（已截断，本次返回第 {offset}–{lastLine} 行；可传 offset={lastLine + 1} 继续读取）");
 
         return [new TextContent($"{header}\n{builder}")];
     }

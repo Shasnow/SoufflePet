@@ -57,8 +57,12 @@ public sealed partial class ChatTools
         ".git", ".svn", ".hg", "node_modules", "bin", "obj", ".vs", ".idea", "dist", "build", "coverage"
     };
 
-    /// <summary>文本文件回传给模型的最大字符数，超出截断。</summary>
-    private const int ReadFileMaxChars = 32768;
+    /// <summary>读取文本文件时默认与允许返回的最大行数。</summary>
+    private const int ReadFileDefaultLines = 2000;
+    private const int ReadFileMaxLines = 8000;
+
+    /// <summary>单行过长时的截断字符数，防止压缩代码 / 单行 JSON 一次占满上下文。</summary>
+    private const int ReadFileMaxLineChars = 16384;
 
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8192;
