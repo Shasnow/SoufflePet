@@ -5,9 +5,11 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Enumeration;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Serilog;
 using SoufflePet.Core.Chat;
@@ -42,6 +44,22 @@ public sealed class ChatTools
 
     /// <summary>媒体文件（图片/音频）读入内存的最大字节数，超出只回报文件信息、不读内容。</summary>
     private const long ReadFileMaxBytes = 20L * 1024 * 1024;
+
+    /// <summary>内容搜索时单个文件的大小上限：超过则不扫描，避免一次搜索读入过多内容。</summary>
+    private const long SearchFileMaxBytes = 1L * 1024 * 1024;
+
+    /// <summary>内容搜索默认返回条数与上限。</summary>
+    private const int SearchDefaultMaxResults = 60;
+    private const int SearchMaxResults = 300;
+
+    /// <summary>内容搜索最多扫描的文件数，防止在超大目录里长时间运行。</summary>
+    private const int SearchMaxFiles = 4000;
+
+    /// <summary>搜索时跳过这些目录（版本库与构建产物）。</summary>
+    private static readonly HashSet<string> SearchSkippedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", ".svn", ".hg", "node_modules", "bin", "obj", ".vs", ".idea", "dist", "build", "coverage"
+    };
 
     /// <summary>文本文件回传给模型的最大字符数，超出截断。</summary>
     private const int ReadFileMaxChars = 32768;
@@ -221,6 +239,10 @@ public sealed class ChatTools
                 EditFile,
                 "edit_file",
                 "编辑文本文件：把一段旧文本替换成新文本；返回改动摘要"),
+            AIFunctionFactory.Create(
+                SearchFiles,
+                "search_files",
+                "在文件内容里查找关键词或正则，返回文件、行号与匹配行"),
             AIFunctionFactory.Create(
                 ListScheduledTasks,
                 "list_scheduled_tasks",
@@ -923,6 +945,235 @@ public sealed class ChatTools
         var result = EditResult("已编辑", fullPath, diff);
         if (actualBackup is not null) result += $"\n原文件已备份到 {actualBackup}。";
         return result;
+    }
+
+    /// <summary>
+    /// 在文件内容里查找关键词或正则：默认搜索整个会话工作区，可按 glob 过滤文件名。
+    /// 只返回「文件:行号: 命中行」，并对条数、单文件大小和扫描文件数设上限，避免拖垮对话。
+    /// </summary>
+    private string SearchFiles(
+        [Description("要查找的关键词；is_regex=true 时按 .NET 正则解释")]
+        string query,
+        [Description("搜索范围：目录或文件；相对路径按当前会话工作区解析，不传则搜索整个工作区")]
+        string? path = null,
+        [Description("只搜索文件名/相对路径匹配该通配符的文件，如 *.cs；不传则搜索所有文本文件")]
+        string? glob = null,
+        [Description("是否按正则表达式匹配（默认 false，按普通文本）")]
+        bool isRegex = false,
+        [Description("是否区分大小写（默认 false）")]
+        bool caseSensitive = false,
+        [Description("最多返回多少条匹配（默认 60，上限 300）")]
+        int maxResults = SearchDefaultMaxResults)
+    {
+        query = query.Trim();
+        if (query.Length == 0) return "查找关键词不能为空。";
+
+        var rawPath = string.IsNullOrWhiteSpace(path) ? WorkspaceContext.Current : path.Trim();
+        if (rawPath.StartsWith('@')) rawPath = rawPath[1..].Trim().Trim('"');
+
+        string root;
+        try
+        {
+            root = WorkspaceContext.Resolve(rawPath);
+        }
+        catch (Exception ex)
+        {
+            return $"搜索路径无效：{ex.Message}";
+        }
+
+        string? singleFile = null;
+        if (Directory.Exists(root))
+        {
+            // 目录：递归搜索
+        }
+        else if (File.Exists(root))
+        {
+            singleFile = root;
+        }
+        else
+        {
+            return $"路径不存在：{root}";
+        }
+
+        return SearchText(root, singleFile, query, glob, isRegex, caseSensitive, maxResults);
+    }
+
+    /// <summary>
+    /// 内容搜索核心：root 为目录时递归扫描，singleFile 非空时只搜该文件。
+    /// 结果按「相对路径:行号: 命中行」输出，单行内容与总条数都做截断。
+    /// </summary>
+    internal static string SearchText(
+        string root,
+        string? singleFile,
+        string query,
+        string? glob,
+        bool isRegex,
+        bool caseSensitive,
+        int maxResults)
+    {
+        var baseDirectory = singleFile is null ? root : Path.GetDirectoryName(singleFile) ?? root;
+        var limit = Math.Clamp(maxResults, 1, SearchMaxResults);
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+        Regex? regex = null;
+        if (isRegex)
+        {
+            try
+            {
+                regex = new Regex(
+                    query,
+                    RegexOptions.CultureInvariant | (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase),
+                    TimeSpan.FromSeconds(2));
+            }
+            catch (ArgumentException ex)
+            {
+                return $"正则表达式无效：{ex.Message}";
+            }
+        }
+
+        var matcher = BuildGlobMatcher(glob, caseSensitive);
+        var builder = new StringBuilder();
+        var matches = 0;
+        var scanned = 0;
+        var resultCapHit = false;
+        var fileCapHit = false;
+        var regexTimedOut = false;
+
+        IEnumerable<string> candidates = singleFile is null ? EnumerateSearchFiles(root) : [singleFile];
+        foreach (var file in candidates)
+        {
+            if (scanned >= SearchMaxFiles)
+            {
+                fileCapHit = true;
+                break;
+            }
+
+            scanned++;
+            var info = new FileInfo(file);
+            if (!info.Exists || info.Length == 0 || info.Length > SearchFileMaxBytes) continue;
+            if (matcher is not null && !matcher(Path.GetRelativePath(baseDirectory, file))) continue;
+
+            // 复用文本读取的编码/二进制校验：非 UTF-8/UTF-16 或含 NUL 的文件直接跳过
+            if (!TryReadTextFile(file, out var text, out _, out _)) continue;
+
+            var relative = Path.GetRelativePath(baseDirectory, file);
+            var lines = text.Split('\n');
+            // 文件以 \n 结尾时 Split 会多产出一个空段，去掉避免多余循环；
+            // 不去掉中间合法空行以保证行号正确。
+            if (lines.Length > 0 && lines[^1].Length == 0)
+                lines = lines[..^1];
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var line = lines[index].TrimEnd('\r');
+                bool hit;
+                if (regex is null)
+                {
+                    hit = line.Contains(query, comparison);
+                }
+                else
+                {
+                    try
+                    {
+                        hit = regex.IsMatch(line);
+                    }
+                    catch (RegexMatchTimeoutException)
+                    {
+                        regexTimedOut = true;
+                        break;
+                    }
+                }
+
+                if (!hit) continue;
+
+                builder.Append('\n').Append(relative).Append(':').Append(index + 1).Append(": ")
+                    .Append(line.Length <= 200 ? line : line[..200] + "…");
+                if (++matches >= limit)
+                {
+                    resultCapHit = true;
+                    break;
+                }
+            }
+
+            if (resultCapHit || regexTimedOut) break;
+        }
+
+        if (matches == 0)
+        {
+            var empty = $"没有找到「{Truncate(query, 80)}」（扫描 {scanned} 个文件）";
+            if (regexTimedOut) empty += "；正则匹配超时，请简化表达式。";
+            return empty + (fileCapHit ? $"\n…（最多只扫描 {SearchMaxFiles} 个文件）" : string.Empty);
+        }
+
+        var report = new StringBuilder($"找到 {matches} 条匹配（扫描 {scanned} 个文件）：");
+        report.Append(builder);
+        if (resultCapHit) report.Append($"\n…（已达到 {limit} 条上限，可能还有更多匹配）");
+        if (regexTimedOut) report.Append("\n…（正则匹配超时，结果可能不完整）");
+        if (fileCapHit) report.Append($"\n…（已达到 {SearchMaxFiles} 个文件的扫描上限，结果可能不完整）");
+        return report.ToString();
+    }
+
+    /// <summary>把用户给的 glob 转成匹配函数：不含分隔符时匹配文件名，否则匹配相对路径。</summary>
+    private static Func<string, bool>? BuildGlobMatcher(string? glob, bool caseSensitive)
+    {
+        if (string.IsNullOrWhiteSpace(glob)) return null;
+
+        var pattern = glob.Trim().Replace('\\', '/');
+        if (pattern.StartsWith("./", StringComparison.Ordinal)) pattern = pattern[2..];
+        var matchPath = pattern.Contains('/');
+
+        return relativePath =>
+        {
+            var normalized = relativePath.Replace('\\', '/');
+            var candidate = matchPath ? normalized : Path.GetFileName(normalized);
+            return FileSystemName.MatchesSimpleExpression(pattern, candidate, ignoreCase: !caseSensitive);
+        };
+    }
+
+    /// <summary>深度优先枚举文件，跳过版本库/构建目录与重解析点，读目录失败时自动跳过。</summary>
+    private static IEnumerable<string> EnumerateSearchFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+
+            string[] entries;
+            try
+            {
+                entries = Directory.GetFileSystemEntries(directory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                bool isDirectory;
+                try
+                {
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((attributes & FileAttributes.Hidden) != 0) continue;
+                    isDirectory = (attributes & FileAttributes.Directory) != 0;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // 单个条目不可访问：跳过，不影响其余结果
+                    continue;
+                }
+
+                if (isDirectory)
+                {
+                    if (!SearchSkippedDirectories.Contains(Path.GetFileName(entry))) pending.Push(entry);
+                }
+                else
+                {
+                    yield return entry;
+                }
+            }
+        }
     }
 
     /// <summary>工具回给模型的写盘结果：有差异时带增删行数，过大时说明未生成 diff。</summary>

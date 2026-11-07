@@ -190,6 +190,38 @@ public sealed class ChatToolsTextFileTests : IDisposable
         Assert.Equal("z\r\nz", updated);
     }
 
+    [Fact]
+    public void SearchTextFindsKeywordWithLineNumbers()
+    {
+        File.WriteAllText(Path.Combine(_root, "a.txt"), "first\r\nneedle here\r\n", new UTF8Encoding(false));
+        Directory.CreateDirectory(Path.Combine(_root, "sub"));
+        File.WriteAllText(
+            Path.Combine(_root, "sub", "b.cs"),
+            "class B { }\r\n// NEEDLE\r\n",
+            new UTF8Encoding(false));
+
+        var report = ChatTools.SearchText(_root, null, "needle", null, false, false, 50);
+
+        Assert.Contains("a.txt:2: needle here", report);
+        Assert.Contains(Path.Combine("sub", "b.cs") + ":2: // NEEDLE", report);
+        Assert.Contains("找到 2 条匹配", report);
+    }
+
+    [Fact]
+    public void SearchTextSupportsRegexGlobAndResultLimit()
+    {
+        File.WriteAllText(Path.Combine(_root, "one.cs"), "alpha\nbeta\n", new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(_root, "two.txt"), "alpha\n", new UTF8Encoding(false));
+
+        var report = ChatTools.SearchText(_root, null, "^alpha$", "*.cs", true, false, 10);
+        Assert.Contains("one.cs:1: alpha", report);
+        Assert.DoesNotContain("two.txt", report);
+        Assert.DoesNotContain("beta", report);
+
+        var limited = ChatTools.SearchText(_root, null, "a", null, false, false, 1);
+        Assert.Contains("已达到 1 条上限", limited);
+    }
+
     private static bool HasUtf8Bom(byte[] bytes) =>
         bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
 }
