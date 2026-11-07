@@ -17,6 +17,10 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
   const parentRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
+  // 「回到最新」的平滑滚动会连续派发 onScroll，途中离底还很远，
+  // 照常判定会把 atBottom 改回 false；还要让 pinToBottom 让路，避免瞬时赋值掐断动画。
+  const smoothScrollingRef = useRef(false)
+  const smoothScrollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const [atBottom, setAtBottom] = useState(true)
   const lastMessage = messages[messages.length - 1]
   const lastLength = lastMessage?.text.length ?? 0
@@ -43,10 +47,50 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
   }
 
   const pinToBottom = () => {
+    // 平滑滚动期间不要瞬时赋值 scrollTop，否则会把动画掐断。
+    if (smoothScrollingRef.current) return
     if (!atBottomRef.current) return
     const element = parentRef.current
     if (element) element.scrollTop = element.scrollHeight
   }
+
+  // 结束一次「回到最新」的平滑滚动锁定：pin=true 时补一次贴底，
+  // 用来兜住动画期间新长出来的流式内容；用户打断时传 false，交回常规判定。
+  const finalizeSmoothScroll = (pin: boolean) => {
+    if (smoothScrollTimerRef.current !== null) {
+      window.clearTimeout(smoothScrollTimerRef.current)
+      smoothScrollTimerRef.current = null
+    }
+    if (!smoothScrollingRef.current) return
+    smoothScrollingRef.current = false
+    if (pin) pinToBottom()
+  }
+
+  const jumpToLatest = () => {
+    const element = parentRef.current
+    if (!element) return
+    finalizeSmoothScroll(false)
+    smoothScrollingRef.current = true
+    updateAtBottom(true)
+    scrollToBottom('smooth')
+    // 有些浏览器不派发足够多的 onScroll，用定时器兜底结束锁定。
+    smoothScrollTimerRef.current = window.setTimeout(() => finalizeSmoothScroll(true), 800)
+  }
+
+  // 用户主动交互（滚轮 / 拖拽 / 触摸）打断平滑滚动，立即按真实位置恢复常规判定。
+  const interruptSmoothScroll = () => {
+    if (!smoothScrollingRef.current) return
+    finalizeSmoothScroll(false)
+    const element = parentRef.current
+    if (!element) return
+    const distance = element.scrollHeight - element.scrollTop - element.clientHeight
+    updateAtBottom(distance < 24)
+  }
+
+  useEffect(() => () => {
+    if (smoothScrollTimerRef.current !== null) window.clearTimeout(smoothScrollTimerRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useLayoutEffect(() => {
     // 打开会话时贴底；会话切换由父组件 key 强制重新挂载。
@@ -77,9 +121,17 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
       <div
         className="message-list"
         ref={parentRef}
+        onWheel={interruptSmoothScroll}
+        onPointerDown={interruptSmoothScroll}
+        onTouchStart={interruptSmoothScroll}
         onScroll={(event) => {
           const element = event.currentTarget
           const distance = element.scrollHeight - element.scrollTop - element.clientHeight
+          if (smoothScrollingRef.current) {
+            // 平滑滚动到目标后结束锁定；途中的中间态一律忽略，避免按钮闪烁。
+            if (distance < 24) finalizeSmoothScroll(true)
+            return
+          }
           updateAtBottom(distance < 24)
         }}
       >
@@ -116,14 +168,7 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
         </div>
       </div>
       {!atBottom ? (
-        <button
-          type="button"
-          className="scroll-jump"
-          onClick={() => {
-            updateAtBottom(true)
-            scrollToBottom('smooth')
-          }}
-        >
+        <button type="button" className="scroll-jump" onClick={jumpToLatest}>
           <ArrowDown size={13} />
           回到最新
         </button>
