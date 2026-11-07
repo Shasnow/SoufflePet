@@ -21,8 +21,11 @@ public interface IAppWindowService
     /// </summary>
     void Start(TopLevel petWindow);
 
-    /// <summary>切换主窗口显隐；首次打开时停靠在 anchor（桌宠窗口）旁边。</summary>
-    void Toggle(Window anchor);
+    /// <summary>
+    /// 切换主窗口显隐；首次打开时停靠在 anchor（桌宠窗口）旁边。
+    /// fromPet 表示由点击桌宠触发：此时若窗口可见但被压在后台，应先提到前台而不是收起。
+    /// </summary>
+    void Toggle(Window anchor, bool fromPet = false);
 
     /// <summary>
     /// 戳一戳唤醒：让桌宠发起一轮自主对话（反应动作由桌宠窗口先播），
@@ -101,9 +104,25 @@ public sealed class AppWindowService : IAppWindowService, IDisposable
         else Logger.Warning("app window hotkey register failed err={Error}", Marshal.GetLastWin32Error());
     }
 
-    public void Toggle(Window anchor)
+    public void Toggle(Window anchor, bool fromPet = false)
     {
         if (_disposed || GetWindow() is not { } window) return;
+
+        // 最小化窗口一律还原并提到前台，不管是热键/托盘还是点桌宠触发——
+        // 用户想"打开"一个最小化的窗口，而不是把它隐藏到托盘。
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.ShowNear(anchor);
+            return;
+        }
+
+        // 点桌宠时若主窗口可见但被压在后台（上次失焦是被别的应用抢走），
+        // 应该先把它提到前台，而不是直接收起——否则点一下只会在隐藏/后台之间来回切。
+        if (fromPet && window.IsVisible && !window.WasForeground)
+        {
+            window.ShowNear(anchor);
+            return;
+        }
 
         if (window.IsVisible) window.HideAndSave();
         else window.ShowNear(anchor);

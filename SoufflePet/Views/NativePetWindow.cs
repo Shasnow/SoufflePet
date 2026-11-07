@@ -234,7 +234,7 @@ public class NativePetWindow : Window, IPetWindow
             }
             if (pressPoint is null) return;
             pressPoint = null;
-            appWindow.Toggle(this);
+            appWindow.Toggle(this, fromPet: true);
         };
         PointerWheelChanged += (_, e) =>
         {

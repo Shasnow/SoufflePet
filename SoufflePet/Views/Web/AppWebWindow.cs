@@ -46,6 +46,11 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwcpRound = 2;
 
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private static readonly IntPtr HwndTopmost = new(-1);
+    private static readonly IntPtr HwndNoTopmost = new(-2);
+
     private readonly ThemeService _theme;
     private readonly UiMode _mode;
     private readonly ILocalFileServer _server;
@@ -60,6 +65,12 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     private double _normalWidth = 1120;
     private double _normalHeight = 760;
     private PixelPoint _normalPosition;
+
+    /// <summary>
+    /// 最近一次失去焦点前是否处于前台：点击桌宠会把主窗口顶掉（前台变成同进程的桌宠窗口），
+    /// 这种失焦要保持 true；被其它应用切走时置 false。Toggle 据此区分「已在前台」和「被遮挡在后台」。
+    /// </summary>
+    private bool _wasForeground;
 
     public AppWebWindow(
         SouffleSettings settings,
@@ -112,6 +123,10 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         Opened += OnOpened;
         Closing += OnClosing;
         Closed += OnClosed;
+        Activated += (_, _) => _wasForeground = true;
+        // 失焦时区分是谁抢走的：同桌宠窗口（同进程）抢走说明主窗口本来就在前台，
+        // 点到桌宠是想收起；被其它应用抢走则说明主窗口被压在后台。
+        Deactivated += (_, _) => _wasForeground = IsOwnProcessForeground();
         PositionChanged += (_, _) => CaptureNormalGeometry();
         SizeChanged += (_, _) => CaptureNormalGeometry();
         PropertyChanged += (_, e) =>
@@ -126,7 +141,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         LoadPage();
     }
 
-    /// <summary>从热键/托盘/戳一戳呼出：首次恢复几何/停靠，之后只显示并激活。</summary>
+    /// <summary>从热键/托盘/戳一戳呼出：首次恢复几何/停靠，之后显示并强制提到前台。</summary>
     public void ShowNear(Window anchor)
     {
         if (!_positioned)
@@ -136,10 +151,39 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         }
 
         if (!IsVisible) Show();
-        Activate();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        BringToForeground();
         FocusInput();
         _bridge.RefreshSnapshot();
         PublishWindowState();
+    }
+
+    /// <summary>窗口上一次（被桌宠顶掉前）是否处于前台；供 Toggle 判断该收起还是提到前台。</summary>
+    public bool WasForeground => _wasForeground;
+
+    /// <summary>
+    /// 把窗口带到前台。SetForegroundWindow 在前台属于其它进程时会被前台锁拒绝，
+    /// 这时退化为「临时置顶再取消置顶」，至少把窗口抬到普通窗口之上，而不是留在后台。
+    /// </summary>
+    private void BringToForeground()
+    {
+        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (hwnd != IntPtr.Zero && !SetForegroundWindow(hwnd))
+        {
+            SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove);
+            SetWindowPos(hwnd, HwndNoTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove);
+            SetForegroundWindow(hwnd);
+        }
+
+        Activate();
+    }
+
+    private static bool IsOwnProcessForeground()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(foreground, out var pid);
+        return pid == (uint)Environment.ProcessId;
     }
 
     /// <summary>关闭按钮/热键第二次：隐藏到托盘，并记住几何。</summary>
@@ -555,6 +599,19 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Point
