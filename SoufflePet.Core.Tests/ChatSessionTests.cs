@@ -129,6 +129,29 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CloseUnloadsIdleSessionAndReopensFromDisk()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("好"))));
+        var first = manager.ActiveSession!;
+        await first.SendAsync("第一句", null, CancellationToken.None);
+        await first.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var second = await manager.CreateAsync(null, CancellationToken.None);
+        await manager.OpenAsync(second.Id, CancellationToken.None);
+
+        // 活动会话不能关闭
+        await Assert.ThrowsAsync<ChatSessionException>(() =>
+            manager.CloseAsync(second.Id, CancellationToken.None));
+
+        await manager.CloseAsync(first.Id, CancellationToken.None);
+        Assert.DoesNotContain(manager.OpenSessions, session => session.Id == first.Id);
+
+        // 卸载只释放内存，历史仍从磁盘恢复
+        var reopened = await manager.OpenAsync(first.Id, CancellationToken.None);
+        Assert.Contains(reopened.Snapshot.Messages, message => message.Text == "第一句");
+    }
+
+    [Fact]
     public async Task UsageIncludesSessionStats()
     {
         var llm = new FakeLlm((_, _, _) => Streams(

@@ -848,6 +848,20 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             response(id, chat)
             return
           }
+          case 'session.close': {
+            const sessionId = String(payload.sessionId ?? '')
+            if (!getSessionSummary(sessionId)) {
+              fail(id, 'not_found', '会话不存在')
+              return
+            }
+            if (sessionId === activeId) {
+              fail(id, 'conflict', '不能关闭当前活动会话')
+              return
+            }
+            // mock 宿主不做真正的卸载：会话数据本来就都在内存里
+            response(id, null)
+            return
+          }
           case 'session.rename': {
             const sessionId = String(payload.sessionId ?? '')
             const title = String(payload.title ?? '').trim()

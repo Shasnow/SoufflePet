@@ -63,6 +63,11 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     private readonly Dictionary<string, ChatSession> _open = new(StringComparer.Ordinal);
     private readonly List<SessionRecord> _records;
 
+    /// <summary>非活动会话闲置多久后卸载，释放内存；历史仍在磁盘，重新打开即可恢复。</summary>
+    private static readonly TimeSpan DefaultIdleUnloadTimeout = TimeSpan.FromMinutes(10);
+    private readonly TimeSpan _idleUnloadTimeout;
+    private readonly Timer? _idleTimer;
+
     /// <summary>
     /// 草稿会话 id：已创建但还没有发出任何消息。它们留在 <see cref="_records" /> 里以便
     /// 重命名/打开，但既不写会话索引，也不出现在侧栏列表，首条消息发出后才转正。
@@ -77,11 +82,20 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     {
     }
 
-    internal ChatSessionManager(SouffleSettings settings, ChatSessionFactory factory, ChatSessionStore store)
+    internal ChatSessionManager(SouffleSettings settings, ChatSessionFactory factory, ChatSessionStore store,
+        TimeSpan? idleUnloadTimeout = null)
     {
         _settings = settings;
         _factory = factory;
         _store = store;
+
+        // 闲置卸载：定期扫描已打开会话，关闭既非活动又长时间没有交互的实例
+        _idleUnloadTimeout = idleUnloadTimeout ?? DefaultIdleUnloadTimeout;
+        var sweepInterval = TimeSpan.FromTicks(Math.Clamp(
+            _idleUnloadTimeout.Ticks / 2,
+            TimeSpan.FromSeconds(1).Ticks,
+            TimeSpan.FromMinutes(1).Ticks));
+        _idleTimer = new Timer(OnIdleTimerTick, null, sweepInterval, sweepInterval);
 
         var index = _store.Load();
         _records = index.Sessions.ToList();
@@ -362,6 +376,68 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         PersistActive();
         Save();
         return session;
+    }
+
+    /// <summary>
+    /// 关闭一个空闲会话实例，释放它占用的消息/历史内存；会话记录与对话文件保留在磁盘，
+    /// 下次 <c>session.open</c> / 显式 sessionId 的命令会按需重新加载。
+    /// 活动会话、正在生成或还有未发送草稿/附件的会话不允许关闭。
+    /// </summary>
+    public async Task CloseAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ChatSession? session;
+        lock (_gate)
+        {
+            _open.TryGetValue(sessionId, out session);
+            if (session is null) return;
+            if (string.Equals(_activeId, sessionId, StringComparison.Ordinal))
+                throw new ChatSessionException("conflict", "不能关闭当前活动会话");
+            if (session.IsBusy)
+                throw new ChatSessionException("conflict", "会话正在生成回复，暂时不能关闭");
+            if (session.HasUnsavedInput)
+                throw new ChatSessionException("conflict", "会话还有未发送的草稿或附件");
+            _open.Remove(sessionId);
+        }
+
+        await session.DisposeAsync().ConfigureAwait(false);
+        Logger.Information("session closed id={Id}", sessionId);
+    }
+
+    private void OnIdleTimerTick(object? state) => _ = SweepIdleSessionsAsync();
+
+    /// <summary>扫描并卸载闲置的非活动会话；定时器定期调用，测试也可直接调用。</summary>
+    internal async Task SweepIdleSessionsAsync()
+    {
+        List<ChatSession> idle;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            var now = Environment.TickCount64;
+            var limit = _idleUnloadTimeout.TotalMilliseconds;
+            idle = [.. _open
+                .Where(pair => !string.Equals(_activeId, pair.Key, StringComparison.Ordinal))
+                .Where(pair => !_drafts.Contains(pair.Key))
+                .Where(pair => !pair.Value.IsBusy && !pair.Value.HasUnsavedInput)
+                .Where(pair => now - pair.Value.LastActivityMilliseconds >= limit)
+                .Select(pair => pair.Value)];
+
+            foreach (var session in idle) _open.Remove(session.Id);
+        }
+
+        foreach (var session in idle)
+        {
+            try
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+                Logger.Information("session unloaded idle={Timeout} id={Id}", _idleUnloadTimeout, session.Id);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "unload session failed id={Id}", session.Id);
+            }
+        }
     }
 
     public Task RenameAsync(string sessionId, string title, CancellationToken cancellationToken)
@@ -678,6 +754,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            _idleTimer?.Dispose();
             sessions = [.. _open.Values];
             draftRecords = _records.Where(record => _drafts.Contains(record.Id)).ToList();
             _open.Clear();

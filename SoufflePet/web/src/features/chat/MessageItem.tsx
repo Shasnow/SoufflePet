@@ -93,7 +93,7 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
     case 'assistant':
       return (
         <div className="message-row" data-kind="assistant">
-          <div className="bubble bubble-assistant">
+          <div className={`bubble bubble-assistant${streaming && message.text ? ' is-streaming' : ''}`}>
             {message.text ? <RenderMarkdown text={message.text} /> : null}
             {!message.text && streaming ? (
               <span className="streaming-hint">
@@ -105,7 +105,6 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
                 正在思考…
               </span>
             ) : null}
-            {streaming && message.text ? <span className="caret" /> : null}
           </div>
           {meta}
         </div>

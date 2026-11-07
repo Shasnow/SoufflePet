@@ -79,6 +79,8 @@ public sealed class ChatSession : IAsyncDisposable
     private string _draft = string.Empty;
     private string _approvalMode;
     private volatile bool _generating;
+    /// <summary>最近一次活动时间（Environment.TickCount64），供管理器判断闲置会话是否可卸载。</summary>
+    private long _lastActivityMilliseconds = Environment.TickCount64;
     private bool _processingPending;
     private bool _disposed;
     private ChatUsageState? _usage;
@@ -327,6 +329,7 @@ public sealed class ChatSession : IAsyncDisposable
     public Task SetDraftAsync(string text)
     {
         lock (_gate) _draft = text ?? string.Empty;
+        TouchActivity();
         return Task.CompletedTask;
     }
 
@@ -1703,6 +1706,7 @@ public sealed class ChatSession : IAsyncDisposable
     private void Emit(ChatOpBatch batch)
     {
         if (batch.Ops.Count == 0) return;
+        TouchActivity();
         try
         {
             OpsProduced?.Invoke(batch);
@@ -1710,6 +1714,33 @@ public sealed class ChatSession : IAsyncDisposable
         catch (Exception ex)
         {
             Logger.Warning(ex, "chat op subscriber failed session={Session}", Id);
+        }
+    }
+
+    private void TouchActivity() => Volatile.Write(ref _lastActivityMilliseconds, Environment.TickCount64);
+
+    /// <summary>最近一次活动时间（毫秒时间戳），供管理器卸载闲置会话。</summary>
+    internal long LastActivityMilliseconds => Volatile.Read(ref _lastActivityMilliseconds);
+
+    /// <summary>是否正在生成/处理排队消息，忙碌的会话不能卸载。</summary>
+    internal bool IsBusy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _generating || _processingPending || _pendingTurns.Count > 0
+                    || _turnTask is { IsCompleted: false } || _pendingTask is { IsCompleted: false };
+            }
+        }
+    }
+
+    /// <summary>是否有未发送的草稿/附件；卸载会丢失这些输入，因此跳过。</summary>
+    internal bool HasUnsavedInput
+    {
+        get
+        {
+            lock (_gate) return _draft.Length > 0 || _attachments.Count > 0;
         }
     }
 

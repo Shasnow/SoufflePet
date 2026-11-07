@@ -207,6 +207,10 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                         RequireString(parameters, "sessionId"), cancellationToken).ConfigureAwait(false);
                     return MapChat(session.Snapshot);
                 }
+                case "session.close":
+                    await _sessions.CloseAsync(
+                        RequireString(parameters, "sessionId"), cancellationToken).ConfigureAwait(false);
+                    return null;
                 case "session.rename":
                     await _sessions.RenameAsync(
                         RequireString(parameters, "sessionId"),

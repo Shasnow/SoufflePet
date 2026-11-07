@@ -245,6 +245,7 @@ interface AppSnapshotDto {
 | `session.list` | `{}` | `SessionSummaryDto[]` |
 | `session.new` | `{workspacePath?}` | `SessionSummaryDto`（草稿：不落盘、不进列表，首条消息后才出现在 `session.list`） |
 | `session.open` | `{sessionId}` | `ChatSnapshotDto`（切换会话时页面应调用它来同步宿主活动会话；已打开的会话不会重新读盘） |
+| `session.close` | `{sessionId}` | `null`（释放非活动会话的内存；历史留在磁盘，下次打开时重新加载。活动/生成中/有草稿的会话会返回 `conflict`） |
 | `session.rename` | `{sessionId,title}` | `SessionSummaryDto` |
 | `session.delete` | `{sessionId}` | `{sessions:SessionSummaryDto[],activeId:string|null}` |
 | `session.search` | `{query}` | `SessionSummaryDto[]` |

@@ -33,6 +33,21 @@ describe('MessageItem', () => {
     expect(meta!.querySelector('.usage-capsule')).not.toBeNull()
   })
 
+  it('流式回复的光标跟随 Markdown 内容，不额外占一行', () => {
+    const message: ChatMessageDto = {
+      id: 'm-assistant',
+      kind: 'assistant',
+      text: '好的',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+    }
+
+    const { container } = render(<MessageItem sessionId="s1" message={message} streaming />)
+    const bubble = container.querySelector('.bubble-assistant')
+    expect(bubble?.classList.contains('is-streaming')).toBe(true)
+    // 光标由 CSS 伪元素画在最后一个块末尾，不再作为独立块插入
+    expect(container.querySelector('.caret')).toBeNull()
+  })
+
   it('工具气泡显示自定义标题', () => {
     const message: ChatMessageDto = {
       id: 'm-tool',

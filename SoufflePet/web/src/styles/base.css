@@ -1302,7 +1302,9 @@ body.is-resizing-sidebar .sidebar {
   opacity: 1;
 }
 
-.caret {
+/* 流式光标：挂在 Markdown 最后一个块级元素末尾，避免作为独立块产生额外空行 */
+.bubble-assistant.is-streaming .md > :last-child::after {
+  content: '';
   display: inline-block;
   width: 2px;
   height: 1.1em;
