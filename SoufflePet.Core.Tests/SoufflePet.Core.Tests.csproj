@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SoufflePet.Core\SoufflePet.Core.csproj" />
+    <ProjectReference Include="..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
   </ItemGroup>
 
 </Project>

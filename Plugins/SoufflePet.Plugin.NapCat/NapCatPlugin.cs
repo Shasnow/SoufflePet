@@ -6,9 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -68,51 +66,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// <summary>单个附件的下载超时。</summary>
     private static readonly TimeSpan AttachmentDownloadTimeout = TimeSpan.FromSeconds(60);
 
-    /// <summary>下载附件用的 HTTP 客户端（插件内共享）。</summary>
-    private static readonly HttpClient Http = CreateHttpClient();
-
-    /// <summary>创建下载用的 HttpClient：QQ 多媒体 CDN 对没有 UA 的请求会长时间不响应，且本机 IPv6 不通时 .NET 会卡到超时。</summary>
-    private static HttpClient CreateHttpClient()
-    {
-        var handler = new SocketsHttpHandler
-        {
-            ConnectTimeout = TimeSpan.FromSeconds(15),
-            ConnectCallback = ConnectIpv4Async,
-        };
-
-        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) SoufflePet/1.0");
-        return client;
-    }
-
-    /// <summary>只用 IPv4 建连：本机 IPv6 出口不通，.NET 默认优先尝试 IPv6 会把请求卡到超时。</summary>
-    private static async ValueTask<Stream> ConnectIpv4Async(
-        SocketsHttpConnectionContext context,
-        CancellationToken token)
-    {
-        var addresses = await Dns
-            .GetHostAddressesAsync(context.DnsEndPoint.Host, token)
-            .ConfigureAwait(false);
-
-        var address = Array.Find(addresses, item => item.AddressFamily == AddressFamily.InterNetwork)
-                      ?? (addresses.Length > 0
-                          ? addresses[0]
-                          : throw new HttpRequestException($"无法解析主机 {context.DnsEndPoint.Host}"));
-
-        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        try
-        {
-            await socket
-                .ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), token)
-                .ConfigureAwait(false);
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
-    }
+    /// <summary>下载附件用的 HTTP 客户端（插件内共享）；IPv4 优先建连的实现收敛在 Sdk。</summary>
+    private static readonly HttpClient Http = Ipv4HttpClient.Create();
 
     /// <summary>消息字符串里 OneBot 的 CQ 码，用于解析 message_format=string 的平台。</summary>
     private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);

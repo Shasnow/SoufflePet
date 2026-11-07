@@ -48,7 +48,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
     private static readonly TimeSpan AttachmentDownloadTimeout = TimeSpan.FromSeconds(60);
 
-    private readonly HttpClient _http = QqApiClient.CreateHttpClient();
+    private readonly HttpClient _http = Ipv4HttpClient.Create();
     private readonly Lock _sync = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly Dictionary<string, List<string>> _history = new(StringComparer.Ordinal);

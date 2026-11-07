@@ -4,14 +4,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using SoufflePet.Plugin.Sdk;
 
 namespace SoufflePet.Plugins.QqBot;
 
@@ -98,50 +97,7 @@ internal sealed class QqApiClient
         _clientSecret = clientSecret;
         _apiBaseUrl = apiBaseUrl.TrimEnd('/');
         _logger = logger;
-        _http = CreateHttpClient();
-    }
-
-    /// <summary>创建 QQ 接口与多媒体 CDN 共用的 HttpClient：IPv4 优先建连、不设整体超时（由调用方各自控制）。</summary>
-    public static HttpClient CreateHttpClient()
-    {
-        var handler = new SocketsHttpHandler
-        {
-            ConnectTimeout = TimeSpan.FromSeconds(15),
-            ConnectCallback = ConnectIpv4Async,
-        };
-
-        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) SoufflePet/1.0");
-        return client;
-    }
-
-    /// <summary>只用 IPv4 建连：本机 IPv6 出口不通时，.NET 默认优先尝试 IPv6 会把请求卡到超时。</summary>
-    private static async ValueTask<Stream> ConnectIpv4Async(
-        SocketsHttpConnectionContext context,
-        CancellationToken token)
-    {
-        var addresses = await Dns
-            .GetHostAddressesAsync(context.DnsEndPoint.Host, token)
-            .ConfigureAwait(false);
-
-        var address = Array.Find(addresses, item => item.AddressFamily == AddressFamily.InterNetwork)
-                      ?? (addresses.Length > 0
-                          ? addresses[0]
-                          : throw new HttpRequestException($"无法解析主机 {context.DnsEndPoint.Host}"));
-
-        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        try
-        {
-            await socket
-                .ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), token)
-                .ConfigureAwait(false);
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
+        _http = Ipv4HttpClient.Create();
     }
 
     /// <summary>返回可用的 access_token：缓存有效时直接复用，否则串行刷新。</summary>
