@@ -52,6 +52,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<ChatSessionManager>();
     private const string PlatformInboxTitle = "平台消息";
+    private const string ScheduledInboxTitle = "定时任务";
 
     private readonly object _gate = new();
     /// <summary>索引落盘串行化：多会话并发生成会同时触发 Save，共享的 index.json.tmp 不能并发写。</summary>
@@ -297,7 +298,20 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     /// 取平台消息专用会话；不存在时创建并立即写入索引。它不会切换当前活动会话，
     /// 平台提醒固定进入同一个会话，避免打断用户正在看的对话，也让请求前缀保持稳定。
     /// </summary>
-    public async Task<ChatSession> GetOrCreatePlatformInboxAsync(CancellationToken cancellationToken)
+    public Task<ChatSession> GetOrCreatePlatformInboxAsync(CancellationToken cancellationToken)
+        => GetOrCreateInboxAsync(SessionKind.PlatformInbox, PlatformInboxTitle, cancellationToken);
+
+    /// <summary>
+    /// 取定时任务专用会话；不存在时创建并立即写入索引，同样不切换当前活动会话。
+    /// 定时任务集中在一个会话里，上下文与请求前缀都更稳定。
+    /// </summary>
+    public Task<ChatSession> GetOrCreateScheduledInboxAsync(CancellationToken cancellationToken)
+        => GetOrCreateInboxAsync(SessionKind.ScheduledInbox, ScheduledInboxTitle, cancellationToken);
+
+    private async Task<ChatSession> GetOrCreateInboxAsync(
+        SessionKind kind,
+        string title,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -305,7 +319,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         bool created = false;
         lock (_gate)
         {
-            var existing = _records.FirstOrDefault(item => item.IsPlatformInbox);
+            var existing = _records.FirstOrDefault(item => item.Kind == kind);
             if (existing is not null)
             {
                 record = existing;
@@ -314,8 +328,8 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
             {
                 record = _store.NewDraftRecord(null) with
                 {
-                    Title = PlatformInboxTitle,
-                    IsPlatformInbox = true,
+                    Title = title,
+                    Kind = kind,
                 };
                 _records.Add(record);
                 created = true;
@@ -326,7 +340,7 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         {
             Save();
             RaiseSessionsChanged();
-            Logger.Information("platform inbox session created id={Id}", record.Id);
+            Logger.Information("dedicated session created kind={Kind} id={Id}", kind, record.Id);
         }
 
         return await ResolveAsync(record.Id, cancellationToken).ConfigureAwait(false);

@@ -138,6 +138,19 @@ public sealed record ChatSessionSnapshot(
     ChatUsageState? Usage,
     ChatAskState? Ask);
 
+/// <summary>会话用途：普通对话，或由后台事件固定投递的专用会话。</summary>
+public enum SessionKind
+{
+    /// <summary>普通对话，用户手动创建或打开。</summary>
+    Normal = 0,
+
+    /// <summary>平台消息专用会话：所有消息平台的提醒固定投递到这里。</summary>
+    PlatformInbox = 1,
+
+    /// <summary>定时任务专用会话：所有定时任务的提醒固定投递到这里。</summary>
+    ScheduledInbox = 2,
+}
+
 /// <summary>会话索引里的一条摘要。</summary>
 public sealed record SessionRecord(
     string Id,
@@ -150,8 +163,8 @@ public sealed record SessionRecord(
     string? ModelKey,
     ChatUsageState? Usage = null,
     ChatSessionStatsState? Stats = null,
-    /// <summary>是否为平台消息专用会话：所有平台提醒固定投递到它，不跟随用户当前选中的会话。</summary>
-    bool IsPlatformInbox = false);
+    /// <summary>会话用途；后台事件按用途查找专用会话，不再跟随用户当前选中的会话。</summary>
+    SessionKind Kind = SessionKind.Normal);
 
 /// <summary>会话摘要变化（重命名/首条消息生成标题/一轮结束）。</summary>
 public sealed record ChatSessionSummary(
