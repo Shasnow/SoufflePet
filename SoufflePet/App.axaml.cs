@@ -54,9 +54,11 @@ public class App : Application
             services.AddSingleton(loadedSettings);
             services.AddSingleton(new UiMode(webDev));
             services.AddSingleton<ThemeService>();
-            // 联网搜索的 HTTP 客户端：由 IHttpClientFactory 统一管理生命周期与连接池
+            // 联网搜索的 HTTP 客户端：由 IHttpClientFactory 统一管理生命周期与连接池。
+            // 主 handler 换成双栈竞速连接：DNS 首位的 IPv6 黑洞不再让首次请求干等约 21 秒超时。
             services.AddHttpClient(ChatTools.WebSearchClientName,
-                client => client.Timeout = TimeSpan.FromSeconds(20));
+                    client => client.Timeout = TimeSpan.FromSeconds(20))
+                .ConfigurePrimaryHttpMessageHandler(WebSearchHttpClient.CreatePrimaryHandler);
             services.AddSingleton<IProcessDetector, ProcessDetector>();
             services.AddSingleton<IForegroundDetector, ForegroundDetector>();
             services.AddSingleton<IAutoExpressionService, AutoExpressionService>();
