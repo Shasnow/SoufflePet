@@ -12,11 +12,9 @@
     "accessToken": "",
     "allowedUsers": [],
     "allowedGroups": [],
-    "requireAtInGroup": true,
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
     "replyProbability": 0,
-    "filterSelfMessage": false,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
     "attachmentCacheDir": "attachments",
@@ -48,12 +46,6 @@
       "description": "每行一个群号；留空表示不启用白名单，所有群聊都放行。"
     },
     {
-      "key": "requireAtInGroup",
-      "label": "群聊仅 @ 时提醒",
-      "type": "boolean",
-      "description": "开启后只有 @ 桌宠的群消息才会唤醒它；关闭后允许群里的每条消息都唤醒。"
-    },
-    {
       "key": "wakeOnPrivateMessage",
       "label": "私聊消息提醒桌宠",
       "type": "boolean",
@@ -70,12 +62,6 @@
       "label": "概率回复（0-1）",
       "type": "number",
       "description": "仅对群聊生效：非 @ 桌宠、非引用桌宠、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠搭话；0 表示关闭。"
-    },
-    {
-      "key": "filterSelfMessage",
-      "label": "过滤自己发出的消息",
-      "type": "boolean",
-      "description": "开启后忽略机器人自己发出的消息，避免自己回复自己；默认关闭，需要时可手动开启。"
     },
     {
       "key": "maxReplyChars",
