@@ -403,6 +403,22 @@ public sealed class ChatSession : IAsyncDisposable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 仅切换本会话使用的模型（定时任务等后台投递使用），不改动全局默认模型；
+    /// 模型已停用或不存在时保持原选择。
+    /// </summary>
+    internal void ApplyModelForBackgroundTurn(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+        lock (_gate)
+        {
+            if (_settings.ChatModels.All(model => model.Key != key)) return;
+            if (string.Equals(_selectedModelKey, key, StringComparison.Ordinal)) return;
+            _selectedModelKey = key;
+            EmitLocked(new ChatOpModels(SnapshotModelsLocked(), _selectedModelKey));
+        }
+    }
+
     /// <summary>设置页改了提供商/模型后，把新清单推给对话页；选中项失效时回落到默认模型。</summary>
     public void RefreshModels()
     {

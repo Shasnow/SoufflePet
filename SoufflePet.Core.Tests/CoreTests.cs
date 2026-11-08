@@ -136,7 +136,7 @@ public sealed class ScheduledTaskTests
         {
             Kind = ScheduledTaskKind.Once,
             OnceDate = new DateTimeOffset(2026, 11, 6, 0, 0, 0, TimeSpan.FromHours(8)),
-            OnceTime = new TimeSpan(9, 0, 0),
+            TimeOfDay = new TimeSpan(9, 0, 0),
         };
         Assert.Equal(new DateTime(2026, 11, 6, 9, 0, 0), ScheduledTaskService.ComputeNext(once, Reference));
         once.Completed = true;

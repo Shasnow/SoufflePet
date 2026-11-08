@@ -12,7 +12,12 @@ using SoufflePet.Models;
 namespace SoufflePet.Services;
 
 /// <summary>一条到点需要执行的定时任务（交给对话层发起一轮对话）。</summary>
-public sealed record ScheduledTaskTrigger(string TaskId, string Name, string Content);
+public sealed record ScheduledTaskTrigger(
+    string TaskId,
+    string Name,
+    string Content,
+    string? WorkspacePath = null,
+    string? ModelKey = null);
 
 /// <summary>
 /// 一条定时任务的调度参数：调用方（对话工具、界面）把外部输入解析成强类型后组装，由
@@ -46,13 +51,20 @@ public interface IScheduledTaskService : IDisposable
     void ClearLogs();
     IReadOnlyList<ScheduledTask> ListScheduledTasks();
     ScheduledTask? FindTask(string id);
-    ScheduledTask CreateScheduledTask(string name, string content, ScheduledTaskSchedule schedule);
+    ScheduledTask CreateScheduledTask(
+        string name,
+        string content,
+        ScheduledTaskSchedule schedule,
+        string? workspacePath = null,
+        string? modelKey = null);
     ScheduledTask? UpdateScheduledTask(
         string id,
         string? name,
         string? content,
         ScheduledTaskSchedule? schedule,
-        bool? enabled);
+        bool? enabled,
+        string? workspacePath = null,
+        string? modelKey = null);
     ScheduledTask? DeleteScheduledTask(string id);
 }
 
@@ -125,7 +137,8 @@ public sealed class ScheduledTaskService : IScheduledTaskService
             AddLog($"手动执行任务「{task.Name}」");
             SaveSettings();
             ArmTimerCore();
-            Triggered?.Invoke(this, new ScheduledTaskTrigger(task.Id, task.Name, task.Content));
+            Triggered?.Invoke(this, new ScheduledTaskTrigger(
+                task.Id, task.Name, task.Content, task.WorkspacePath, task.ModelKey));
         });
     }
 
@@ -166,13 +179,19 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         return result;
     }
 
-    public ScheduledTask CreateScheduledTask(string name, string content, ScheduledTaskSchedule schedule)
+    public ScheduledTask CreateScheduledTask(
+        string name,
+        string content,
+        ScheduledTaskSchedule schedule,
+        string? workspacePath = null,
+        string? modelKey = null)
     {
         var task = new ScheduledTask();
         RunOnUiThread(() =>
         {
             task.Name = name;
             task.Content = content;
+            ApplyRoute(task, workspacePath, modelKey);
             ApplySchedule(task, schedule);
             _settings.ScheduledTasks.Add(task);
             RefreshCore();
@@ -186,13 +205,15 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         string? name,
         string? content,
         ScheduledTaskSchedule? schedule,
-        bool? enabled)
+        bool? enabled,
+        string? workspacePath = null,
+        string? modelKey = null)
     {
         ScheduledTask? result = null;
         RunOnUiThread(() =>
         {
             if (FindTaskCore(id) is not { } task) return;
-            ApplyChange(task, name, content, schedule, enabled);
+            ApplyChange(task, name, content, schedule, enabled, workspacePath, modelKey);
             RefreshCore();
             result = task;
         });
@@ -225,7 +246,7 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         bool? enabled)
     {
         var task = basedOn is null ? new ScheduledTask() : Copy(basedOn);
-        ApplyChange(task, name, content, schedule, enabled);
+        ApplyChange(task, name, content, schedule, enabled, null, null);
         return task;
     }
 
@@ -254,13 +275,25 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         string? name,
         string? content,
         ScheduledTaskSchedule? schedule,
-        bool? enabled)
+        bool? enabled,
+        string? workspacePath,
+        string? modelKey)
     {
         if (name is { } newName) task.Name = newName;
         if (content is { } newContent) task.Content = newContent;
         if (schedule is { } newSchedule) ApplySchedule(task, newSchedule);
         if (enabled is { } isEnabled) task.Enabled = isEnabled;
+        ApplyRoute(task, workspacePath, modelKey);
     }
+
+    /// <summary>null 表示保持原值，空字符串表示清空（投递到全局定时任务会话 / 沿用会话模型）。</summary>
+    private static void ApplyRoute(ScheduledTask task, string? workspacePath, string? modelKey)
+    {
+        if (workspacePath is { } path) task.WorkspacePath = NullIfBlank(path);
+        if (modelKey is { } key) task.ModelKey = NullIfBlank(key);
+    }
+
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void ApplySchedule(ScheduledTask task, ScheduledTaskSchedule schedule)
     {
@@ -270,7 +303,7 @@ public sealed class ScheduledTaskService : IScheduledTaskService
             case ScheduledTaskKind.Once:
                 if (schedule.OnceDate is not null || schedule.TimeOfDay is not null) task.Completed = false;
                 if (schedule.OnceDate is { } onceDate) task.OnceDate = onceDate;
-                if (schedule.TimeOfDay is { } onceTime) task.OnceTime = onceTime;
+                if (schedule.TimeOfDay is { } onceTime) task.TimeOfDay = onceTime;
                 break;
             case ScheduledTaskKind.Daily:
                 if (schedule.TimeOfDay is { } dailyTime) task.TimeOfDay = dailyTime;
@@ -296,11 +329,12 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         Enabled = task.Enabled,
         Kind = task.Kind,
         OnceDate = task.OnceDate,
-        OnceTime = task.OnceTime,
         TimeOfDay = task.TimeOfDay,
         Weekdays = [.. task.Weekdays],
         IntervalMinutes = task.IntervalMinutes,
         Content = task.Content,
+        WorkspacePath = task.WorkspacePath,
+        ModelKey = task.ModelKey,
         Completed = task.Completed,
     };
 
@@ -374,7 +408,8 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         var nextText = task.NextRunAt is { } next ? next.ToString("yyyy-MM-dd HH:mm") : "无（不再重复）";
         AddLog($"任务「{task.Name}」已触发，交给桌宠执行（下次 {nextText}）");
         Logger.Information("scheduled task fired {Name} kind={Kind}", task.Name, task.Kind);
-        Triggered?.Invoke(this, new ScheduledTaskTrigger(task.Id, task.Name, task.Content));
+        Triggered?.Invoke(this, new ScheduledTaskTrigger(
+            task.Id, task.Name, task.Content, task.WorkspacePath, task.ModelKey));
     }
 
     private void ArmTimerCore()
@@ -412,7 +447,7 @@ public sealed class ScheduledTaskService : IScheduledTaskService
             case ScheduledTaskKind.Once:
                 if (task.Completed) return null;
                 return (task.OnceDate ?? DateTimeOffset.Now).LocalDateTime.Date +
-                       (task.OnceTime ?? new TimeSpan(9, 0, 0));
+                       (task.TimeOfDay ?? new TimeSpan(9, 0, 0));
 
             case ScheduledTaskKind.Daily:
                 return NextDaily(reference, task.TimeOfDay);

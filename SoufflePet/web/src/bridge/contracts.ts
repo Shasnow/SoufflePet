@@ -261,13 +261,14 @@ export interface TaskDto {
   enabled: boolean
   kind: TaskKind
   onceDate?: string
-  onceTime?: string
   timeOfDay?: string
   weekdays: number[]
   intervalMinutes: number
   completed: boolean
   nextRunAt?: string
   lastRunAt?: string
+  workspacePath?: string
+  modelKey?: string
 }
 
 export interface TaskInputDto {
@@ -277,10 +278,11 @@ export interface TaskInputDto {
   enabled: boolean
   kind: TaskKind
   onceDate?: string
-  onceTime?: string
   timeOfDay?: string
   weekdays: number[]
   intervalMinutes: number
+  workspacePath?: string
+  modelKey?: string
 }
 
 export interface ScheduledTaskLogDto {

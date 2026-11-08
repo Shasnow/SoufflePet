@@ -361,15 +361,17 @@ interface PluginDto {
 interface TaskDto {
   id: string; name: string; content: string; enabled: boolean
   kind: 'once' | 'daily' | 'weekly' | 'interval'
-  onceDate?: string; onceTime?: string; timeOfDay?: string
+  onceDate?: string; timeOfDay?: string   // timeOfDay 由单次 / 每日 / 每周共用
   weekdays: number[]      // 0=Sunday … 6=Saturday
   intervalMinutes: number
   completed: boolean; nextRunAt?: string; lastRunAt?: string
+  workspacePath?: string; modelKey?: string
 }
 interface TaskInputDto {
   id?: string; name: string; content: string; enabled: boolean
-  kind: TaskDto['kind']; onceDate?: string; onceTime?: string
+  kind: TaskDto['kind']; onceDate?: string
   timeOfDay?: string; weekdays: number[]; intervalMinutes: number
+  workspacePath?: string; modelKey?: string
 }
 interface ScheduledTaskLogDto { text: string; isError: boolean }
 

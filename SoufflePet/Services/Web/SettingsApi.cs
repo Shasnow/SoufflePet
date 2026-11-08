@@ -552,20 +552,55 @@ public sealed class SettingsApi(
             throw new BridgeRpcException("invalid_argument", "请填写任务内容");
 
         var schedule = ParseSchedule(input);
+        var workspace = NormalizeTaskWorkspace(input.WorkspacePath);
+        var model = NormalizeTaskModel(input.ModelKey);
         ScheduledTask? task;
         if (string.IsNullOrWhiteSpace(input.Id))
         {
-            task = scheduler.CreateScheduledTask(name, input.Content.Trim(), schedule);
+            task = scheduler.CreateScheduledTask(name, input.Content.Trim(), schedule, workspace, model);
             task = scheduler.UpdateScheduledTask(task.Id, null, null, null, input.Enabled) ?? task;
         }
         else
         {
-            task = scheduler.UpdateScheduledTask(input.Id, name, input.Content.Trim(), schedule, input.Enabled)
+            task = scheduler.UpdateScheduledTask(
+                       input.Id, name, input.Content.Trim(), schedule, input.Enabled,
+                       workspace, model)
                    ?? throw new BridgeRpcException("not_found", "任务不存在");
         }
 
         scheduler.Refresh();
         return MapTask(task);
+    }
+
+    /// <summary>任务工作区必须是已存在的目录；未填写表示投递到全局定时任务会话。</summary>
+    private static string? NormalizeTaskWorkspace(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try
+        {
+            var full = Path.GetFullPath(path.Trim());
+            if (!Directory.Exists(full))
+                throw new BridgeRpcException("invalid_argument", "工作区目录不存在");
+            return full;
+        }
+        catch (BridgeRpcException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new BridgeRpcException("invalid_argument", "工作区路径无效");
+        }
+    }
+
+    /// <summary>任务模型必须仍是启用状态；未填写表示沿用目标会话当前的模型。</summary>
+    private string? NormalizeTaskModel(string? modelKey)
+    {
+        if (string.IsNullOrWhiteSpace(modelKey)) return null;
+        var key = modelKey.Trim();
+        if (settings.ChatModels.All(model => !string.Equals(model.Key, key, StringComparison.Ordinal)))
+            throw new BridgeRpcException("invalid_argument", "对话模型不存在或已被停用");
+        return key;
     }
 
     private object TasksDelete(string id)
@@ -615,8 +650,8 @@ public sealed class SettingsApi(
             _ => ScheduledTaskKind.Daily,
         };
 
-        TimeSpan? time = null;
-        if (TryParseTime(input.TimeOfDay ?? input.OnceTime) is { } parsedTime) time = parsedTime;
+        // 单次 / 每日 / 每周共用 TimeOfDay 作为触发时刻
+        var time = TryParseTime(input.TimeOfDay);
 
         DateTimeOffset? onceDate = null;
         if (kind == ScheduledTaskKind.Once)
@@ -653,13 +688,14 @@ public sealed class SettingsApi(
         task.Enabled,
         task.Kind.ToString().ToLowerInvariant(),
         task.OnceDate?.ToString("yyyy-MM-dd"),
-        task.OnceTime?.ToString(@"hh\:mm"),
         task.TimeOfDay?.ToString(@"hh\:mm"),
         [.. task.Weekdays.Select(day => (int)day)],
         task.IntervalMinutes,
         task.Completed,
         ToIso(task.NextRunAt),
-        ToIso(task.LastRunAt));
+        ToIso(task.LastRunAt),
+        task.WorkspacePath,
+        task.ModelKey);
 
     private static string? ToIso(DateTime? value) =>
         value is { } time ? new DateTimeOffset(time).ToString("O") : null;

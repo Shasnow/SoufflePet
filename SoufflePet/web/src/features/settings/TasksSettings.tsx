@@ -4,7 +4,8 @@
 import { Clock, Play, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@/bridge/client'
-import type { ScheduledTaskLogDto, TaskDto, TaskInputDto } from '@/bridge/contracts'
+import type { ChatModelDto, ScheduledTaskLogDto, TaskDto, TaskInputDto } from '@/bridge/contracts'
+import { useAppStore } from '@/stores/appStore'
 import { useToastStore } from '@/stores/toastStore'
 import { Dialog } from '@/ui/Dialog'
 import { errorMessage, SettingsCard, SettingsEmpty, SettingsError, Toggle } from './SettingsShared'
@@ -12,6 +13,10 @@ import { errorMessage, SettingsCard, SettingsEmpty, SettingsError, Toggle } from
 interface TasksListPayload {
   tasks: TaskDto[]
   logs: ScheduledTaskLogDto[]
+}
+
+interface LlmListPayload {
+  enabledModels: ChatModelDto[]
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -25,10 +30,11 @@ function toInput(task: TaskDto | null): TaskInputDto {
       enabled: task.enabled,
       kind: task.kind,
       onceDate: task.onceDate,
-      onceTime: task.onceTime,
       timeOfDay: task.timeOfDay,
       weekdays: [...task.weekdays],
       intervalMinutes: task.intervalMinutes,
+      workspacePath: task.workspacePath,
+      modelKey: task.modelKey,
     }
   }
 
@@ -47,7 +53,7 @@ function toInput(task: TaskDto | null): TaskInputDto {
 function scheduleText(task: TaskDto): string {
   switch (task.kind) {
     case 'once':
-      return `单次 ${task.onceDate ?? ''} ${task.onceTime ?? task.timeOfDay ?? ''}`.trim()
+      return `单次 ${task.onceDate ?? ''} ${task.timeOfDay ?? '09:00'}`.trim()
     case 'daily':
       return `每天 ${task.timeOfDay ?? '09:00'}`
     case 'weekly': {
@@ -79,7 +85,9 @@ function nextRunText(task: TaskDto): string {
 
 export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }) {
   const pushToast = useToastStore((state) => state.push)
+  const workspaces = useAppStore((state) => state.workspaces)
   const [data, setData] = useState<TasksListPayload | null>(null)
+  const [models, setModels] = useState<ChatModelDto[]>([])
   const [editing, setEditing] = useState<TaskInputDto | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,9 +103,27 @@ export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }
     }
   }, [])
 
+  const loadModels = useCallback(async () => {
+    try {
+      const payload = await invoke<LlmListPayload>('settings.llm.list')
+      setModels(payload.enabledModels)
+    } catch {
+      setModels([])
+    }
+  }, [])
+
   useEffect(() => {
     void load()
-  }, [load])
+    void loadModels()
+  }, [load, loadModels])
+
+  const workspaceName = (path: string) =>
+    workspaces.find((item) => item.path === path)?.name ?? path
+
+  const modelName = (key: string) => {
+    const model = models.find((item) => item.key === key)
+    return model ? model.name || model.modelId : key
+  }
 
   const openNew = () => {
     setEditing(toInput(null))
@@ -213,6 +239,12 @@ export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }
                   <button type="button" className="task-card-main" onClick={() => openEdit(task)}>
                     <span className="task-card-title">{task.name}</span>
                     <span className="task-card-content">{task.content || '没有填写任务内容'}</span>
+                    {task.workspacePath || task.modelKey ? (
+                      <span className="task-card-meta">
+                        {task.workspacePath ? <span>工作区 · {workspaceName(task.workspacePath)}</span> : null}
+                        {task.modelKey ? <span>模型 · {modelName(task.modelKey)}</span> : null}
+                      </span>
+                    ) : null}
                     <span className="task-card-foot">
                       <span className="task-card-schedule">
                         <Clock size={12} />
@@ -296,7 +328,7 @@ export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }
                       kind === 'once' && !editing.onceDate
                         ? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
                         : editing.onceDate
-                    update({ kind, onceDate, onceTime: editing.onceTime ?? editing.timeOfDay ?? '09:00' })
+                    update({ kind, onceDate, timeOfDay: editing.timeOfDay ?? '09:00' })
                   }}
                 >
                   <option value="once">单次</option>
@@ -337,8 +369,8 @@ export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }
                     id="task-once-time"
                     className="input"
                     type="time"
-                    value={editing.onceTime ?? editing.timeOfDay ?? '09:00'}
-                    onChange={(event) => update({ onceTime: event.target.value })}
+                    value={editing.timeOfDay ?? '09:00'}
+                    onChange={(event) => update({ timeOfDay: event.target.value })}
                   />
                 </div>
               </div>
@@ -392,6 +424,48 @@ export function TasksSettings({ view = 'tasks' }: { view?: 'tasks' | 'history' }
                 ) : null}
               </>
             )}
+
+            <div className="settings-grid-2">
+              <div className="field">
+                <label className="field-label" htmlFor="task-workspace">投递工作区</label>
+                <select
+                  id="task-workspace"
+                  className="select"
+                  value={editing.workspacePath ?? ''}
+                  onChange={(event) => update({ workspacePath: event.target.value || undefined })}
+                >
+                  <option value="">不指定（全局定时任务会话）</option>
+                  {editing.workspacePath && !workspaces.some((item) => item.path === editing.workspacePath) ? (
+                    <option value={editing.workspacePath}>{editing.workspacePath}（已失效）</option>
+                  ) : null}
+                  {workspaces.map((item) => (
+                    <option value={item.path} key={item.path}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="task-model">对话模型</label>
+                <select
+                  id="task-model"
+                  className="select"
+                  value={editing.modelKey ?? ''}
+                  onChange={(event) => update({ modelKey: event.target.value || undefined })}
+                >
+                  <option value="">沿用会话当前模型</option>
+                  {editing.modelKey && !models.some((item) => item.key === editing.modelKey) ? (
+                    <option value={editing.modelKey}>{editing.modelKey}（已停用）</option>
+                  ) : null}
+                  {models.map((item) => (
+                    <option value={item.key} key={item.key}>
+                      {item.provider} · {item.name || item.modelId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="field-hint">
+              指定工作区后，任务会投递到该工作区下的「定时任务」会话（没有则自动新建）；指定模型会切换该会话使用的模型，不改动全局默认模型。
+            </p>
 
             <Toggle
               checked={editing.enabled}

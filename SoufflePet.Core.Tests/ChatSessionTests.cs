@@ -387,6 +387,36 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ScheduledInboxRoutesToWorkspaceAndAppliesModelWithoutChangingDefault()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));
+        var workspace = Path.Combine(_root, "ws-scheduled");
+        Directory.CreateDirectory(workspace);
+
+        _settings.ChatProviders[0].Models.Add(
+            new ChatProviderModel { ModelId = "other", Name = "另一个模型", IsActive = true });
+        _settings.RebuildChatModels();
+        var defaultKey = _settings.ChatModelKey;
+        var modelKey = _settings.ChatModels.First(model => model.Key != defaultKey).Key;
+
+        var inbox = await manager.GetOrCreateScheduledInboxAsync(workspace, modelKey, CancellationToken.None);
+        Assert.Equal(Path.GetFullPath(workspace), inbox.Snapshot.Workspace?.Path);
+        Assert.Equal(modelKey, inbox.Snapshot.SelectedModelKey);
+        // 后台投递切换会话模型，但不能改掉用户的全局默认模型
+        Assert.Equal(defaultKey, _settings.ChatModelKey);
+
+        // 同一工作区复用同一个定时任务会话，未指定模型时保持原模型
+        var again = await manager.GetOrCreateScheduledInboxAsync(workspace, null, CancellationToken.None);
+        Assert.Equal(inbox.Id, again.Id);
+        Assert.Equal(modelKey, again.Snapshot.SelectedModelKey);
+
+        // 未指定工作区仍进入全局定时任务会话
+        var global = await manager.GetOrCreateScheduledInboxAsync(null, null, CancellationToken.None);
+        Assert.NotEqual(inbox.Id, global.Id);
+        Assert.Null(global.Snapshot.Workspace);
+    }
+
+    [Fact]
     public async Task ResolveAsyncDoesNotChangeActiveSession()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));

@@ -84,12 +84,7 @@ public partial class ScheduledTask : ObservableObject
     [NotifyPropertyChangedFor(nameof(ScheduleText))]
     public partial DateTimeOffset? OnceDate { get; set; } = DateTimeOffset.Now.Date;
 
-    /// <summary>单次定时的触发时刻。</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ScheduleText))]
-    public partial TimeSpan? OnceTime { get; set; } = DefaultTimeOfDay;
-
-    /// <summary>每日 / 每周定时的触发时刻。</summary>
+    /// <summary>触发时刻（单次 / 每日 / 每周共用）。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ScheduleText))]
     public partial TimeSpan? TimeOfDay { get; set; } = DefaultTimeOfDay;
@@ -112,6 +107,14 @@ public partial class ScheduledTask : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasContent))]
     [NotifyPropertyChangedFor(nameof(ContentPreview))]
     public partial string Content { get; set; } = string.Empty;
+
+    /// <summary>任务投递的目标工作区；为空时投递到全局「定时任务」会话。</summary>
+    [ObservableProperty]
+    public partial string? WorkspacePath { get; set; }
+
+    /// <summary>任务投递时使用的对话模型 key；为空时沿用目标会话当前的模型。</summary>
+    [ObservableProperty]
+    public partial string? ModelKey { get; set; }
 
     /// <summary>上次触发时间（本地时间）；不持久化。</summary>
     [ObservableProperty]
@@ -155,7 +158,7 @@ public partial class ScheduledTask : ObservableObject
     public string ScheduleText => Kind switch
     {
         ScheduledTaskKind.Once =>
-            $"单次 {(OnceDate ?? DateTimeOffset.Now).LocalDateTime:yyyy-MM-dd} {FormatTime(OnceTime)}",
+            $"单次 {(OnceDate ?? DateTimeOffset.Now).LocalDateTime:yyyy-MM-dd} {FormatTime(TimeOfDay)}",
         ScheduledTaskKind.Daily => $"每日 {FormatTime(TimeOfDay)}",
         ScheduledTaskKind.Weekly => Weekdays.Count == 0
             ? $"每周 {FormatTime(TimeOfDay)}（未选星期，按每天）"

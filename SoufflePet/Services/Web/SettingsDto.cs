@@ -73,13 +73,14 @@ public sealed record TaskDto(
     bool Enabled,
     string Kind,
     string? OnceDate,
-    string? OnceTime,
     string? TimeOfDay,
     IReadOnlyList<int> Weekdays,
     int IntervalMinutes,
     bool Completed,
     string? NextRunAt,
-    string? LastRunAt);
+    string? LastRunAt,
+    string? WorkspacePath,
+    string? ModelKey);
 
 public sealed record TaskInputDto(
     string? Id,
@@ -88,10 +89,11 @@ public sealed record TaskInputDto(
     bool Enabled,
     string Kind,
     string? OnceDate,
-    string? OnceTime,
     string? TimeOfDay,
     IReadOnlyList<int> Weekdays,
-    int IntervalMinutes);
+    int IntervalMinutes,
+    string? WorkspacePath,
+    string? ModelKey);
 
 public sealed record ScheduledTaskLogDto(string Text, bool IsError);
 

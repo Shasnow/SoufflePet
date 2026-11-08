@@ -311,51 +311,80 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     /// 平台提醒固定进入同一个会话，避免打断用户正在看的对话，也让请求前缀保持稳定。
     /// </summary>
     public Task<ChatSession> GetOrCreatePlatformInboxAsync(CancellationToken cancellationToken)
-        => GetOrCreateInboxAsync(SessionKind.PlatformInbox, PlatformInboxTitle, cancellationToken);
+        => GetOrCreateInboxAsync(SessionKind.PlatformInbox, PlatformInboxTitle, null, null, cancellationToken);
 
     /// <summary>
-    /// 取定时任务专用会话；不存在时创建并立即写入索引，同样不切换当前活动会话。
-    /// 定时任务集中在一个会话里，上下文与请求前缀都更稳定。
+    /// 取某个工作区下的定时任务专用会话；不存在时创建并立即写入索引，同样不切换当前活动会话。
+    /// 指定了 <paramref name="modelKey" /> 时会把该会话的模型切到指定模型（不改全局默认模型）。
+    /// 工作区为空表示全局定时任务会话。
     /// </summary>
-    public Task<ChatSession> GetOrCreateScheduledInboxAsync(CancellationToken cancellationToken)
-        => GetOrCreateInboxAsync(SessionKind.ScheduledInbox, ScheduledInboxTitle, cancellationToken);
+    public Task<ChatSession> GetOrCreateScheduledInboxAsync(
+        string? workspacePath,
+        string? modelKey,
+        CancellationToken cancellationToken)
+        => GetOrCreateInboxAsync(SessionKind.ScheduledInbox, ScheduledInboxTitle, workspacePath, modelKey, cancellationToken);
 
     private async Task<ChatSession> GetOrCreateInboxAsync(
         SessionKind kind,
         string title,
+        string? workspacePath,
+        string? modelKey,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var workspace = NormalizeWorkspacePath(workspacePath);
+        if (workspace is null && !string.IsNullOrWhiteSpace(workspacePath))
+            Logger.Warning("dedicated session workspace missing, fallback to default kind={Kind} path={Path}", kind, workspacePath);
+
+        var model = NormalizeModelKey(modelKey);
+        if (model is null && !string.IsNullOrWhiteSpace(modelKey))
+            Logger.Warning("dedicated session model unavailable, keep session model kind={Kind} model={Model}", kind, modelKey);
+
         SessionRecord record;
         bool created = false;
+        bool changed = false;
         lock (_gate)
         {
-            var existing = _records.FirstOrDefault(item => item.Kind == kind);
+            var existing = _records.FirstOrDefault(item =>
+                item.Kind == kind &&
+                string.Equals(item.WorkspacePath, workspace, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
                 record = existing;
+                if (model is not null && !string.Equals(existing.ModelKey, model, StringComparison.Ordinal))
+                {
+                    record = existing with { ModelKey = model };
+                    var index = _records.FindIndex(item => item.Id == existing.Id);
+                    if (index >= 0) _records[index] = record;
+                    changed = true;
+                }
             }
             else
             {
-                record = _store.NewDraftRecord(null) with
+                record = _store.NewDraftRecord(workspace) with
                 {
                     Title = title,
                     Kind = kind,
+                    ModelKey = model,
                 };
                 _records.Add(record);
                 created = true;
             }
         }
 
-        if (created)
+        if (created || changed)
         {
             Save();
             RaiseSessionsChanged();
-            Logger.Information("dedicated session created kind={Kind} id={Id}", kind, record.Id);
+            Logger.Information(
+                "dedicated session {Action} kind={Kind} id={Id} workspace={Workspace} model={Model}",
+                created ? "created" : "updated", kind, record.Id, workspace, model);
         }
 
-        return await ResolveAsync(record.Id, cancellationToken).ConfigureAwait(false);
+        var session = await ResolveAsync(record.Id, cancellationToken).ConfigureAwait(false);
+        if (model is not null) session.ApplyModelForBackgroundTurn(model);
+        return session;
     }
 
     public async Task<ChatSession> OpenAsync(string sessionId, CancellationToken cancellationToken)
@@ -740,6 +769,16 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         {
             return null;
         }
+    }
+
+    /// <summary>后台投递只接受当前仍启用的模型；找不到时返回 null，沿用会话原模型。</summary>
+    private string? NormalizeModelKey(string? modelKey)
+    {
+        if (string.IsNullOrWhiteSpace(modelKey)) return null;
+        var key = modelKey.Trim();
+        return _settings.ChatModels.Any(model => string.Equals(model.Key, key, StringComparison.Ordinal))
+            ? key
+            : null;
     }
 
     public async ValueTask DisposeAsync()

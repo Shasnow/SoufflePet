@@ -259,6 +259,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       intervalMinutes: 60,
       completed: false,
       nextRunAt: iso(-60 * 48),
+      workspacePath: NOTES_WORKSPACE.path,
+      modelKey: 'deepseek/deepseek-reasoner',
     },
     {
       id: 'task-interval',

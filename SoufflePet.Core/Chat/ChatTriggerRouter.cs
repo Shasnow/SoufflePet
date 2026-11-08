@@ -82,7 +82,7 @@ public sealed class ChatTriggerRouter : IDisposable
         _ = RouteScheduledTaskAsync(trigger);
     }
 
-    /// <summary>定时任务固定投递到「定时任务」专用会话，不切换用户当前活动会话。</summary>
+    /// <summary>定时任务投递到目标工作区（未指定则全局）的「定时任务」专用会话，不切换用户当前活动会话。</summary>
     private async Task RouteScheduledTaskAsync(ScheduledTaskTrigger trigger)
     {
         try
@@ -90,7 +90,7 @@ public sealed class ChatTriggerRouter : IDisposable
             if (_disposed) return;
 
             var session = await _sessions
-                .GetOrCreateScheduledInboxAsync(CancellationToken.None)
+                .GetOrCreateScheduledInboxAsync(trigger.WorkspacePath, trigger.ModelKey, CancellationToken.None)
                 .ConfigureAwait(false);
 
             var display = $"⏰ 定时任务「{trigger.Name}」：{Preview(trigger.Content)}";
