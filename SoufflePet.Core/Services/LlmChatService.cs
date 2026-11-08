@@ -804,10 +804,6 @@ public sealed class LlmChatService(
             foreach (var entry in roles)
                 builder.Append("- ").Append(entry.Id).Append('：').AppendLine(entry.Role!.Trim());
         }
-
-        builder.AppendLine("- 收到 [平台消息] 时，消息行以 [会话 id] 开头，会话 id 形如 group:12345 或 private:777 。");
-        builder.AppendLine("- 要查看指定会话的上下文用 `get_platform_messages`");
-        builder.AppendLine("- 回复会话时必须用 `send_platform_message`");
     }
 
     /// <summary>

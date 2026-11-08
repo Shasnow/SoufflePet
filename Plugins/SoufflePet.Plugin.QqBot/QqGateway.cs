@@ -16,11 +16,11 @@ namespace SoufflePet.Plugins.QqBot;
 
 /// <summary>
 /// QQ 官方机器人 WebSocket 网关：负责建连、Hello/心跳、Identify/Resume、事件分发与断线重连。
-/// 只处理 GROUP_AND_C2C_EVENT（群内 @ 与单聊）对应的事件。
+/// 只处理 GROUP_AND_C2C_EVENT（群内消息与单聊）对应的事件。
 /// </summary>
 internal sealed class QqGateway
 {
-    /// <summary>GROUP_AND_C2C_EVENT：群聊 @ 机器人与单聊消息。</summary>
+    /// <summary>GROUP_AND_C2C_EVENT：群聊消息（@ 与全量模式）与单聊消息。</summary>
     private const int GroupAndC2cIntent = 1 << 25;
 
     /// <summary>单帧消息上限，防止异常数据无限占用内存。</summary>

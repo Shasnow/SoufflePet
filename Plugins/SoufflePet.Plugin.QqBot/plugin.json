@@ -3,7 +3,7 @@
   "name": "QQ 官方机器人消息平台",
   "version": "1.0.0",
   "author": "SoufflePet",
-  "description": "通过 QQ 官方机器人 API v2 接入 QQ：群聊里 @ 机器人或单聊时提醒桌宠，并可在最近一次会话里回复消息。需要机器人 AppID 与 Secret，且机器人已加入目标群。",
+  "description": "通过 QQ 官方机器人 API v2 接入 QQ：群聊里 @ 机器人、开启全量模式后的群消息或单聊时提醒桌宠，并可在最近一次会话里回复消息。需要机器人 AppID 与 Secret，且机器人已加入目标群。",
   "assembly": "SoufflePet.Plugin.QqBot.dll",
   "entryType": "SoufflePet.Plugins.QqBot.QqBotPlugin",
   "timeoutSeconds": 30,
@@ -16,6 +16,8 @@
     "allowedGroups": [],
     "openIdNames": [],
     "wakeOnPrivateMessage": true,
+    "wakeWords": [],
+    "replyProbability": 0,
     "allowActiveMessage": true,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
@@ -69,7 +71,19 @@
       "key": "wakeOnPrivateMessage",
       "label": "单聊消息提醒桌宠",
       "type": "boolean",
-      "description": "收到允许用户的单聊时主动提醒桌宠；关闭后只记录、不唤醒。群聊只有 @ 机器人才会收到，始终提醒。"
+      "description": "收到允许用户的单聊时主动提醒桌宠；关闭后只记录、不唤醒。群聊 @ 机器人时始终提醒；开启「接收所有消息」后，未 @ 机器人的群消息只记录、不唤醒。"
+    },
+    {
+      "key": "wakeWords",
+      "label": "唤醒词",
+      "type": "list",
+      "description": "每行一个词；仅对群聊生效，消息正文含有任意一个（不区分大小写）就唤醒桌宠（无需 @）。留空表示不启用。"
+    },
+    {
+      "key": "replyProbability",
+      "label": "概率唤醒（0-1）",
+      "type": "number",
+      "description": "仅对群聊生效：未 @ 机器人、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠搭话；0 表示关闭。"
     },
     {
       "key": "allowActiveMessage",

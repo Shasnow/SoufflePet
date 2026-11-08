@@ -66,9 +66,9 @@ public sealed class ChatTriggerRouter : IDisposable
             var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {senderName}：{Preview(notification.Content)}";
             var prompt = new StringBuilder()
                 .Append(PlatformNoticePrefix)
-                .Append($"「{notification.PlatformId}」收到一条新消息（发送者：")
-                .Append(senderName).Append("）：\n")
-                .Append("<<<\n").Append(notification.Content).Append("\n>>>").ToString();
+                .AppendLine($"「{notification.PlatformId}」<<<\n{notification.Content}\n>>>")
+                .AppendLine("在回复之前，使用 `get_platform_messages` 查看上下文，然后使用 `send_platform_message` 回复。")
+                .ToString();
             _ = session.EnqueueSystemTurnAsync(prompt, display, isPlatformNotice: true);
         }
         catch (Exception ex)

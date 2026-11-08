@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -17,7 +18,7 @@ using SoufflePet.Plugin.Sdk;
 namespace SoufflePet.Plugins.QqBot;
 
 /// <summary>
-/// QQ 官方机器人消息平台：通过 WebSocket 网关接收群聊 @ 机器人与单聊消息，
+/// QQ 官方机器人消息平台：通过 WebSocket 网关接收群聊消息（@ 机器人或全量模式）与单聊消息，
 /// 用 REST 接口按会话回复；优先使用被动回复（msg_id + msg_seq），窗口用尽时可按配置回退主动消息。
 /// 会话 id 形如 group:&lt;group_openid&gt; 或 private:&lt;user_openid&gt;。
 /// </summary>
@@ -25,6 +26,9 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 {
     /// <summary>每个会话最多保留的历史消息条数。</summary>
     private const int MaxHistoryMessages = 50;
+
+    /// <summary>历史记录里机器人自己发送的消息使用的发送者名称。</summary>
+    private const string AssistantLabel = "你";
 
     /// <summary>最多保留的会话数，超出时淘汰最久未活跃的会话。</summary>
     private const int MaxConversations = 200;
@@ -55,6 +59,18 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     private readonly Dictionary<string, string> _conversationNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _lastActive = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PassiveReplyContext> _passive = new(StringComparer.Ordinal);
+
+    /// <summary>已处理的消息 id：官方可能重复推送同一 msg_id，需要用它去重。</summary>
+    private readonly HashSet<string> _recentMessageIds = new(StringComparer.Ordinal);
+    private readonly Queue<string> _recentMessageIdOrder = new();
+
+    /// <summary>已唤醒过的消息 id：同一条消息可能先来全量事件、再来 @ 事件，只唤醒一次。</summary>
+    private readonly HashSet<string> _wokenMessageIds = new(StringComparer.Ordinal);
+    private readonly Queue<string> _wokenMessageIdOrder = new();
+
+    /// <summary>去重时最多保留的消息 id 数量。</summary>
+    private const int MaxRecentMessageIds = 256;
+
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>会话缓存落盘间隔；只在有变更时写文件。</summary>
@@ -77,6 +93,12 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     private HashSet<string> _allowedGroups = [];
     private Dictionary<string, string> _openIdNames = new(StringComparer.Ordinal);
     private bool _wakeOnPrivateMessage = true;
+
+    /// <summary>群聊唤醒词：消息正文命中任意一个即唤醒（无需 @）；为空表示不启用。</summary>
+    private string[] _wakeWords = [];
+
+    /// <summary>群聊概率唤醒：未 @、未命中唤醒词时按此概率随机唤醒；0 表示关闭。</summary>
+    private double _replyProbability;
     private bool _allowActiveMessage = true;
     private bool _downloadAttachments = true;
     private int _maxReplyChars = 1500;
@@ -174,6 +196,12 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
                 if (passive is not null) MarkPassiveSent(target, passive);
 
+                // 出站消息不会作为网关事件回传，主动写入历史，否则读取历史时只能看到用户消息
+                RecordMessage(
+                    ConversationKey(target),
+                    $"[{ConversationKey(target)}] {AssistantLabel}：{chunk}",
+                    null);
+
                 Context.Logger.LogInformation(
                     "已向 {Conversation} 发送消息（{Mode}）{MessageId}",
                     ConversationKey(target),
@@ -238,10 +266,17 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
             if (passive is not null) MarkPassiveSent(target, passive);
 
+            var attachmentName = attachment.DisplayName ?? Path.GetFileName(path);
+            RecordMessage(
+                ConversationKey(target),
+                $"[{ConversationKey(target)}] {AssistantLabel}："
+                + $"[{(attachment.Kind == PlatformAttachmentKind.Image ? "图片" : "文件")}] {attachmentName}",
+                null);
+
             Context.Logger.LogInformation(
                 "已向 {Conversation} 发送附件「{Name}」（{Mode}）",
                 ConversationKey(target),
-                attachment.DisplayName ?? Path.GetFileName(path),
+                attachmentName,
                 passive is not null ? "被动回复" : "主动消息");
         }
         finally
@@ -340,7 +375,13 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
                     break;
 
                 case "GROUP_AT_MESSAGE_CREATE":
-                    await HandleGroupAsync(data).ConfigureAwait(false);
+                    // 逐条 @ 事件：内容已去掉 @ 前缀，必然是在叫机器人
+                    await HandleGroupAsync(data, atBot: true).ConfigureAwait(false);
+                    break;
+
+                case "GROUP_MESSAGE_CREATE":
+                    // 全量模式：群里每条消息都会推送，只有 @ 机器人时才唤醒桌宠
+                    await HandleGroupAsync(data, atBot: false).ConfigureAwait(false);
                     break;
 
                 default:
@@ -361,7 +402,9 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         if (_allowedUsers.Count > 0 && !_allowedUsers.Contains(openId)) return;
 
         var conversationId = $"private:{openId}";
-        var messageId = RememberPassive(conversationId, QqJson.GetString(data, "id"));
+        var rawMessageId = QqJson.GetString(data, "id");
+        if (IsDuplicateMessage(rawMessageId)) return;
+        var messageId = RememberPassive(conversationId, rawMessageId);
         var content = QqJson.GetString(data, "content")?.Trim() ?? string.Empty;
         var sender = ResolveSender(openId, EventUsername(data));
         var line = await BuildLineAsync(conversationId, sender, content, data).ConfigureAwait(false);
@@ -371,9 +414,9 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         if (_wakeOnPrivateMessage) RaiseMentioned(line, sender, messageId);
     }
 
-    private async Task HandleGroupAsync(JsonElement data)
+    private async Task HandleGroupAsync(JsonElement data, bool atBot)
     {
-        Context.Logger.LogDebug("收到 QQ 群聊事件：{data}", data);
+        Context.Logger.LogDebug("收到 QQ 群聊事件（{Mode}）：{data}", atBot ? "@ 机器人" : "全量模式", data);
         var groupId = QqJson.GetString(data, "group_openid");
         if (string.IsNullOrEmpty(groupId)) return;
         if (_allowedGroups.Count > 0 && !_allowedGroups.Contains(groupId)) return;
@@ -383,14 +426,93 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
             ? ResolveSender(sender, EventUsername(data))
             : $"群#{ShortId(groupId)}";
         var conversationId = $"group:{groupId}";
-        var messageId = RememberPassive(conversationId, QqJson.GetString(data, "id"));
+        var rawMessageId = QqJson.GetString(data, "id");
+        var duplicate = IsDuplicateMessage(rawMessageId);
         var content = QqJson.GetString(data, "content")?.Trim() ?? string.Empty;
+
+        // @ 机器人与唤醒词优先；概率只对未命中的非重复消息掷一次，避免重复推送反复触发
+        var wake = atBot || IsBotMentioned(data) || ContainsWakeWord(content);
+        if (!wake && !duplicate) wake = RollReplyChance();
+
+        // 同一条消息可能同时以全量事件和 @ 事件推送：只记录一次，但 @ 事件仍可补唤醒
+        if (duplicate && !wake) return;
+
+        var messageId = RememberPassive(conversationId, rawMessageId);
         var line = await BuildLineAsync(conversationId, senderLabel, content, data).ConfigureAwait(false);
 
-        RecordMessage(conversationId, line, null);
+        if (!duplicate) RecordMessage(conversationId, line, null);
 
-        RaiseMentioned(line, senderLabel, messageId);
+        // 全量模式下非 @ 消息只记录不唤醒，避免群里每句话都惊动桌宠
+        if (wake && TryMarkWoken(rawMessageId)) RaiseMentioned(line, senderLabel, messageId);
     }
+
+    /// <summary>全量模式下判断消息是否 @ 了机器人：mentions 里带 bot=true 的用户。</summary>
+    private static bool IsBotMentioned(JsonElement data)
+    {
+        if (!data.TryGetProperty("mentions", out var mentions)
+            || mentions.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in mentions.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            if (item.TryGetProperty("bot", out var bot) && bot.ValueKind == JsonValueKind.True)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>官方可能重复推送同一 msg_id；返回 true 表示这条消息已经处理过。</summary>
+    private bool IsDuplicateMessage(string? messageId)
+    {
+        if (string.IsNullOrEmpty(messageId)) return false;
+
+        lock (_sync)
+        {
+            if (!_recentMessageIds.Add(messageId)) return true;
+
+            _recentMessageIdOrder.Enqueue(messageId);
+            while (_recentMessageIdOrder.Count > MaxRecentMessageIds)
+                _recentMessageIds.Remove(_recentMessageIdOrder.Dequeue());
+        }
+
+        return false;
+    }
+
+    /// <summary>同一条消息只唤醒一次；返回 true 表示本次可以唤醒。</summary>
+    private bool TryMarkWoken(string? messageId)
+    {
+        if (string.IsNullOrEmpty(messageId)) return true;
+
+        lock (_sync)
+        {
+            if (!_wokenMessageIds.Add(messageId)) return false;
+
+            _wokenMessageIdOrder.Enqueue(messageId);
+            while (_wokenMessageIdOrder.Count > MaxRecentMessageIds)
+                _wokenMessageIds.Remove(_wokenMessageIdOrder.Dequeue());
+        }
+
+        return true;
+    }
+
+    /// <summary>消息正文是否含有任一唤醒词（不区分大小写）；未配置唤醒词时始终返回 false。</summary>
+    private bool ContainsWakeWord(string text)
+    {
+        foreach (var word in _wakeWords)
+        {
+            if (text.Contains(word, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>概率唤醒（仅群聊生效）：0 表示关闭。</summary>
+    private bool RollReplyChance()
+        => _replyProbability > 0 && Random.Shared.NextDouble() < _replyProbability;
 
     private async Task<string> BuildLineAsync(
         string conversationId,
@@ -844,6 +966,8 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         _allowedGroups = ReadConfigList(config, "allowedGroups");
         _openIdNames = ReadOpenIdNames(config);
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
+        _wakeWords = ReadConfigWords(config, "wakeWords");
+        _replyProbability = Math.Clamp(GetConfigDouble(config, "replyProbability", 0), 0, 1);
         _allowActiveMessage = GetConfigBool(config, "allowActiveMessage", true);
         _maxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000);
         _downloadAttachments = GetConfigBool(config, "downloadAttachments", true);
@@ -893,6 +1017,57 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
             JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
             _ => fallback,
         };
+    }
+
+    private static double GetConfigDouble(JsonElement? config, string key, double fallback)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetDouble(out var number) => number,
+            JsonValueKind.String when double.TryParse(
+                value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => fallback,
+        };
+    }
+
+    /// <summary>读取唤醒词：支持数组或逗号 / 空白分隔的字符串，去重并保持顺序。</summary>
+    private static string[] ReadConfigWords(JsonElement? config, string key)
+    {
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return [];
+
+        var words = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? raw)
+        {
+            var word = raw?.Trim();
+            if (string.IsNullOrEmpty(word) || !seen.Add(word)) return;
+            words.Add(word);
+        }
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    Add(item.ValueKind == JsonValueKind.String ? item.GetString() : item.GetRawText());
+                break;
+
+            case JsonValueKind.String:
+                foreach (var part in (value.GetString() ?? string.Empty).Split(
+                             [',', '，', ';', '；', ' ', '\n', '\r', '\t'],
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    Add(part);
+                }
+
+                break;
+        }
+
+        return [.. words];
     }
 
     /// <summary>读取 openid → 昵称映射：每行一个 openid=昵称，忽略空行与 # 开头的注释。</summary>
