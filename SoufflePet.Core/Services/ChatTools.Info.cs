@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Shasnow
 
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using SoufflePet.Core.Chat;
 using SoufflePet.Services.Plugins;
 
 namespace SoufflePet.Services;
@@ -236,6 +238,170 @@ public sealed partial class ChatTools
     /// <summary>列出所有消息平台当前已知的会话（群聊 / 私聊）及其会话 id。</summary>
     private Task<string> ListPlatformConversations()
         => _platforms.ListConversationsAsync();
+
+    /// <summary>
+    /// 列出本地所有会话（id、标题、工作区、更新时间、消息数），
+    /// 或按会话 id 读取该会话最近若干轮 / 指定日期的用户与助手消息。
+    /// </summary>
+    private string GetSessionHistory(
+        [Description("会话 id；不传则列出所有会话及其 id")]
+        string? sessionId = null,
+        [Description("最多返回多少轮对话（默认 20，上限 200；传 date 时忽略）")]
+        int maxTurns = SessionHistoryDefaultTurns,
+        [Description("只取该日期的记录，格式 yyyy-MM-dd；不传则取最近的对话")]
+        string? date = null)
+    {
+        var store = ChatSessionStore.CreateDefault();
+        ChatSessionIndex index;
+        try
+        {
+            index = store.Load();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"读取会话索引失败：{ex.Message}";
+        }
+
+        var records = index.Sessions;
+        if (records.Count == 0) return "当前没有任何会话记录。";
+
+        var rawDate = (date ?? string.Empty).Trim();
+        DateOnly? day = null;
+        if (rawDate.Length > 0)
+        {
+            if (!DateOnly.TryParseExact(rawDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var parsed))
+                return $"日期「{rawDate}」格式无效，请用 yyyy-MM-dd（例如 2026-11-08）。";
+            day = parsed;
+        }
+
+        var currentId = CurrentSessionId();
+        var id = (sessionId ?? string.Empty).Trim();
+        if (id.Length == 0) return DescribeSessions(records, currentId, day);
+
+        var record = records.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (record is null)
+            return $"没有找到会话「{id}」；不传 sessionId 可以列出所有会话及其 id。";
+
+        var memory = new ChatMemory(
+            _settings,
+            store.SessionDirectory(record.Id, record.WorkspacePath),
+            "conversation.jsonl",
+            store.ProfilePath);
+
+        IReadOnlyList<MemoryTurn> turns;
+        if (day is { } target)
+        {
+            var (start, end) = LocalDayRange(target);
+            turns = memory.TurnsBetween(start, end, includeTools: false);
+        }
+        else
+        {
+            maxTurns = Math.Clamp(maxTurns, 1, SessionHistoryMaxTurns);
+            turns = memory.RecentTurns(maxTurns, includeTools: false);
+        }
+
+        if (turns.Count == 0)
+            return day is { } emptyDay
+                ? $"会话「{record.Title}」（id={record.Id}）在 {FormatSessionDate(emptyDay)} 没有对话记录。"
+                : $"会话「{record.Title}」（id={record.Id}）还没有对话记录。";
+
+        var rangeText = day is { } readDay
+            ? $"{FormatSessionDate(readDay)} 的 {turns.Count} 条记录"
+            : $"最近 {turns.Count} 条记录";
+        var builder = new StringBuilder(
+            $"会话「{record.Title}」（id={record.Id}，工作区={WorkspaceText(record.WorkspacePath)}，"
+            + $"更新于 {FormatSessionTime(record.UpdatedAt)}）{rangeText}：");
+        foreach (var turn in turns)
+        {
+            var role = string.Equals(turn.Role, ChatMemory.UserRole, StringComparison.OrdinalIgnoreCase)
+                ? "用户"
+                : "你";
+            builder.Append('\n')
+                .Append('[').Append(FormatSessionTime(turn.Time)).Append("] ")
+                .Append(role).Append('：')
+                .Append(Truncate(turn.Text, SessionHistoryMessageMaxLength));
+
+            if (builder.Length >= SessionHistoryOutputMaxLength)
+            {
+                builder.Append("\n…（记录过长，已截断；可指定 date 或减小 maxTurns）");
+                break;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>会话列表：可只列某天更新过的会话；最后一条用户消息只做短预览；当前会话额外标注。</summary>
+    private static string DescribeSessions(
+        IReadOnlyList<SessionRecord> records,
+        string? currentId,
+        DateOnly? day)
+    {
+        var visible = day is { } filterDay
+            ? records.Where(record => LocalDate(record.UpdatedAt) == filterDay).ToList()
+            : records;
+        if (visible.Count == 0)
+            return $"{FormatSessionDate(day!.Value)} 没有更新过的会话。";
+
+        var header = day is { } headerDay
+            ? $"共 {visible.Count} 个会话（{FormatSessionDate(headerDay)} 更新；传 sessionId 可读取某个会话的记录）："
+            : $"共 {visible.Count} 个会话（传 sessionId 可读取某个会话的记录）：";
+        var builder = new StringBuilder(header);
+        foreach (var record in visible.OrderByDescending(item => item.UpdatedAt))
+        {
+            builder.Append("\n- id=").Append(record.Id)
+                .Append(" 标题「").Append(record.Title).Append('」')
+                .Append(" 更新于=").Append(FormatSessionTime(record.UpdatedAt))
+                .Append(" 消息数=").Append(record.MessageCount)
+                .Append(" 工作区=").Append(WorkspaceText(record.WorkspacePath));
+
+            if (string.Equals(record.Id, currentId, StringComparison.Ordinal))
+                builder.Append("（当前会话）");
+
+            if (!string.IsNullOrWhiteSpace(record.LastUserText))
+                builder.Append(" 最后用户消息：").Append(
+                    Truncate(record.LastUserText.ReplaceLineEndings(" ").Trim(), SessionHistoryPreviewLength));
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>当前会话 id：工具执行时会把会话目录放进异步上下文，取其目录名即可。</summary>
+    private static string? CurrentSessionId()
+    {
+        var directory = ToolInvocationContext.BackupDirectory;
+        if (string.IsNullOrWhiteSpace(directory)) return null;
+
+        try
+        {
+            var id = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)));
+            return ChatSessionStore.IsSafeId(id) ? id : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private static string FormatSessionTime(DateTimeOffset time) =>
+        time.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    private static string FormatSessionDate(DateOnly date) => date.ToString("yyyy-MM-dd");
+
+    /// <summary>本地日期的起止时间，区间为 [当天 00:00, 次日 00:00)。</summary>
+    private static (DateTimeOffset Start, DateTimeOffset End) LocalDayRange(DateOnly date)
+    {
+        var localStart = date.ToDateTime(TimeOnly.MinValue);
+        var start = new DateTimeOffset(localStart, TimeZoneInfo.Local.GetUtcOffset(localStart));
+        return (start, start.AddDays(1));
+    }
+
+    private static DateOnly LocalDate(DateTimeOffset time) =>
+        DateOnly.FromDateTime(time.ToLocalTime().DateTime);
+
+    private static string WorkspaceText(string? workspacePath) =>
+        string.IsNullOrWhiteSpace(workspacePath) ? "（默认）" : workspacePath;
 
     /// <summary>读取指定会话的最近消息；会话 id 取自平台消息前缀（如 group:12345、private:777）。</summary>
     private Task<string> GetPlatformMessages(

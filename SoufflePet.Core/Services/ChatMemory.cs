@@ -352,6 +352,25 @@ public sealed class ChatMemory
     }
 
     /// <summary>
+    /// 读取指定时间范围内的对话记录；includeTools 为 true 时一并返回工具调用记录。
+    /// 用于按日期查看会话历史，时间区间为 [start, end)。
+    /// </summary>
+    public IReadOnlyList<MemoryTurn> TurnsBetween(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        bool includeTools = false)
+    {
+        lock (_gate)
+        {
+            return _turns
+                .Where(turn => turn.Time >= start && turn.Time < end)
+                .Where(turn => includeTools || !IsToolRole(turn.Role))
+                .Select(ToMemoryTurn)
+                .ToList();
+        }
+    }
+
+    /// <summary>
     /// 最近若干轮对话（用于界面恢复与上下文重建）；includeTools 为 true 时一并返回工具调用记录。
     /// 一轮以用户提问为边界，包含该提问及其后的助手回复与工具记录；不足 maxTurns 轮时返回全部。
     /// </summary>

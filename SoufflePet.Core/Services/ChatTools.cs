@@ -64,6 +64,17 @@ public sealed partial class ChatTools
     /// <summary>单行过长时的截断字符数，防止压缩代码 / 单行 JSON 一次占满上下文。</summary>
     private const int ReadFileMaxLineChars = 16384;
 
+    /// <summary>读取其他会话记录时默认与允许的最大轮数。</summary>
+    private const int SessionHistoryDefaultTurns = 20;
+    private const int SessionHistoryMaxTurns = 200;
+
+    /// <summary>会话记录里单条消息与会话列表预览的最大长度。</summary>
+    private const int SessionHistoryMessageMaxLength = 2000;
+    private const int SessionHistoryPreviewLength = 80;
+
+    /// <summary>会话记录整体回传给模型的最大长度，超出截断。</summary>
+    private const int SessionHistoryOutputMaxLength = 12000;
+
     /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
     private const int SkillContentMaxLength = 8192;
 
@@ -215,6 +226,10 @@ public sealed partial class ChatTools
                 ListPlatformConversations,
                 "list_platform_conversations",
                 "列出所有消息平台上当前已知的会话（群聊 / 私聊）及其会话 id"),
+            AIFunctionFactory.Create(
+                GetSessionHistory,
+                "get_session_history",
+                "列出本地所有会话，或读取指定会话的最近 / 指定日期的对话记录"),
             AIFunctionFactory.Create(
                 GetPlatformMessages,
                 "get_platform_messages",

@@ -72,7 +72,11 @@ public static class ToolDisplay
                 ReadString(root, "enabled") == "false" ? "停用插件" : "启用插件",
                 ReadString(root, "pluginId")),
             "reload_plugins" => "重新扫描插件",
+            "list_platform_conversations" => "列出平台会话",
             "get_platform_messages" => Compose("读取消息", ReadString(root, "conversation")),
+            "get_session_history" => ReadString(root, "sessionId") is { Length: > 0 } session
+                ? Compose("读取会话", session)
+                : "列出会话",
             "send_platform_message" => Compose("发送消息", ReadString(root, "conversation")),
             "send_attachment" => Compose("发送文件",
                 Clip(ReadString(root, "displayName")) ?? FileName(ReadString(root, "path"))),
