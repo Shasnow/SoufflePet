@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading;
@@ -27,6 +28,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private NapCatConversationStore? _store;
     private NapCatSender? _sender;
     private NapCatAttachmentDownloader? _downloader;
+    private NapCatForwardResolver? _forwardResolver;
     private NapCatQuoteTracker? _quotes;
 
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
@@ -56,6 +58,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             Context.Logger,
             _config.AttachmentCacheDir,
             _connection.ShutdownToken);
+        _forwardResolver = new NapCatForwardResolver(
+            Context.Logger,
+            _connection,
+            () => Volatile.Read(ref _selfId));
 
         if (!Uri.TryCreate(_config.WsUrl, UriKind.Absolute, out var uri)
             || (uri.Scheme != "ws" && uri.Scheme != "wss"))
@@ -159,17 +165,35 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
             var selfId = Volatile.Read(ref _selfId);
             var lines = new List<string>();
+            // 合并转发要逐条调接口，一次读历史最多反查 5 条，其余退回「[合并转发]」
+            var forwardBudget = 5;
             foreach (var message in messages.EnumerateArray())
             {
                 if (message.ValueKind != JsonValueKind.Object) continue;
 
-                var parsed = NapCatMessageParser.ParseMessage(message, selfId, _quotes!.IsSentBySelf);
+                var parsed = NapCatMessageParser.ParseMessage(
+                    message,
+                    selfId,
+                    _quotes!.IsSentBySelf,
+                    collectForwards: true);
                 var text = parsed.Text;
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
                 // 反查过的引用直接用缓存里的摘要替换占位，没缓存过就保留「（引用）」
                 if (parsed.QuotedId is { } quotedHistoryId && _quotes.TryGetQuoteLabel(quotedHistoryId) is { } quotedLabel)
                     text = text.Replace(NapCatMessageParser.QuotePlaceholder, quotedLabel, StringComparison.Ordinal);
+
+                if (parsed.Forwards is { Count: > 0 } historyForwards)
+                {
+                    if (forwardBudget > 0)
+                    {
+                        var batch = historyForwards.Take(forwardBudget).ToArray();
+                        forwardBudget -= batch.Length;
+                        text = await _forwardResolver!.HydrateAsync(text, batch).ConfigureAwait(false);
+                    }
+
+                    text = NapCatForwardResolver.Fallback(text, historyForwards);
+                }
 
                 var sender = NapCatMessageParser.GetSenderName(
                     message,
@@ -208,7 +232,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             root,
             selfId,
             _quotes!.IsSentBySelf,
-            _config.DownloadAttachments);
+            _config.DownloadAttachments,
+            collectForwards: true);
         var text = parsed.Text;
         if (string.IsNullOrWhiteSpace(text)) return;
 
@@ -226,9 +251,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             var line = $"[{conversationId}] {sender}：{text}";
             _store!.RecordMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
 
-            // 引用反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
+            // 引用反查、合并转发反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
             var wake = parsed.MentionsSelf || ContainsWakeWord(text) || RollReplyChance();
-            if (parsed.Attachments is not null || parsed.QuotedId is not null)
+            if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
                 _ = FinalizeMessageAsync(
                     conversationId,
                     line,
@@ -253,7 +278,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
             // 唤醒词与概率回复只对群聊生效；私聊是否唤醒只取决于 wakeOnPrivateMessage
             var wake = _config.WakeOnPrivateMessage;
-            if (parsed.Attachments is not null || parsed.QuotedId is not null)
+            if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
                 _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, wake);
             else if (wake)
                 RaiseMentioned(line, sender, messageId);
@@ -261,8 +286,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     }
 
     /// <summary>
-    /// 补全一条刚入队的消息：先下载附件并把本地路径写回正文，再反查引用内容，
-    /// 最后按需要唤醒桌宠。异步执行，避免下载/网络等待阻塞接收循环。
+    /// 补全一条刚入队的消息：先下载附件并把本地路径写回正文，再反查合并转发内容，最后反查引用内容，
+    /// 并按需要唤醒桌宠。异步执行，避免下载/网络等待阻塞接收循环。
     /// </summary>
     private async Task FinalizeMessageAsync(
         string conversationId,
@@ -283,10 +308,20 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     line = hydrated;
                 }
             }
+
+            if (parsed.Forwards is { Count: > 0 } forwards)
+            {
+                var hydrated = await _forwardResolver!.HydrateAsync(line, forwards).ConfigureAwait(false);
+                if (!string.Equals(hydrated, line, StringComparison.Ordinal))
+                {
+                    _store!.PatchRecordedLine(conversationId, line, hydrated);
+                    line = hydrated;
+                }
+            }
         }
         catch (Exception ex)
         {
-            Context.Logger.LogDebug(ex, "处理消息附件失败");
+            Context.Logger.LogDebug(ex, "处理消息附件或合并转发失败");
         }
 
         if (parsed.QuotedId is { } quotedId)

@@ -24,29 +24,36 @@ internal static class NapCatMessageParser
         JsonElement root,
         long selfId,
         Func<string?, bool> isSentBySelf,
-        bool collectAttachments = false)
+        bool collectAttachments = false,
+        bool collectForwards = false)
     {
-        if (root.TryGetProperty("message", out var message))
+        // 合并转发节点等实现会把内容放在 content 里，与 message 等价
+        if (root.TryGetProperty("message", out var message)
+            || root.TryGetProperty("content", out message))
         {
             if (message.ValueKind == JsonValueKind.Array)
-                return ParseSegments(message, selfId, isSentBySelf, collectAttachments);
+                return ParseSegments(message, selfId, isSentBySelf, collectAttachments, collectForwards);
             if (message.ValueKind == JsonValueKind.String)
-                return ParseCqCode(message.GetString() ?? string.Empty, selfId, isSentBySelf, collectAttachments);
+                return ParseCqCode(
+                    message.GetString() ?? string.Empty, selfId, isSentBySelf, collectAttachments, collectForwards);
         }
 
-        return ParseCqCode(GetString(root, "raw_message") ?? string.Empty, selfId, isSentBySelf, collectAttachments);
+        return ParseCqCode(
+            GetString(root, "raw_message") ?? string.Empty, selfId, isSentBySelf, collectAttachments, collectForwards);
     }
 
     private static NapCatParsedMessage ParseSegments(
         JsonElement segments,
         long selfId,
         Func<string?, bool> isSentBySelf,
-        bool collectAttachments)
+        bool collectAttachments,
+        bool collectForwards)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
         string? quotedId = null;
         List<NapCatPendingAttachment>? attachments = collectAttachments ? [] : null;
+        List<NapCatPendingForward>? forwards = collectForwards ? [] : null;
 
         foreach (var segment in segments.EnumerateArray())
         {
@@ -109,7 +116,7 @@ internal static class NapCatMessageParser
                         GetString(data, "url"), fileName, FormatFileSegment(fileName));
                     break;
                 case "forward":
-                    builder.Append("[合并转发]");
+                    AppendForward(builder, forwards, GetString(data, "id") ?? GetString(data, "message_id"));
                     break;
                 case "json":
                 case "xml":
@@ -122,7 +129,8 @@ internal static class NapCatMessageParser
             builder.ToString().Trim(),
             mentionsSelf,
             quotedId,
-            attachments is { Count: > 0 } ? attachments : null);
+            attachments is { Count: > 0 } ? attachments : null,
+            forwards is { Count: > 0 } ? forwards : null);
     }
 
     /// <summary>解析 CQ 码字符串；非文本段替换成可读占位，@ 自己时记录提醒标记。</summary>
@@ -130,12 +138,14 @@ internal static class NapCatMessageParser
         string raw,
         long selfId,
         Func<string?, bool> isSentBySelf,
-        bool collectAttachments)
+        bool collectAttachments,
+        bool collectForwards)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
         string? quotedId = null;
         List<NapCatPendingAttachment>? attachments = collectAttachments ? [] : null;
+        List<NapCatPendingForward>? forwards = collectForwards ? [] : null;
         var index = 0;
 
         foreach (Match match in CqCodePattern.Matches(raw))
@@ -196,7 +206,7 @@ internal static class NapCatMessageParser
                         FindCqArgument(arguments, "url"), fileName, FormatFileSegment(fileName));
                     break;
                 case "forward":
-                    builder.Append("[合并转发]");
+                    AppendForward(builder, forwards, FindCqArgument(arguments, "id"));
                     break;
                 case "json":
                 case "xml":
@@ -210,7 +220,8 @@ internal static class NapCatMessageParser
             builder.ToString().Trim(),
             mentionsSelf,
             quotedId,
-            attachments is { Count: > 0 } ? attachments : null);
+            attachments is { Count: > 0 } ? attachments : null,
+            forwards is { Count: > 0 } ? forwards : null);
     }
 
     /// <summary>追加一个图片/文件段：可下载时写入占位符并登记下载任务，否则直接写可读占位。</summary>
@@ -232,6 +243,23 @@ internal static class NapCatMessageParser
 
         var placeholder = $"[{label}#{attachments!.Count + 1}]";
         attachments.Add(new NapCatPendingAttachment(placeholder, downloadUrl, label, prefix, fileName, fallback));
+        builder.Append(placeholder);
+    }
+
+    /// <summary>追加一个合并转发段：可反查时写入占位符并登记，否则直接写可读占位。</summary>
+    private static void AppendForward(
+        StringBuilder builder,
+        List<NapCatPendingForward>? forwards,
+        string? forwardId)
+    {
+        if (forwards is null || string.IsNullOrWhiteSpace(forwardId))
+        {
+            builder.Append("[合并转发]");
+            return;
+        }
+
+        var placeholder = $"[合并转发#{forwards.Count + 1}]";
+        forwards.Add(new NapCatPendingForward(placeholder, forwardId.Trim(), "[合并转发]"));
         builder.Append(placeholder);
     }
 
