@@ -804,6 +804,8 @@ public sealed class LlmChatService(
             foreach (var entry in roles)
                 builder.Append("- ").Append(entry.Id).Append('：').AppendLine(entry.Role!.Trim());
         }
+        builder.AppendLine();
+        builder.AppendLine("当消息以 [平台消息] 开头时：先用 `get_platform_messages` 工具查看该会话最近的上下文，决定回复时用 `send_platform_message` 工具发送消息");
     }
 
     /// <summary>
