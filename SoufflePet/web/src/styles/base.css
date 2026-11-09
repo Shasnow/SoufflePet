@@ -87,8 +87,9 @@
   }
 
   ::selection {
-    background: var(--accent-soft);
-    color: var(--text-1);
+    /* 用实色强调色而非半透明 accent-soft：深色主题下后者与气泡底色亮度过于接近，选中区域几乎不可辨。 */
+    background: var(--accent);
+    color: var(--on-accent);
   }
 
   :focus-visible {
@@ -2106,10 +2107,28 @@ body.is-resizing-sidebar .sidebar {
   font-size: 1em;
 }
 
+/* Tailwind Preflight 会把 list-style 重置为 none，这里显式恢复序号与圆点。 */
 .md ul,
 .md ol {
   margin: 0.45em 0;
   padding-left: 1.35em;
+  list-style-position: outside;
+}
+
+.md ul {
+  list-style-type: disc;
+}
+
+.md ul ul {
+  list-style-type: circle;
+}
+
+.md ul ul ul {
+  list-style-type: square;
+}
+
+.md ol {
+  list-style-type: decimal;
 }
 
 .md li {
@@ -2705,6 +2724,7 @@ body.is-resizing-sidebar .sidebar {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
   color: var(--text-2);
   font-size: 12.5px;
