@@ -2447,6 +2447,104 @@ body.is-resizing-sidebar .sidebar {
   background: var(--surface-3);
 }
 
+/* 右侧快速目录：每轮对话一个刻度，hover 预览问答，点击跳转 */
+.chat-outline-wrap {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  right: 14px;
+  width: 28px;
+  z-index: 9;
+  pointer-events: none;
+}
+
+.chat-outline {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-block: 2px;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.chat-outline::-webkit-scrollbar {
+  display: none;
+}
+
+.outline-node {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 28px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.outline-tick {
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition:
+    width 120ms ease,
+    background-color 120ms ease;
+}
+
+.outline-node:hover .outline-tick,
+.outline-node:focus-visible .outline-tick {
+  width: 24px;
+  background: var(--accent);
+}
+
+.outline-preview {
+  position: absolute;
+  right: calc(100% + 10px);
+  width: min(320px, 46vw);
+  transform: translateY(-50%);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  animation: fade-in 120ms ease;
+}
+
+.outline-preview-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+.outline-preview-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

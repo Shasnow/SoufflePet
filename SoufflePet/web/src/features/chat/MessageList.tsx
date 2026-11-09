@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessageDto } from '@/bridge/contracts'
+import { ChatOutline } from './ChatOutline'
 import { MessageItem } from './MessageItem'
 
 interface MessageListProps {
@@ -30,6 +31,10 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     if (messages.length === 0) return
     virtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior })
+  }
+
+  const jumpToMessage = (index: number) => {
+    virtualizer.scrollToIndex(index, { align: 'start', behavior: 'smooth' })
   }
 
   useLayoutEffect(() => {
@@ -86,6 +91,7 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
           </div>
         </div>
       </div>
+      <ChatOutline messages={messages} onJump={jumpToMessage} />
       {!atBottom ? (
         <button type="button" className="scroll-jump" onClick={() => scrollToBottom('smooth')}>
           <ArrowDown size={13} />
