@@ -117,10 +117,12 @@ export function PluginsSettings() {
                       {STATE_LABELS[plugin.state] ?? plugin.state}
                     </span>
                   </span>
+                  {/* 版本与工具数放在描述之前，避免描述过长被省略号截断时丢失关键信息。 */}
                   <span className="settings-list-desc">
+                    {plugin.version ? `v${plugin.version}` : ''}
+                    {plugin.toolNames.length > 0 ? `${plugin.version ? ' · ' : ''}${plugin.toolNames.length} 个工具` : ''}
+                    {plugin.version || plugin.toolNames.length > 0 ? ' · ' : ''}
                     {plugin.description || '没有说明'}
-                    {plugin.version ? ` · v${plugin.version}` : ''}
-                    {plugin.toolNames.length > 0 ? ` · ${plugin.toolNames.length} 个工具` : ''}
                   </span>
                   {plugin.error ? <span className="settings-row-error">{plugin.error}</span> : null}
                 </div>
