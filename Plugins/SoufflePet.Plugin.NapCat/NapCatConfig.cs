@@ -39,11 +39,41 @@ internal sealed class NapCatConfig
     /// <summary>平台角色说明（例如「你正在托管主人的 QQ」），注入系统提示词；为空则不注入。</summary>
     public string RolePrompt { get; init; } = string.Empty;
 
+    /// <summary>允许群管理工具操作的群号；为空表示不暴露群管理工具。</summary>
+    public HashSet<long> ManagedGroups { get; init; } = [];
+
+    /// <summary>是否自动审批加群申请。</summary>
+    public bool AutoApproveJoin { get; init; } = true;
+
+    /// <summary>自动审批生效的群号；为空表示全部群。</summary>
+    public HashSet<long> ApproveGroups { get; init; } = [];
+
+    /// <summary>同意关键词：验证信息含有任意一个就同意；为空表示无需验证信息，直接同意。</summary>
+    public string[] ApproveKeywords { get; init; } = [];
+
+    /// <summary>拒绝关键词：验证信息含有任意一个就拒绝，优先级高于同意关键词。</summary>
+    public string[] RejectKeywords { get; init; } = [];
+
+    /// <summary>自动拒绝申请时返回给申请人的理由。</summary>
+    public string RejectReason { get; init; } = "未通过群自动审核";
+
+    /// <summary>是否启用群管理工具（需要至少配置一个群号）。</summary>
+    public bool HasManagedGroups => ManagedGroups.Count > 0;
+
+    /// <summary>该群是否允许执行群管理操作；空数组表示拒绝所有群。</summary>
+    public bool CanManage(long groupId) => ManagedGroups.Contains(groupId);
+
+    /// <summary>该群是否参与入群自动审批。</summary>
+    public bool ShouldAutoApprove(long groupId) => ApproveGroups.Count == 0 || ApproveGroups.Contains(groupId);
+
     /// <summary>读取插件配置；缺省值与 plugin.json 的默认段保持一致。</summary>
     public static NapCatConfig Load(JsonElement? config, string pluginDirectory)
     {
         var cacheDir = GetConfigString(config, "attachmentCacheDir", "attachments").Trim();
         if (cacheDir.Length == 0) cacheDir = "attachments";
+
+        var rejectReason = GetConfigString(config, "rejectReason", "未通过群自动审核").Trim();
+        if (rejectReason.Length == 0) rejectReason = "未通过群自动审核";
 
         return new NapCatConfig
         {
@@ -57,6 +87,12 @@ internal sealed class NapCatConfig
             MaxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000),
             DownloadAttachments = GetConfigBool(config, "downloadAttachments", true),
             RolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim(),
+            ManagedGroups = ReadConfigIds(config, "managedGroups"),
+            AutoApproveJoin = GetConfigBool(config, "autoApproveJoin", true),
+            ApproveGroups = ReadConfigIds(config, "approveGroups"),
+            ApproveKeywords = ReadConfigWords(config, "approveKeywords"),
+            RejectKeywords = ReadConfigWords(config, "rejectKeywords"),
+            RejectReason = rejectReason,
             AttachmentCacheDir = Path.GetFullPath(
                 Path.IsPathRooted(cacheDir) ? cacheDir : Path.Combine(pluginDirectory, cacheDir)),
         };

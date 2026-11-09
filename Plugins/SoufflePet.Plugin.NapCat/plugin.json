@@ -3,7 +3,7 @@
   "name": "NapCat QQ 消息平台",
   "version": "1.0.0",
   "author": "SoufflePet",
-  "description": "通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ：私聊或群聊里被 @ 时主动提醒桌宠，并可在最近一次会话里回复消息",
+  "description": "通过 NapCat 的 OneBot 11 正向 WebSocket 接入 QQ：私聊或群聊里被 @ 时主动提醒桌宠，并提供群管理工具（禁言、踢人、群名片等）与入群自动审批",
   "assembly": "SoufflePet.Plugin.NapCat.dll",
   "entryType": "SoufflePet.Plugins.NapCat.NapCatPlugin",
   "timeoutSeconds": 30,
@@ -18,7 +18,13 @@
     "maxReplyChars": 1500,
     "downloadAttachments": true,
     "attachmentCacheDir": "attachments",
-    "rolePrompt": ""
+    "rolePrompt": "",
+    "managedGroups": [],
+    "autoApproveJoin": true,
+    "approveGroups": [],
+    "approveKeywords": [],
+    "rejectKeywords": [],
+    "rejectReason": "未通过群自动审核"
   },
   "configSchema": [
     {
@@ -86,6 +92,42 @@
       "label": "平台角色说明",
       "type": "text",
       "description": "注入系统提示词，告诉桌宠这个 QQ 在它眼里的身份，例如「这是你自己的 QQ」或「你正在托管主人的 QQ」；留空则不注入。"
+    },
+    {
+      "key": "managedGroups",
+      "label": "允许管理的群号",
+      "type": "list",
+      "description": "每行一个群号；群管理工具只能操作这些群，留空表示不暴露群管理工具（安全默认）。"
+    },
+    {
+      "key": "autoApproveJoin",
+      "label": "自动审批入群申请",
+      "type": "boolean",
+      "description": "开启后按下面的群范围与关键词自动同意或拒绝加群申请。"
+    },
+    {
+      "key": "approveGroups",
+      "label": "自动审批的群号",
+      "type": "list",
+      "description": "每行一个群号；只有这些群的入群申请会自动审批，留空表示全部群。"
+    },
+    {
+      "key": "approveKeywords",
+      "label": "同意关键词",
+      "type": "list",
+      "description": "每行一个词；申请验证信息含有任意一个（不区分大小写）就自动同意。留空表示无需验证信息，直接同意。"
+    },
+    {
+      "key": "rejectKeywords",
+      "label": "拒绝关键词",
+      "type": "list",
+      "description": "每行一个词；申请验证信息含有任意一个（不区分大小写）就自动拒绝，优先级高于同意关键词。"
+    },
+    {
+      "key": "rejectReason",
+      "label": "拒绝理由",
+      "type": "text",
+      "description": "自动拒绝申请时返回给申请人的理由。"
     }
   ]
 }

@@ -3,12 +3,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using SoufflePet.Plugin.Sdk;
 
@@ -20,6 +22,7 @@ namespace SoufflePet.Plugins.NapCat;
 /// <see cref="OnMentioned" /> 主动唤醒桌宠；还可为群聊配置概率回复，让非 @、非引用、未命中唤醒词的消息也按概率随机唤醒。
 /// 插件始终忽略桌宠自己发出的消息，避免自己回复自己。
 /// 支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
+/// 同时提供群管理工具（禁言、解除禁言、全员禁言、踢出成员、修改群名片、查询成员），并按配置自动审批加群申请。
 /// </summary>
 public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 {
@@ -30,6 +33,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private NapCatAttachmentDownloader? _downloader;
     private NapCatForwardResolver? _forwardResolver;
     private NapCatQuoteTracker? _quotes;
+    private NapCatGroupAdmin? _groupAdmin;
+    private NapCatGroupJoinApprover? _joinApprover;
 
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
@@ -51,9 +56,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _store.Load();
         _store.StartAutoSave();
 
-        _connection = new NapCatConnection(Context.Logger, _config.AccessToken, HandleMessage);
+        _connection = new NapCatConnection(Context.Logger, _config.AccessToken, HandleEvent);
         _quotes = new NapCatQuoteTracker(Context.Logger, _connection);
         _sender = new NapCatSender(Context.Logger, _connection, _quotes);
+        _groupAdmin = new NapCatGroupAdmin(Context.Logger, _connection, _config);
+        _joinApprover = new NapCatGroupJoinApprover(Context.Logger, _connection, _config);
         _downloader = new NapCatAttachmentDownloader(
             Context.Logger,
             _config.AttachmentCacheDir,
@@ -71,14 +78,89 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         }
 
         Context.Logger.LogInformation(
-            "NapCat 平台将连接 {Url}；私聊白名单 {Users} 个，群白名单 {Groups} 个",
+            "NapCat 平台将连接 {Url}；私聊白名单 {Users} 个，群白名单 {Groups} 个，可管理群 {ManagedGroups} 个，自动审批加群 {AutoApprove}",
             _config.WsUrl,
             _config.AllowedUsers.Count,
-            _config.AllowedGroups.Count);
+            _config.AllowedGroups.Count,
+            _config.ManagedGroups.Count,
+            _config.AutoApproveJoin ? "已开启" : "已关闭");
 
         _connection.Start(uri);
         return Task.CompletedTask;
     }
+
+    protected override void OnToolsBuilding(ICollection<AIFunction> tools)
+    {
+        if (_groupAdmin is null || !_config.HasManagedGroups) return;
+
+        tools.Add(AIFunctionFactory.Create(
+            BanMemberAsync,
+            "qqgroup_ban_member",
+            "在指定 QQ 群里禁言某个成员；durationSeconds 填 0 或负数表示解除禁言。"));
+
+        tools.Add(AIFunctionFactory.Create(
+            SetWholeBanAsync,
+            "qqgroup_ban_all",
+            "开启或关闭指定 QQ 群的全员禁言。"));
+
+        tools.Add(AIFunctionFactory.Create(
+            KickMemberAsync,
+            "qqgroup_kick_member",
+            "把指定 QQ 群的某个成员移出群。"));
+
+        tools.Add(AIFunctionFactory.Create(
+            SetCardAsync,
+            "qqgroup_set_card",
+            "修改指定 QQ 群中某个成员的群名片。"));
+
+        tools.Add(AIFunctionFactory.Create(
+            MemberListAsync,
+            "qqgroup_member_list",
+            "读取指定 QQ 群的成员列表，用于确认要操作的对象。"));
+    }
+
+    private Task<string> BanMemberAsync(
+        [Description("群号")] long groupId,
+        [Description("要禁言的成员 QQ 号")]
+        long userId,
+        [Description("禁言时长（秒），最长 2592000（30 天）；填 0 或负数表示解除禁言")]
+        int durationSeconds,
+        CancellationToken cancellationToken = default)
+        => _groupAdmin!.BanMemberAsync(groupId, userId, durationSeconds, cancellationToken);
+
+    private Task<string> SetWholeBanAsync(
+        [Description("群号")] long groupId,
+        [Description("true 开启全员禁言，false 关闭")]
+        bool enable,
+        CancellationToken cancellationToken = default)
+        => _groupAdmin!.SetWholeBanAsync(groupId, enable, cancellationToken);
+
+    private Task<string> KickMemberAsync(
+        [Description("群号")] long groupId,
+        [Description("要移出群的成员 QQ 号")]
+        long userId,
+        [Description("是否同时拒绝该成员再次加群，默认 false")]
+        bool rejectAddRequest = false,
+        CancellationToken cancellationToken = default)
+        => _groupAdmin!.KickMemberAsync(groupId, userId, rejectAddRequest, cancellationToken);
+
+    private Task<string> SetCardAsync(
+        [Description("群号")] long groupId,
+        [Description("要修改群名片的成员 QQ 号")]
+        long userId,
+        [Description("新的群名片；留空表示清空")]
+        string card,
+        CancellationToken cancellationToken = default)
+        => _groupAdmin!.SetCardAsync(groupId, userId, card, cancellationToken);
+
+    private Task<string> MemberListAsync(
+        [Description("群号")] long groupId,
+        [Description("本次最多返回多少名成员，默认 50，上限 2000")]
+        int count = 50,
+        [Description("从第几名成员开始返回（从 0 开始），默认 0；用于翻页")]
+        int offset = 0,
+        CancellationToken cancellationToken = default)
+        => _groupAdmin!.GetMemberListAsync(groupId, count, offset, cancellationToken);
 
     /// <summary>向指定会话发送消息；conversationId 形如 group:12345 或 private:777。</summary>
     public async Task SendMessageAsync(string conversationId, string message)
@@ -215,6 +297,43 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     {
         if (_connection is not null) await _connection.ShutdownAsync().ConfigureAwait(false);
         _store?.StopAutoSave();
+    }
+
+    /// <summary>NapCat 事件分派：消息交给平台逻辑，加群申请交给自动审批。</summary>
+    private void HandleEvent(JsonElement root)
+    {
+        switch (NapCatMessageParser.GetString(root, "post_type"))
+        {
+            case "message":
+                HandleMessage(root);
+                break;
+
+            case "request":
+                // 审批要等待 action 响应，不能在接收循环里同步处理
+                var request = root.Clone();
+                _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleJoinRequestAsync(request, _connection!.ShutdownToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // 插件正在卸载，忽略
+                        }
+                        catch (Exception ex)
+                        {
+                            Context.Logger.LogWarning(ex, "自动审批加群申请失败");
+                        }
+                    }, CancellationToken.None).ConfigureAwait(false);
+                break;
+        }
+    }
+
+    private async Task HandleJoinRequestAsync(JsonElement root, CancellationToken cancellationToken)
+    {
+        if (_joinApprover is null || !_joinApprover.ShouldHandle(root)) return;
+        await _joinApprover.HandleAsync(root, cancellationToken).ConfigureAwait(false);
     }
 
     private void HandleMessage(JsonElement root)

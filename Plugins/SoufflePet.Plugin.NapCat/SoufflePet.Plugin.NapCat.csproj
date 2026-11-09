@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\SoufflePet.Plugin.Sdk\SoufflePet.Plugin.Sdk.csproj" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
   </ItemGroup>
 
   <ItemGroup>

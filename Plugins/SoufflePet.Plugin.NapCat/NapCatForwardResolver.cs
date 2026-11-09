@@ -117,7 +117,7 @@ internal sealed class NapCatForwardResolver
         }
     }
 
-    /// <summary>取节点发送者展示名：优先群名片、昵称，其次节点自带的昵称。</summary>
+    /// <summary>取节点发送者展示名：优先群名片，其次昵称，最后节点自带的昵称。</summary>
     private static string GetNodeSender(JsonElement node)
     {
         var target = Unwrap(node);

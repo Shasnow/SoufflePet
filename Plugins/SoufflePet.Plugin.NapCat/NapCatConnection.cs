@@ -27,7 +27,7 @@ internal sealed class NapCatConnection
 
     private readonly ILogger _logger;
     private readonly string _accessToken;
-    private readonly Action<JsonElement> _onMessage;
+    private readonly Action<JsonElement> _onEvent;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly Lock _sync = new();
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new(StringComparer.Ordinal);
@@ -36,11 +36,11 @@ internal sealed class NapCatConnection
     private ClientWebSocket? _socket;
     private Task? _pump;
 
-    public NapCatConnection(ILogger logger, string accessToken, Action<JsonElement> onMessage)
+    public NapCatConnection(ILogger logger, string accessToken, Action<JsonElement> onEvent)
     {
         _logger = logger;
         _accessToken = accessToken;
-        _onMessage = onMessage;
+        _onEvent = onEvent;
     }
 
     /// <summary>连接关闭时取消后台下载、action 等待等操作。</summary>
@@ -217,8 +217,8 @@ internal sealed class NapCatConnection
                 return;
             }
 
-            if (NapCatMessageParser.GetString(root, "post_type") != "message") return;
-            _onMessage(root);
+            // 事件（消息、加群申请等）交给插件同步分派；需要等待 action 响应的处理由插件放到后台任务
+            _onEvent(root);
         }
         catch (JsonException ex)
         {
@@ -241,7 +241,8 @@ internal sealed class NapCatConnection
     public async Task<JsonElement> SendActionAsync(
         ClientWebSocket socket,
         string action,
-        Dictionary<string, object?> parameters)
+        Dictionary<string, object?> parameters,
+        CancellationToken cancellationToken = default)
     {
         var echo = Guid.NewGuid().ToString("N");
         var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -254,16 +255,17 @@ internal sealed class NapCatConnection
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_sync) _pending[echo] = completion;
 
-        // ClientWebSocket 不支持并发发送，所有 action（发送消息、查询历史、反查引用）统一排队
-        await _sendGate.WaitAsync(_cts.Token).ConfigureAwait(false);
+        // ClientWebSocket 不支持并发发送，所有 action（发送消息、查询历史、反查引用、群管理）统一排队
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        timeout.CancelAfter(ActionTimeout);
+
+        await _sendGate.WaitAsync(timeout.Token).ConfigureAwait(false);
         try
         {
             var bytes = Encoding.UTF8.GetBytes(payload);
-            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token)
+            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, timeout.Token)
                 .ConfigureAwait(false);
 
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            timeout.CancelAfter(ActionTimeout);
             var response = await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
 
             var retcode = NapCatMessageParser.GetInt64(response, "retcode");
