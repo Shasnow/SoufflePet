@@ -84,12 +84,6 @@ internal sealed class NapCatQuoteTracker
 
         var summary = Summarize(NapCatMessageParser.ParseMessage(data, selfId, IsSentBySelf).Text);
 
-        _logger.LogDebug(
-            "引用消息 {QuotedId} 的发送者 {UserId}，桌宠自己 {SelfId}",
-            quotedId,
-            quotedUserId,
-            selfId);
-
         return new NapCatQuotedMessage(
             quotedUserId > 0 && quotedUserId == selfId,
             NapCatMessageParser.GetSenderName(data, quotedUserId),
