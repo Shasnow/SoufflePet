@@ -1104,7 +1104,7 @@ body.is-resizing-sidebar .sidebar {
 .toast {
   pointer-events: auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-width: 220px;
   max-width: min(380px, calc(100vw - 32px));

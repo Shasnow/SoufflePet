@@ -16,7 +16,7 @@ export function ToastHost() {
         const Icon = toast.level === 'error' ? AlertCircle : toast.level === 'success' ? CheckCircle2 : Info
         return (
           <div key={toast.id} className="toast" data-level={toast.level}>
-            <Icon size={16} style={{ marginTop: 2, flex: 'none' }} />
+            <Icon size={16} style={{ flex: 'none' }} />
             <span style={{ flex: 1 }}>{toast.text}</span>
             <button className="icon-btn" aria-label="关闭提示" onClick={() => dismiss(toast.id)}>
               <X size={14} />
