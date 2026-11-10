@@ -159,9 +159,7 @@ public sealed partial class ChatTools
         if (content.Length == 0) return $"技能「{skill.Name}」没有正文内容。";
 
         var builder = new StringBuilder($"技能「{skill.Name}」（{skill.Source}）：\n");
-        return content.Length <= SkillContentMaxLength
-            ? builder.Append(content).ToString()
-            : builder.Append(content[..SkillContentMaxLength]).Append("\n…（已截断）").ToString();
+        return builder.Append(content).ToString();
     }
 
     /// <summary>列出全部已发现插件（数据取自插件服务，这里只负责转成可读文本）。</summary>

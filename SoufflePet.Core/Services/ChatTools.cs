@@ -75,9 +75,6 @@ public sealed partial class ChatTools
     /// <summary>会话记录整体回传给模型的最大长度，超出截断。</summary>
     private const int SessionHistoryOutputMaxLength = 12000;
 
-    /// <summary>技能正文回传给模型的最大长度，超出截断。</summary>
-    private const int SkillContentMaxLength = 8192;
-
     /// <summary>本地展示文件的最大字节数，超出时只回报文件信息、不展示。</summary>
     private const long ShowFileMaxBytes = 50L * 1024 * 1024;
 
