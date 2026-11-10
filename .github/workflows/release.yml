@@ -1,0 +1,195 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Shasnow
+#
+# 打包并发布：主程序（自包含 / 依赖运行时）+ 内置插件
+# 触发：推送 v* 标签，或在 Actions 页面手动运行并填写版本号
+# 产物：GitHub Release 附件
+#   SoufflePet-<版本>-win-x64-self-contained.zip        已内置 .NET 10 运行时
+#   SoufflePet-<版本>-win-x64-framework-dependent.zip   需安装 .NET 10 运行时
+#   <插件 id>-<插件版本>.zip                            可导入的独立插件包
+
+name: 发布
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不带 v 前缀，例如 1.2.0）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '22'
+  PNPM_VERSION: '11'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  release:
+    name: 打包并发布
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: SoufflePet/web/pnpm-lock.yaml
+
+      - name: 安装前端依赖
+        shell: pwsh
+        run: |
+          pnpm --dir SoufflePet/web install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw '前端依赖安装失败' }
+
+      - name: 解析版本号
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $version = if ([string]::IsNullOrWhiteSpace($env:INPUT_VERSION)) { $env:REF_NAME } else { $env:INPUT_VERSION }
+          $version = $version.Trim() -replace '^[vV]', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+') {
+            throw "版本号格式不正确：$version（应形如 1.2.0）"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: 运行 Core 单元测试
+        shell: pwsh
+        run: |
+          dotnet test SoufflePet.Core.Tests\SoufflePet.Core.Tests.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw '单元测试未通过' }
+
+      - name: 发布主程序（自包含）
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dotnet publish SoufflePet\SoufflePet.csproj -c Release -r win-x64 --self-contained true -p:SelfContained=true -p:Version=$env:VERSION -p:DebugType=none -p:DebugSymbols=false -o publish\self-contained
+          if ($LASTEXITCODE -ne 0) { throw '自包含版本发布失败' }
+
+      - name: 发布主程序（依赖运行时）
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dotnet publish SoufflePet\SoufflePet.csproj -c Release -r win-x64 --self-contained false -p:SelfContained=false -p:Version=$env:VERSION -p:DebugType=none -p:DebugSymbols=false -o publish\framework-dependent
+          if ($LASTEXITCODE -ne 0) { throw '依赖运行时版本发布失败' }
+
+      - name: 打包内置插件
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 每个插件工程 dotnet publish 后由自身 PackPlugin 目标在 artifacts/ 生成可导入 zip
+          $projects = Get-ChildItem -Path Plugins -Directory |
+            ForEach-Object { Join-Path $_.FullName "$($_.Name).csproj" } |
+            Where-Object { Test-Path -LiteralPath $_ }
+          if (-not $projects) { throw '未找到内置插件工程' }
+          foreach ($project in $projects) {
+            Write-Host "==> 打包插件：$project"
+            dotnet publish $project -c Release -p:DeployToHost=false -p:DebugType=none -p:DebugSymbols=false
+            if ($LASTEXITCODE -ne 0) { throw "插件打包失败：$project" }
+          }
+
+      - name: 组装发布包
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = 'release'
+          if (Test-Path -LiteralPath $releaseDir) { Remove-Item -LiteralPath $releaseDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $releaseDir | Out-Null
+
+          $flavors = @(
+            @{ Dir = 'publish\self-contained'; Suffix = 'win-x64-self-contained' },
+            @{ Dir = 'publish\framework-dependent'; Suffix = 'win-x64-framework-dependent' }
+          )
+
+          foreach ($flavor in $flavors) {
+            $dir = $flavor.Dir
+            Copy-Item -Path LICENSE, README.md -Destination $dir
+
+            # NuGet 原生库附带的 pdb 对运行无用且体积很大（SkiaSharp / HarfBuzz 合计约 100MB）
+            Get-ChildItem -Path $dir -Filter *.pdb -File -Recurse | Remove-Item -Force
+
+            # 内置插件放到应用目录的 plugins/<id>/，随主程序一起分发
+            foreach ($projectDir in Get-ChildItem -Path Plugins -Directory) {
+              $pluginPublishDir = Join-Path $projectDir.FullName 'bin\Release\net10.0\publish'
+              $manifestPath = Join-Path $pluginPublishDir 'plugin.json'
+              if (-not (Test-Path -LiteralPath $manifestPath)) { continue }
+              $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+              $targetDir = Join-Path $dir "plugins\$($manifest.id)"
+              New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+              Copy-Item -LiteralPath (Join-Path $pluginPublishDir $manifest.assembly) -Destination $targetDir
+              Copy-Item -LiteralPath $manifestPath -Destination $targetDir
+            }
+
+            $zipPath = Join-Path $releaseDir "SoufflePet-$env:VERSION-$($flavor.Suffix).zip"
+            Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zipPath -Force
+            Write-Host "已生成 $zipPath"
+          }
+
+          # 各内置插件单独的可导入 zip，供插件窗口「导入」使用
+          Copy-Item -Path 'Plugins\*\artifacts\*.zip' -Destination $releaseDir
+
+      - name: 创建 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = (Get-ChildItem -Path release -Filter *.zip -File).FullName
+          if (-not $assets) { throw '没有可上传的发布包' }
+
+          $notes = @'
+          ## 下载说明
+
+          - **win-x64-self-contained**：自包含版本，已内置 .NET 10 运行时，解压后直接运行 `SoufflePet.exe`。
+          - **win-x64-framework-dependent**：依赖运行时版本，需先安装 .NET 10 运行时（https://dotnet.microsoft.com/download/dotnet/10.0）。
+
+          两个主程序压缩包都已包含内置插件（`plugins/` 目录）；单独的插件 zip 可在主窗口「插件…」→「导入」中安装。
+
+          运行需要 WebView2 Runtime（https://developer.microsoft.com/microsoft-edge/webview2/）。本项目不附带任何 Live2D 模型，请自行导入已获授权的模型。
+          '@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+
+          # 重新运行时若 Release 已存在，直接覆盖附件
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw '上传发布包失败' }
+          } else {
+            gh release create $env:TAG $assets --title "SoufflePet $env:VERSION" --notes-file $notesPath --target $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
+          }
