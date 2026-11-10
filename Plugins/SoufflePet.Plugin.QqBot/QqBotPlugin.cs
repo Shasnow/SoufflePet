@@ -10,6 +10,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -405,7 +406,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         var rawMessageId = QqJson.GetString(data, "id");
         if (IsDuplicateMessage(rawMessageId)) return;
         var messageId = RememberPassive(conversationId, rawMessageId);
-        var content = QqJson.GetString(data, "content")?.Trim() ?? string.Empty;
+        var content = ParseContent(QqJson.GetString(data, "content"));
         var sender = ResolveSender(openId, EventUsername(data));
         var line = await BuildLineAsync(conversationId, sender, content, data).ConfigureAwait(false);
 
@@ -428,7 +429,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         var conversationId = $"group:{groupId}";
         var rawMessageId = QqJson.GetString(data, "id");
         var duplicate = IsDuplicateMessage(rawMessageId);
-        var content = QqJson.GetString(data, "content")?.Trim() ?? string.Empty;
+        var content = ParseContent(QqJson.GetString(data, "content"));
 
         // @ 机器人与唤醒词优先；概率只对未命中的非重复消息掷一次，避免重复推送反复触发
         var wake = atBot || IsBotMentioned(data) || ContainsWakeWord(content);
@@ -513,6 +514,59 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     /// <summary>概率唤醒（仅群聊生效）：0 表示关闭。</summary>
     private bool RollReplyChance()
         => _replyProbability > 0 && Random.Shared.NextDouble() < _replyProbability;
+
+    /// <summary>QQ 官方消息正文里的表情标记，形如 &lt;faceType=1,faceId="63",ext="..."&gt;。</summary>
+    private static readonly Regex FaceTagPattern = new(
+        @"<faceType=[^<>]*>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>表情标记里的 ext 属性：base64 编码的 JSON，含表情文字。</summary>
+    private static readonly Regex FaceExtPattern = new(
+        @"(?:^|,)\s*ext\s*=\s*""(?<ext>[^""]*)""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>把消息正文里的表情标记转成可读文本，例如「[表情 囧]」。</summary>
+    private static string ParseContent(string? raw)
+    {
+        var content = raw?.Trim() ?? string.Empty;
+        if (content.IndexOf("<faceType=", StringComparison.OrdinalIgnoreCase) < 0) return content;
+
+        return FaceTagPattern.Replace(content, match => FormatFace(match.Value)).Trim();
+    }
+
+    /// <summary>解析单个表情标记：优先使用 ext 里的文字，解析不到时退回「[表情]」。</summary>
+    private static string FormatFace(string tag)
+    {
+        var ext = FaceExtPattern.Match(tag);
+        if (ext.Success && DecodeFaceText(ext.Groups["ext"].Value) is { Length: > 0 } text)
+            return $"[表情 {text}]";
+
+        return "[表情]";
+    }
+
+    /// <summary>解码表情 ext（兼容 URL 安全 base64 与缺失的填充符），取出 JSON 里的 text 字段。</summary>
+    private static string? DecodeFaceText(string base64)
+    {
+        var normalized = base64.Trim().Replace('-', '+').Replace('_', '/');
+        normalized = (normalized.Length % 4) switch
+        {
+            2 => normalized + "==",
+            3 => normalized + "=",
+            _ => normalized,
+        };
+
+        try
+        {
+            var json = Encoding.UTF8.GetString(Convert.FromBase64String(normalized));
+            using var document = JsonDocument.Parse(json);
+            var text = QqJson.GetString(document.RootElement, "text")?.Trim();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
 
     private async Task<string> BuildLineAsync(
         string conversationId,
