@@ -175,7 +175,7 @@ jobs:
 
           两个主程序压缩包都已包含内置插件（`plugins/` 目录），无需单独安装。
 
-          运行需要 WebView2 Runtime（https://developer.microsoft.com/microsoft-edge/webview2/）。本项目不附带任何 Live2D 模型，请自行导入已获授权的模型。
+          运行需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).本项目不附带任何 Live2D 模型，请自行导入已获授权的模型。
           '@
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
