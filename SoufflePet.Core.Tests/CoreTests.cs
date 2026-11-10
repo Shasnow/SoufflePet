@@ -132,10 +132,12 @@ public sealed class ScheduledTaskTests
         var interval = new ScheduledTask { Kind = ScheduledTaskKind.Interval, IntervalMinutes = 45 };
         Assert.Equal(Reference.AddMinutes(45), ScheduledTaskService.ComputeNext(interval, Reference));
 
+        // 单次任务的日期由界面按本地时区写入，这里也用本地时区构造：
+        // 写死 +08:00 会在 UTC 等其它时区的机器上被 LocalDateTime 换算成前一天
         var once = new ScheduledTask
         {
             Kind = ScheduledTaskKind.Once,
-            OnceDate = new DateTimeOffset(2026, 11, 6, 0, 0, 0, TimeSpan.FromHours(8)),
+            OnceDate = new DateTimeOffset(new DateTime(2026, 11, 6, 0, 0, 0, DateTimeKind.Local)),
             TimeOfDay = new TimeSpan(9, 0, 0),
         };
         Assert.Equal(new DateTime(2026, 11, 6, 9, 0, 0), ScheduledTaskService.ComputeNext(once, Reference));
