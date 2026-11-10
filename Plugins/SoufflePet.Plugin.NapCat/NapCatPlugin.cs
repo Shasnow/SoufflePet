@@ -371,7 +371,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             _store!.RecordMessage(conversationId, line, $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
 
             // 引用反查、合并转发反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
-            var wake = parsed.MentionsSelf || ContainsWakeWord(text) || RollReplyChance();
+            // 禁止主动回复的群只是不再按概率随机搭话，@、引用与唤醒词仍然生效
+            var wake = parsed.MentionsSelf
+                       || ContainsWakeWord(text)
+                       || (_config.AllowsProactiveReply(groupId) && RollReplyChance());
             if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
                 _ = FinalizeMessageAsync(
                     conversationId,

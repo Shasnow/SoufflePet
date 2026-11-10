@@ -28,6 +28,9 @@ internal sealed class NapCatConfig
     /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠；0 表示关闭。</summary>
     public double ReplyProbability { get; init; }
 
+    /// <summary>禁止主动回复的群号：这些群里不再按概率随机搭话，@、引用与唤醒词仍然生效。</summary>
+    public HashSet<long> ProactiveReplyBlockedGroups { get; init; } = [];
+
     public int MaxReplyChars { get; init; } = 1500;
 
     /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
@@ -66,6 +69,9 @@ internal sealed class NapCatConfig
     /// <summary>该群是否参与入群自动审批。</summary>
     public bool ShouldAutoApprove(long groupId) => ApproveGroups.Count == 0 || ApproveGroups.Contains(groupId);
 
+    /// <summary>该群是否允许概率回复（主动搭话）；唤醒词不受影响。</summary>
+    public bool AllowsProactiveReply(long groupId) => !ProactiveReplyBlockedGroups.Contains(groupId);
+
     /// <summary>读取插件配置；缺省值与 plugin.json 的默认段保持一致。</summary>
     public static NapCatConfig Load(JsonElement? config, string pluginDirectory)
     {
@@ -84,6 +90,7 @@ internal sealed class NapCatConfig
             WakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true),
             WakeWords = ReadConfigWords(config, "wakeWords"),
             ReplyProbability = Math.Clamp(GetConfigDouble(config, "replyProbability", 0), 0, 1),
+            ProactiveReplyBlockedGroups = ReadConfigIds(config, "proactiveReplyBlockedGroups"),
             MaxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000),
             DownloadAttachments = GetConfigBool(config, "downloadAttachments", true),
             RolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim(),

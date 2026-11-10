@@ -15,6 +15,7 @@
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
     "replyProbability": 0,
+    "proactiveReplyBlockedGroups": [],
     "maxReplyChars": 1500,
     "downloadAttachments": true,
     "attachmentCacheDir": "attachments",
@@ -68,6 +69,12 @@
       "label": "概率回复（0-1）",
       "type": "number",
       "description": "仅对群聊生效：非 @ 桌宠、非引用桌宠、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠搭话；0 表示关闭。"
+    },
+    {
+      "key": "proactiveReplyBlockedGroups",
+      "label": "禁止主动回复的群号",
+      "type": "list",
+      "description": "每行一个群号；这些群里不再按概率随机搭话，@、引用与唤醒词仍然生效。留空表示不限制。"
     },
     {
       "key": "maxReplyChars",
