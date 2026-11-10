@@ -305,6 +305,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         switch (NapCatMessageParser.GetString(root, "post_type"))
         {
             case "message":
+                Context.Logger.LogDebug("收到 NapCat 消息：{Event}", root.ToString());
                 HandleMessage(root);
                 break;
 
