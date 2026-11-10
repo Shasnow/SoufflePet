@@ -13,6 +13,8 @@ bin
 Plugins/**/artifacts/
 **/Live2DCubismCore.h
 **/node_modules
+# 前端测试目录 src/test 会被上面的 **/*Test 误伤（Windows 下大小写不敏感），显式放行
+!SoufflePet/web/src/test/
 SoufflePet/web/dist/
 SoufflePet/web/coverage/
 SoufflePet/web/test-results/
