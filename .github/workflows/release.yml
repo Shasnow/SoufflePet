@@ -3,10 +3,9 @@
 #
 # 打包并发布：主程序（自包含 / 依赖运行时）+ 内置插件
 # 触发：推送 v* 标签，或在 Actions 页面手动运行并填写版本号
-# 产物：GitHub Release 附件
+# 产物：GitHub Release 附件（内置插件只随主程序分发，不单独出包）
 #   SoufflePet-<版本>-win-x64-self-contained.zip        已内置 .NET 10 运行时
 #   SoufflePet-<版本>-win-x64-framework-dependent.zip   需安装 .NET 10 运行时
-#   <插件 id>-<插件版本>.zip                            可导入的独立插件包
 
 name: 发布
 
@@ -103,19 +102,19 @@ jobs:
           dotnet publish SoufflePet\SoufflePet.csproj -c Release -r win-x64 --self-contained false -p:SelfContained=false -p:Version=$env:VERSION -p:DebugType=none -p:DebugSymbols=false -o publish\framework-dependent
           if ($LASTEXITCODE -ne 0) { throw '依赖运行时版本发布失败' }
 
-      - name: 打包内置插件
+      - name: 构建内置插件
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # 每个插件工程 dotnet publish 后由自身 PackPlugin 目标在 artifacts/ 生成可导入 zip
+          # 内置插件随主程序分发，不在 Release 里单独出包；这里只构建出 dll 与 plugin.json
           $projects = Get-ChildItem -Path Plugins -Directory |
             ForEach-Object { Join-Path $_.FullName "$($_.Name).csproj" } |
             Where-Object { Test-Path -LiteralPath $_ }
           if (-not $projects) { throw '未找到内置插件工程' }
           foreach ($project in $projects) {
-            Write-Host "==> 打包插件：$project"
-            dotnet publish $project -c Release -p:DeployToHost=false -p:DebugType=none -p:DebugSymbols=false
-            if ($LASTEXITCODE -ne 0) { throw "插件打包失败：$project" }
+            Write-Host "==> 构建插件：$project"
+            dotnet build $project -c Release -p:DeployToHost=false -p:DebugType=none -p:DebugSymbols=false
+            if ($LASTEXITCODE -ne 0) { throw "插件构建失败：$project" }
           }
 
       - name: 组装发布包
@@ -142,13 +141,13 @@ jobs:
 
             # 内置插件放到应用目录的 plugins/<id>/，随主程序一起分发
             foreach ($projectDir in Get-ChildItem -Path Plugins -Directory) {
-              $pluginPublishDir = Join-Path $projectDir.FullName 'bin\Release\net10.0\publish'
-              $manifestPath = Join-Path $pluginPublishDir 'plugin.json'
+              $pluginOutputDir = Join-Path $projectDir.FullName 'bin\Release\net10.0'
+              $manifestPath = Join-Path $pluginOutputDir 'plugin.json'
               if (-not (Test-Path -LiteralPath $manifestPath)) { continue }
               $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
               $targetDir = Join-Path $dir "plugins\$($manifest.id)"
               New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-              Copy-Item -LiteralPath (Join-Path $pluginPublishDir $manifest.assembly) -Destination $targetDir
+              Copy-Item -LiteralPath (Join-Path $pluginOutputDir $manifest.assembly) -Destination $targetDir
               Copy-Item -LiteralPath $manifestPath -Destination $targetDir
             }
 
@@ -156,9 +155,6 @@ jobs:
             Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zipPath -Force
             Write-Host "已生成 $zipPath"
           }
-
-          # 各内置插件单独的可导入 zip，供插件窗口「导入」使用
-          Copy-Item -Path 'Plugins\*\artifacts\*.zip' -Destination $releaseDir
 
       - name: 创建 GitHub Release
         shell: pwsh
@@ -177,18 +173,20 @@ jobs:
           - **win-x64-self-contained**：自包含版本，已内置 .NET 10 运行时，解压后直接运行 `SoufflePet.exe`。
           - **win-x64-framework-dependent**：依赖运行时版本，需先安装 .NET 10 运行时（https://dotnet.microsoft.com/download/dotnet/10.0）。
 
-          两个主程序压缩包都已包含内置插件（`plugins/` 目录）；单独的插件 zip 可在主窗口「插件…」→「导入」中安装。
+          两个主程序压缩包都已包含内置插件（`plugins/` 目录），无需单独安装。
 
           运行需要 WebView2 Runtime（https://developer.microsoft.com/microsoft-edge/webview2/）。本项目不附带任何 Live2D 模型，请自行导入已获授权的模型。
           '@
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
 
-          # 重新运行时若 Release 已存在，直接覆盖附件
+          # 重新运行时若 Release 已存在，覆盖附件并同步说明
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:TAG $assets --clobber
             if ($LASTEXITCODE -ne 0) { throw '上传发布包失败' }
+            gh release edit $env:TAG --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { throw '更新 Release 说明失败' }
           } else {
             gh release create $env:TAG $assets --title "SoufflePet $env:VERSION" --notes-file $notesPath --target $env:GITHUB_SHA
             if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
