@@ -119,8 +119,10 @@ internal static class NapCatMessageParser
                     AppendForward(builder, forwards, GetString(data, "id") ?? GetString(data, "message_id"));
                     break;
                 case "json":
+                    builder.Append(NapCatCardParser.FormatJsonCard(data));
+                    break;
                 case "xml":
-                    builder.Append("[卡片消息]");
+                    builder.Append(NapCatCardParser.FormatXmlCard(data));
                     break;
             }
         }
@@ -209,8 +211,10 @@ internal static class NapCatMessageParser
                     AppendForward(builder, forwards, FindCqArgument(arguments, "id"));
                     break;
                 case "json":
+                    builder.Append(NapCatCardParser.FormatJsonCard(FindCqArgument(arguments, "data"), null));
+                    break;
                 case "xml":
-                    builder.Append("[卡片消息]");
+                    builder.Append(NapCatCardParser.FormatXmlCard(FindCqArgument(arguments, "data")));
                     break;
             }
         }
