@@ -54,6 +54,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     private readonly ThemeService _theme;
     private readonly UiMode _mode;
     private readonly ILocalFileServer _server;
+    private readonly SouffleSettings _settings;
     private readonly NativeWebView _view;
     private readonly WebBridgeServer _bridge;
     private readonly ChatRpc _rpc;
@@ -91,6 +92,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         _theme = theme;
         _mode = mode;
         _server = files;
+        _settings = settings;
 
         Title = $"{settings.PetName} · SoufflePet";
         Width = 1120;
@@ -119,6 +121,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
             _rpc);
         _bridge.PageReady += OnPageReady;
         _theme.Changed += OnThemeChanged;
+        settings.PropertyChanged += OnSettingsChanged;
 
         Opened += OnOpened;
         Closing += OnClosing;
@@ -498,11 +501,20 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     private void OnClosed(object? sender, EventArgs e)
     {
         _theme.Changed -= OnThemeChanged;
+        _settings.PropertyChanged -= OnSettingsChanged;
         _view.NavigationStarted -= OnNavigationStarted;
         _view.NewWindowRequested -= OnNewWindowRequested;
         _bridge.PageReady -= OnPageReady;
         _bridge.Dispose();
         _rpc.Dispose();
+    }
+
+    /// <summary>人设面板改了称呼后同步任务栏/Alt-Tab 标题；属性变更可能来自 RPC 线程，需切回 UI 线程。</summary>
+    private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SouffleSettings.PetName)) return;
+        var title = $"{_settings.PetName} · SoufflePet";
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => Title = title);
     }
 
     private async Task FocusComposerAsync()

@@ -14,6 +14,7 @@ import type {
   Live2DModelDto,
   McpServerDto,
   McpToolDto,
+  PersonaDto,
   PluginDto,
   ProviderDto,
   ScheduledTaskLogDto,
@@ -140,6 +141,15 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     accentC: DEFAULT_ACCENT.c,
     accentH: DEFAULT_ACCENT.h,
     followSystem: false,
+  }
+  const DEFAULT_PERSONA_PROMPT =
+    '你是「舒芙蕾」，一个性格活泼、温柔、有点黏人的女孩，住在用户的电脑桌面上。' +
+    '请用简短、口语化的中文回复，一般不超过三句话。不要使用颜文字或emoji。'
+  let persona: PersonaDto = {
+    petName: '舒芙蕾',
+    systemPrompt: DEFAULT_PERSONA_PROMPT,
+    defaultPetName: '舒芙蕾',
+    defaultSystemPrompt: DEFAULT_PERSONA_PROMPT,
   }
 
   const providers: ProviderDto[] = [
@@ -638,7 +648,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       protocolVersion: 1,
       window: 'app',
       route: activeId ? `#/chat/${activeId}` : '#/chat',
-      pet: { name: '舒芙蕾', initial: '舒' },
+      pet: { name: persona.petName, initial: persona.petName.slice(0, 1) || '舒' },
       theme,
       usage: {
         inputTokens: 128_400,
@@ -1193,6 +1203,30 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
           }
           case 'settings.appearance.setSidebarCollapsed': {
             response(id, null)
+            return
+          }
+          case 'settings.persona.get': {
+            response(id, persona)
+            return
+          }
+          case 'settings.persona.save': {
+            const name = String(payload.petName ?? '').trim()
+            if (!name) {
+              fail(id, 'invalid_argument', '桌宠名称不能为空')
+              return
+            }
+            const promptInput = String(payload.systemPrompt ?? '').trim()
+            // 与宿主一致：提示词仍是旧称呼的默认人设时，跟随称呼一起更新。
+            const previousDefault = DEFAULT_PERSONA_PROMPT.replace('舒芙蕾', persona.petName)
+            persona = {
+              ...persona,
+              petName: name,
+              systemPrompt:
+                promptInput === previousDefault ? DEFAULT_PERSONA_PROMPT.replace('舒芙蕾', name) : promptInput,
+              defaultSystemPrompt: DEFAULT_PERSONA_PROMPT.replace('舒芙蕾', name),
+            }
+            emitSnapshot()
+            response(id, persona)
             return
           }
           case 'settings.llm.list': {

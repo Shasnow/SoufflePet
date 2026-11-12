@@ -180,6 +180,14 @@ export interface AppSnapshotDto {
 
 /* ============================== 设置 DTO ============================== */
 
+/** 人设面板：default* 由宿主按当前称呼生成，前端用来「恢复默认」。 */
+export interface PersonaDto {
+  petName: string
+  systemPrompt: string
+  defaultPetName: string
+  defaultSystemPrompt: string
+}
+
 export interface ChatProviderModelDto {
   modelId: string
   name?: string

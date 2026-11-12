@@ -111,7 +111,7 @@ public partial class SouffleSettings : ObservableObject
     public const string DefaultPetName = "舒芙蕾";
 
     [ObservableProperty]
-    [Description("桌面宠物的称呼（聊天窗口标题、输入提示、记忆自称与默认人设；修改后重启生效）")]
+    [Description("桌面宠物的称呼（聊天窗口标题、输入提示、记忆自称与默认人设；修改后即时生效）")]
     public partial string PetName { get; set; } = DefaultPetName;
 
     [Description("大语言模型提供商列表（对话模型管理面板按提供商配置接口与密钥，并勾选可用模型）")]
@@ -136,7 +136,8 @@ public partial class SouffleSettings : ObservableObject
     /// <summary>默认人设：首次启动写入设置文件，之后可直接改 SoufflePet.json 调整。</summary>
     public static readonly string DefaultChatSystemPrompt = BuildDefaultChatSystemPrompt(DefaultPetName);
 
-    private static string BuildDefaultChatSystemPrompt(string petName) =>
+    /// <summary>默认人设的生成规则：人设面板的「填入默认人设」与首次启动共用同一份模板。</summary>
+    public static string BuildDefaultChatSystemPrompt(string petName) =>
         $"你是「{petName}」，一个性格活泼、温柔、有点黏人的女孩，住在用户的电脑桌面上。" +
         "请用简短、口语化的中文回复，一般不超过三句话。不要使用颜文字或emoji。";
 

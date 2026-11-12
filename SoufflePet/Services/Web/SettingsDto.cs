@@ -21,6 +21,15 @@ public sealed record ProviderInputDto(
     IReadOnlyList<ChatProviderModelDto> Models,
     string? PreviousName = null);
 
+/// <summary>人设面板：桌宠称呼与系统提示词；default* 由宿主生成，供前端恢复默认。</summary>
+public sealed record PersonaDto(
+    string PetName,
+    string SystemPrompt,
+    string DefaultPetName,
+    string DefaultSystemPrompt);
+
+public sealed record PersonaInputDto(string PetName, string SystemPrompt);
+
 public sealed record McpServerDto(
     string Name,
     bool Enabled,

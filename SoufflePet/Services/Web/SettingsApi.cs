@@ -18,7 +18,7 @@ using SoufflePet.Services.Plugins;
 namespace SoufflePet.Services.Web;
 
 /// <summary>
-/// 七个设置面板的宿主 API：LLM 提供商、MCP、技能、插件、定时任务、Live2D 模型与外观。
+/// 设置面板的宿主 API：人设、LLM 提供商、MCP、技能、插件、定时任务、Live2D 模型与外观。
 /// 全部走 Core 服务，返回 v1 契约 DTO；文件/目录选择由 AppWebWindow 提供。
 /// </summary>
 public sealed class SettingsApi(
@@ -48,6 +48,9 @@ public sealed class SettingsApi(
                 "settings.llm.fetchModels" => await LlmFetchModelsAsync(parameters, cancellationToken),
                 "settings.llm.setEnabled" => LlmSetEnabled(parameters),
                 "settings.llm.setDefault" => LlmSetDefault(RequireString(parameters, "key")),
+
+                "settings.persona.get" => PersonaGet(),
+                "settings.persona.save" => PersonaSave(Read<PersonaInputDto>(parameters)),
 
                 "settings.mcp.list" => McpList(),
                 "settings.mcp.save" => await McpSaveAsync(Read<McpServerDto>(parameters), cancellationToken),
@@ -218,6 +221,36 @@ public sealed class SettingsApi(
             model.ModelId,
             string.IsNullOrWhiteSpace(model.Name) ? null : model.Name,
             model.IsActive))]);
+
+    // ===== 人设 =====
+
+    private PersonaDto PersonaGet() => MapPersona();
+
+    private PersonaDto PersonaSave(PersonaInputDto input)
+    {
+        var name = input.PetName?.Trim() ?? string.Empty;
+        if (name.Length == 0) throw new BridgeRpcException("invalid_argument", "桌宠名称不能为空");
+
+        const int maxPromptLen = 4000;
+        var prompt = input.SystemPrompt?.Trim() ?? string.Empty;
+        if (prompt.Length > maxPromptLen)
+            throw new BridgeRpcException("invalid_argument", $"人设提示词超过 {maxPromptLen} 字上限（当前 {prompt.Length} 字）");
+
+        // 提示词仍是旧称呼的默认人设时，随称呼一起更新，避免人设里残留旧名字（与启动时的 Normalize 规则一致）。
+        if (prompt == SouffleSettings.BuildDefaultChatSystemPrompt(settings.PetName))
+            prompt = SouffleSettings.BuildDefaultChatSystemPrompt(name);
+
+        // 属性变化会由 App 的订阅统一落盘并刷新主窗口标题。
+        settings.PetName = name;
+        settings.ChatSystemPrompt = prompt;
+        return MapPersona();
+    }
+
+    private PersonaDto MapPersona() => new(
+        settings.PetName,
+        settings.ChatSystemPrompt,
+        SouffleSettings.DefaultPetName,
+        SouffleSettings.BuildDefaultChatSystemPrompt(settings.PetName));
 
     // ===== MCP =====
 

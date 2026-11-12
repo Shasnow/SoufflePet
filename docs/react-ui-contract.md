@@ -280,6 +280,8 @@ interface AppSnapshotDto {
 
 | 方法 | 参数 | 返回 |
 | --- | --- | --- |
+| `settings.persona.get` | `{}` | `PersonaDto` |
+| `settings.persona.save` | `{petName,systemPrompt}` | `PersonaDto`（落盘并刷新主窗口标题） |
 | `settings.llm.list` | `{}` | `{providers:ProviderDto[],enabledModels:ChatModelDto[],defaultKey:string|null}` |
 | `settings.llm.saveProvider` | `{name,baseUrl,apiKey,models,previousName?}` | `ProviderDto` |
 | `settings.llm.deleteProvider` | `{name}` | `{providers:ProviderDto[]}` |
@@ -323,6 +325,15 @@ interface AppSnapshotDto {
 设置 DTO（字段与现有模型一致）：
 
 ```ts
+interface PersonaDto {
+  petName: string
+  systemPrompt: string
+  /** 宿主默认称呼，前端用于恢复默认。 */
+  defaultPetName: string
+  /** 按当前称呼生成的默认人设提示词。 */
+  defaultSystemPrompt: string
+}
+
 interface ChatProviderModelDto { modelId: string; name?: string; isActive: boolean }
 interface ProviderDto { name: string; baseUrl: string; apiKey: string; models: ChatProviderModelDto[] }
 
