@@ -4,11 +4,13 @@
 import { SETTINGS_PANELS, navigate, type SettingsPanel } from '@/app/router'
 import { AppearanceSettings } from './AppearanceSettings'
 import { LlmSettings } from './LlmSettings'
+import { MemorySettings } from './MemorySettings'
 import { ModelsSettings } from './ModelsSettings'
 import { PersonaSettings } from './PersonaSettings'
 
 const DESCRIPTIONS: Record<SettingsPanel, string> = {
   persona: '桌宠的称呼与对话人设：名称会同步到侧栏、窗口标题与输入提示。',
+  memory: '查看并编辑桌宠记住的事实，可增删改或清空；关闭后不再注入对话。',
   llm: '按提供商配置接口与密钥，勾选要启用的模型。',
   models: '导入、切换或移除 Live2D 桌宠模型。',
   appearance: '强调色、预设与“跟随系统”由 OKLCH token 驱动。',
@@ -18,6 +20,8 @@ function PanelBody({ panel }: { panel: SettingsPanel }) {
   switch (panel) {
     case 'persona':
       return <PersonaSettings />
+    case 'memory':
+      return <MemorySettings />
     case 'llm':
       return <LlmSettings />
     case 'models':

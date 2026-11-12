@@ -14,6 +14,8 @@ import type {
   Live2DModelDto,
   McpServerDto,
   McpToolDto,
+  MemoryDto,
+  MemoryEntryDto,
   PersonaDto,
   PluginDto,
   ProviderDto,
@@ -150,6 +152,19 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     systemPrompt: DEFAULT_PERSONA_PROMPT,
     defaultPetName: '舒芙蕾',
     defaultSystemPrompt: DEFAULT_PERSONA_PROMPT,
+  }
+  let memoryEnabled = true
+  let memoryEntries: MemoryEntryDto[] = [
+    { key: '用户称呼', value: '老板', updatedAt: iso(60 * 24 * 3) },
+    { key: '常用工作区', value: 'D:/20114/CSharp/SoufflePet', updatedAt: iso(60 * 5) },
+  ]
+
+  function memoryDto(): MemoryDto {
+    return {
+      enabled: memoryEnabled,
+      path: 'C:/Users/20114/.souffle/memory.json',
+      entries: [...memoryEntries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    }
   }
 
   const providers: ProviderDto[] = [
@@ -1227,6 +1242,40 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             }
             emitSnapshot()
             response(id, persona)
+            return
+          }
+          case 'settings.memory.get': {
+            response(id, memoryDto())
+            return
+          }
+          case 'settings.memory.setEnabled': {
+            memoryEnabled = payload.enabled === true
+            response(id, memoryDto())
+            return
+          }
+          case 'settings.memory.save': {
+            const entryKey = String(payload.key ?? '').trim()
+            const entryValue = String(payload.value ?? '').trim()
+            const previousKey = String(payload.previousKey ?? '').trim()
+            if (!entryKey || !entryValue) {
+              fail(id, 'invalid_argument', '记忆的键和内容不能为空。')
+              return
+            }
+            memoryEntries = memoryEntries.filter(
+              (entry) => entry.key !== entryKey && (!previousKey || entry.key !== previousKey),
+            )
+            memoryEntries.push({ key: entryKey, value: entryValue, updatedAt: new Date().toISOString() })
+            response(id, memoryDto())
+            return
+          }
+          case 'settings.memory.delete': {
+            memoryEntries = memoryEntries.filter((entry) => entry.key !== payload.key)
+            response(id, memoryDto())
+            return
+          }
+          case 'settings.memory.clear': {
+            memoryEntries = []
+            response(id, memoryDto())
             return
           }
           case 'settings.llm.list': {

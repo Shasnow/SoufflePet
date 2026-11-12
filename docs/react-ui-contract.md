@@ -282,6 +282,11 @@ interface AppSnapshotDto {
 | --- | --- | --- |
 | `settings.persona.get` | `{}` | `PersonaDto` |
 | `settings.persona.save` | `{petName,systemPrompt}` | `PersonaDto`（落盘并刷新主窗口标题） |
+| `settings.memory.get` | `{}` | `MemoryDto` |
+| `settings.memory.setEnabled` | `{enabled}` | `MemoryDto` |
+| `settings.memory.save` | `{key,value,previousKey?}` | `MemoryDto`（按 key 覆盖；带 previousKey 时改名并删除旧键） |
+| `settings.memory.delete` | `{key}` | `MemoryDto`（幂等） |
+| `settings.memory.clear` | `{}` | `MemoryDto` |
 | `settings.llm.list` | `{}` | `{providers:ProviderDto[],enabledModels:ChatModelDto[],defaultKey:string|null}` |
 | `settings.llm.saveProvider` | `{name,baseUrl,apiKey,models,previousName?}` | `ProviderDto` |
 | `settings.llm.deleteProvider` | `{name}` | `{providers:ProviderDto[]}` |
@@ -332,6 +337,20 @@ interface PersonaDto {
   defaultPetName: string
   /** 按当前称呼生成的默认人设提示词。 */
   defaultSystemPrompt: string
+}
+
+interface MemoryDto {
+  enabled: boolean
+  /** memory.json 的绝对路径，仅用于界面展示。 */
+  path: string
+  entries: MemoryEntryDto[]
+}
+
+interface MemoryEntryDto {
+  key: string
+  value: string
+  /** ISO 8601 时间戳；列表按它倒序。 */
+  updatedAt: string
 }
 
 interface ChatProviderModelDto { modelId: string; name?: string; isActive: boolean }

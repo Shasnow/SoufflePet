@@ -3,10 +3,11 @@
 
 import { useSyncExternalStore } from 'react'
 
-export type SettingsPanel = 'persona' | 'llm' | 'models' | 'appearance'
+export type SettingsPanel = 'persona' | 'memory' | 'llm' | 'models' | 'appearance'
 
 export const SETTINGS_PANELS: { id: SettingsPanel; label: string }[] = [
   { id: 'persona', label: '人设' },
+  { id: 'memory', label: '记忆' },
   { id: 'llm', label: '对话模型' },
   { id: 'models', label: 'Live2D 模型' },
   { id: 'appearance', label: '外观' },

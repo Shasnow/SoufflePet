@@ -30,6 +30,13 @@ public sealed record PersonaDto(
 
 public sealed record PersonaInputDto(string PetName, string SystemPrompt);
 
+/// <summary>长期记忆面板：开关、落盘位置与条目列表（按更新时间倒序）。</summary>
+public sealed record MemoryDto(bool Enabled, string Path, IReadOnlyList<MemoryEntryDto> Entries);
+
+public sealed record MemoryEntryDto(string Key, string Value, string UpdatedAt);
+
+public sealed record MemoryInputDto(string Key, string Value, string? PreviousKey = null);
+
 public sealed record McpServerDto(
     string Name,
     bool Enabled,

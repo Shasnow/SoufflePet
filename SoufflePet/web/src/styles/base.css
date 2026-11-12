@@ -2954,6 +2954,78 @@ body.is-resizing-sidebar .sidebar {
   margin-top: 4px;
 }
 
+/* 长期记忆：新增行与条目卡片 */
+.memory-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.memory-add-key {
+  flex: 0 0 150px;
+}
+
+.memory-add-value {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+
+.memory-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-entry-key {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.memory-entry-time {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.memory-entry-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.memory-entry-value {
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.memory-entry-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .settings-model-list {
   display: flex;
   flex-direction: column;

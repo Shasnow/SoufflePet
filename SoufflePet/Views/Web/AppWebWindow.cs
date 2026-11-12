@@ -75,6 +75,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
 
     public AppWebWindow(
         SouffleSettings settings,
+        ChatMemory memory,
         ILocalFileServer files,
         ThemeService theme,
         IStatisticsService statistics,
@@ -113,7 +114,7 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         Content = _view;
 
         var settingsApi = new SettingsApi(
-            this, settings, theme, catalog, mcpConfig, mcpTools, skills, plugins, scheduler, models, ui);
+            this, settings, memory, theme, catalog, mcpConfig, mcpTools, skills, plugins, scheduler, models, ui);
         _rpc = new ChatRpc(this, sessions, settings, theme, statistics, files, mcpTools, mcpConfig, settingsApi);
         _bridge = new WebBridgeServer(
             _view,

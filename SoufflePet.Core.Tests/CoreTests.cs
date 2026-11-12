@@ -74,6 +74,53 @@ public sealed class ChatMemoryTests : IDisposable
     }
 
     [Fact]
+    public void EditsProfileEntriesFromSettingsApi()
+    {
+        var settings = new SouffleSettings { ChatMemoryEnabled = true };
+        var memory = new ChatMemory(settings, _root);
+
+        memory.UpsertProfileEntry("称呼", "老板");
+        var entries = memory.ProfileEntries();
+        Assert.Single(entries);
+        Assert.Equal("老板", entries[0].Value);
+
+        // 同键覆盖，而不是新增一条
+        memory.UpsertProfileEntry("称呼", "老板娘");
+        entries = memory.ProfileEntries();
+        Assert.Single(entries);
+        Assert.Equal("老板娘", entries[0].Value);
+
+        // 给 previousKey 时改名：旧条目被删掉，不会留下两份
+        memory.UpsertProfileEntry("昵称", "老板娘", previousKey: "称呼");
+        entries = memory.ProfileEntries();
+        Assert.Single(entries);
+        Assert.Equal("昵称", entries[0].Key);
+
+        Assert.True(memory.DeleteProfileEntry("昵称"));
+        Assert.Empty(memory.ProfileEntries());
+        Assert.False(memory.DeleteProfileEntry("昵称"));
+
+        memory.UpsertProfileEntry("常用语言", "中文");
+        memory.ClearProfile();
+        Assert.Empty(memory.ProfileEntries());
+    }
+
+    [Fact]
+    public void EditsProfileEvenWhenMemoryDisabled()
+    {
+        var settings = new SouffleSettings { ChatMemoryEnabled = false };
+        var memory = new ChatMemory(settings, _root);
+
+        // 关闭记忆只停止注入，设置页仍可查看与编辑
+        memory.UpsertProfileEntry("称呼", "老板");
+        Assert.Single(memory.ProfileEntries());
+
+        var profile = new StringBuilder();
+        memory.BuildProfileBlock(profile);
+        Assert.DoesNotContain("老板", profile.ToString());
+    }
+
+    [Fact]
     public void SkipsCorruptJsonLines()
     {
         Directory.CreateDirectory(_root);

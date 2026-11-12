@@ -231,6 +231,109 @@ public sealed class ChatMemory
     /// <summary>记忆总开关（设置里可关掉注入，已落盘的内容保留）。</summary>
     private bool Enabled => _settings.ChatMemoryEnabled;
 
+    /// <summary>长期记忆文件位置（~/.souffle/memory.json），供设置页展示。</summary>
+    public string ProfilePath => _profilePath;
+
+    /// <summary>
+    /// 读取长期记忆条目（按更新时间倒序）。先刷新磁盘，保证多会话写入后设置页看到最新内容。
+    /// </summary>
+    public IReadOnlyList<MemoryEntry> ProfileEntries()
+    {
+        lock (_gate)
+        {
+            ReloadProfileFromDisk();
+            return [.. _profile.OrderByDescending(e => e.UpdatedAt).Select(CloneEntry)];
+        }
+    }
+
+    /// <summary>
+    /// 设置页写入一条记忆：按 key 覆盖。<paramref name="previousKey" /> 用于改名——
+    /// 与原键不同时会先删掉旧条目。与 remember 工具不同，这里不受「长期记忆已关闭」限制，
+    /// 用户显式编辑始终落盘；记忆关闭只影响是否注入提示词。
+    /// </summary>
+    public MemoryEntry UpsertProfileEntry(string key, string value, string? previousKey = null)
+    {
+        key = key.Trim();
+        value = value.Trim();
+        var renamedFrom = previousKey?.Trim() ?? string.Empty;
+        if (key.Length == 0) throw new ArgumentException("记忆的键不能为空。", nameof(key));
+        if (value.Length == 0) throw new ArgumentException("记忆的内容不能为空。", nameof(value));
+        if (key.Length > 30) key = key[..30];
+        const int maxValueLen = 500;
+        if (value.Length > maxValueLen) value = value[..maxValueLen];
+
+        lock (_gate)
+        {
+            ReloadProfileFromDisk();
+            var renamed = renamedFrom.Length > 0
+                          && !string.Equals(renamedFrom, key, StringComparison.OrdinalIgnoreCase);
+            if (renamed)
+                _profile.RemoveAll(e => string.Equals(e.Key, renamedFrom, StringComparison.OrdinalIgnoreCase));
+
+            var entry = _profile.FirstOrDefault(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                entry = new MemoryEntry { Key = key };
+                _profile.Add(entry);
+            }
+
+            entry.Value = value;
+            entry.UpdatedAt = DateTimeOffset.Now;
+            // 改名时必须把旧键排除在合并之外，否则磁盘上的旧条目会被原样合并回来。
+            SaveProfile(merge: true, excludeKeys: renamed ? [renamedFrom] : null);
+            return CloneEntry(entry);
+        }
+    }
+
+    /// <summary>删除一条长期记忆；不存在时返回 false（删除是幂等的，不算错误）。</summary>
+    public bool DeleteProfileEntry(string key)
+    {
+        key = key.Trim();
+        if (key.Length == 0) return false;
+
+        lock (_gate)
+        {
+            ReloadProfileFromDisk();
+            if (_profile.RemoveAll(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase)) == 0)
+                return false;
+            SaveProfile(merge: false);
+            return true;
+        }
+    }
+
+    /// <summary>清空全部长期记忆。</summary>
+    public void ClearProfile()
+    {
+        lock (_gate)
+        {
+            _profile = [];
+            SaveProfile(merge: false);
+        }
+    }
+
+    /// <summary>重新从磁盘读取档案，覆盖内存缓存；设置页编辑后让注入提示词立即用上新内容。</summary>
+    private void ReloadProfileFromDisk()
+    {
+        _profile = [];
+        LoadProfile();
+    }
+
+    private void TrimProfile()
+    {
+        if (_profile.Count <= MaxProfileEntries) return;
+        _profile = _profile
+            .OrderByDescending(e => e.UpdatedAt)
+            .Take(MaxProfileEntries)
+            .ToList();
+    }
+
+    private static MemoryEntry CloneEntry(MemoryEntry entry) => new()
+    {
+        Key = entry.Key,
+        Value = entry.Value,
+        UpdatedAt = entry.UpdatedAt,
+    };
+
     /// <summary>
     /// 追加一条记录并落盘；role 为 user / assistant / tool。
     /// tool 记录额外保存调用信息（CallId、工具名、参数、完整结果），供启动时重建请求上下文。
@@ -760,9 +863,10 @@ public sealed class ChatMemory
     /// <summary>
     /// 落盘用户档案。多会话共享同一个 memory.json 时，<paramref name="merge" /> 先把磁盘上
     /// 其他会话刚写入的条目合并进来（同键以本实例为准），避免后写的会话覆盖先写的记忆；
+    /// <paramref name="excludeKeys" /> 里的键（如改名前的旧键）不参与合并；
     /// 删除走 merge: false，确保删除结果就是最终结果。
     /// </summary>
-    private void SaveProfile(bool merge)
+    private void SaveProfile(bool merge, IReadOnlyCollection<string>? excludeKeys = null)
     {
         try
         {
@@ -773,8 +877,13 @@ public sealed class ChatMemory
                 if (onDisk is { Count: > 0 })
                 {
                     var keys = _profile.Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var excluded = excludeKeys is { Count: > 0 }
+                        ? excludeKeys.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                        : null;
                     _profile.AddRange(onDisk.Where(e =>
-                        !string.IsNullOrWhiteSpace(e.Key) && !keys.Contains(e.Key)));
+                        !string.IsNullOrWhiteSpace(e.Key)
+                        && !keys.Contains(e.Key)
+                        && (excluded is null || !excluded.Contains(e.Key))));
                     if (_profile.Count > MaxProfileEntries)
                     {
                         _profile = _profile

@@ -188,6 +188,20 @@ export interface PersonaDto {
   defaultSystemPrompt: string
 }
 
+/** 长期记忆面板：条目按更新时间倒序；enabled=false 时只停止注入，不删除内容。 */
+export interface MemoryDto {
+  enabled: boolean
+  path: string
+  entries: MemoryEntryDto[]
+}
+
+export interface MemoryEntryDto {
+  key: string
+  value: string
+  /** ISO 8601 时间戳。 */
+  updatedAt: string
+}
+
 export interface ChatProviderModelDto {
   modelId: string
   name?: string

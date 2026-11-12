@@ -18,12 +18,13 @@ using SoufflePet.Services.Plugins;
 namespace SoufflePet.Services.Web;
 
 /// <summary>
-/// 设置面板的宿主 API：人设、LLM 提供商、MCP、技能、插件、定时任务、Live2D 模型与外观。
+/// 设置面板的宿主 API：人设、长期记忆、LLM 提供商、MCP、技能、插件、定时任务、Live2D 模型与外观。
 /// 全部走 Core 服务，返回 v1 契约 DTO；文件/目录选择由 AppWebWindow 提供。
 /// </summary>
 public sealed class SettingsApi(
     IAppWindowCommands window,
     SouffleSettings settings,
+    ChatMemory memory,
     ThemeService theme,
     ILlmModelCatalog catalog,
     IMcpConfigStore mcpConfig,
@@ -51,6 +52,12 @@ public sealed class SettingsApi(
 
                 "settings.persona.get" => PersonaGet(),
                 "settings.persona.save" => PersonaSave(Read<PersonaInputDto>(parameters)),
+
+                "settings.memory.get" => MemoryGet(),
+                "settings.memory.setEnabled" => MemorySetEnabled(GetBool(parameters, "enabled")),
+                "settings.memory.save" => MemorySave(Read<MemoryInputDto>(parameters)),
+                "settings.memory.delete" => MemoryDelete(RequireString(parameters, "key")),
+                "settings.memory.clear" => MemoryClear(),
 
                 "settings.mcp.list" => McpList(),
                 "settings.mcp.save" => await McpSaveAsync(Read<McpServerDto>(parameters), cancellationToken),
@@ -251,6 +258,52 @@ public sealed class SettingsApi(
         settings.ChatSystemPrompt,
         SouffleSettings.DefaultPetName,
         SouffleSettings.BuildDefaultChatSystemPrompt(settings.PetName));
+
+    // ===== 长期记忆 =====
+
+    private MemoryDto MemoryGet() => MapMemory();
+
+    private MemoryDto MemorySetEnabled(bool enabled)
+    {
+        // 只影响是否把档案注入提示词，已落盘的记忆保留。
+        settings.ChatMemoryEnabled = enabled;
+        return MapMemory();
+    }
+
+    private MemoryDto MemorySave(MemoryInputDto input)
+    {
+        try
+        {
+            memory.UpsertProfileEntry(input.Key, input.Value, input.PreviousKey);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new BridgeRpcException("invalid_argument", ex.Message);
+        }
+
+        return MapMemory();
+    }
+
+    private MemoryDto MemoryDelete(string key)
+    {
+        // 删除保持幂等：条目可能已被模型或其他实例删掉，直接返回最新列表。
+        memory.DeleteProfileEntry(key);
+        return MapMemory();
+    }
+
+    private MemoryDto MemoryClear()
+    {
+        memory.ClearProfile();
+        return MapMemory();
+    }
+
+    private MemoryDto MapMemory() => new(
+        settings.ChatMemoryEnabled,
+        memory.ProfilePath,
+        [.. memory.ProfileEntries().Select(entry => new MemoryEntryDto(
+            entry.Key,
+            entry.Value,
+            entry.UpdatedAt.ToString("O")))]);
 
     // ===== MCP =====
 
