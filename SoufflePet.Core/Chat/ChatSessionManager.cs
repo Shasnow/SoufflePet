@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
+using SoufflePet.Chat;
 using SoufflePet.Models;
 using SoufflePet.Services;
 

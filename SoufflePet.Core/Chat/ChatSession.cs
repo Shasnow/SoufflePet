@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Serilog;
+using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 using SoufflePet.Services;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
-namespace SoufflePet.Core.Chat;
+namespace SoufflePet.Chat;
 
 /// <summary>会话层可预期的业务错误；宿主映射为桥的 error.code。</summary>
 public sealed class ChatSessionException(string code, string message) : Exception(message)
@@ -33,7 +28,6 @@ public sealed class ChatSession : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<ChatSession>();
 
-    private const string ThinkingText = "正在思考…";
     private const string BlankText = "（空白内容）";
     private const string DefaultTitle = "新会话";
     private const int ToolResultMaxLength = 300;
@@ -44,7 +38,6 @@ public sealed class ChatSession : IAsyncDisposable
     private const int TitleLength = 30;
     private const int WorkspaceNameLength = 40;
     private const string SystemPrefix = "[系统消息]";
-    private const string PlatformNoticePrefix = "[平台消息]";
 
     private static readonly string AttachmentDirectory = Path.Combine(
         ChatMemory.SouffleHome, "attachments");
@@ -55,7 +48,7 @@ public sealed class ChatSession : IAsyncDisposable
     /// </summary>
     private static readonly AsyncLocal<ChatSession?> CurrentTurn = new();
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly List<MessageState> _messages = [];
     private readonly List<AttachmentEntry> _attachments = [];
     private readonly List<ChatMessage> _history = [];
@@ -164,20 +157,18 @@ public sealed class ChatSession : IAsyncDisposable
     /// </summary>
     public void Activate()
     {
-        if (_workspacePath is { } path && NormalizeDirectory(path) is null)
-        {
-            _workspacePath = null;
-            Logger.Warning("workspace no longer exists, fallback to default id={Session} path={Path}", Id, path);
-        }
+        if (_workspacePath is not { } path || NormalizeDirectory(path) is not null) return;
+        _workspacePath = null;
+        Logger.Warning("workspace no longer exists, fallback to default id={Session} path={Path}", Id, path);
     }
 
     /// <summary>把会话存储迁到当前工作区对应的分组目录（由工厂注入的解析器决定）。</summary>
     private void RebaseStorage(string? workspacePath)
     {
-        if (_directoryResolver is not { } resolver) return;
+        if (_directoryResolver is null) return;
         try
         {
-            _memory.Rebase(resolver(workspacePath));
+            _memory.Rebase(_directoryResolver(workspacePath));
         }
         catch (Exception ex)
         {
@@ -193,7 +184,7 @@ public sealed class ChatSession : IAsyncDisposable
     /// <summary>发送一条用户消息；校验通过后立即返回，回复通过事件流式推送。</summary>
     public async Task SendAsync(string text, IReadOnlyList<string>? attachmentIds, CancellationToken cancellationToken)
     {
-        text = (text ?? string.Empty).Trim();
+        text = text.Trim();
         cancellationToken.ThrowIfCancellationRequested();
 
         await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -298,7 +289,7 @@ public sealed class ChatSession : IAsyncDisposable
 
     public Task SetDraftAsync(string text)
     {
-        lock (_gate) _draft = text ?? string.Empty;
+        lock (_gate) _draft = text;
         TouchActivity();
         return Task.CompletedTask;
     }
@@ -356,7 +347,7 @@ public sealed class ChatSession : IAsyncDisposable
 
             var state = SnapshotAttachmentsLocked();
             EmitLocked(new ChatOpAttachments(state));
-            return Task.FromResult<IReadOnlyList<ChatAttachmentState>>(state);
+            return Task.FromResult(state);
         }
     }
 
@@ -372,7 +363,7 @@ public sealed class ChatSession : IAsyncDisposable
             _attachments.Add(new AttachmentEntry(NewMessageId("a"), fileName, string.Empty, true, data, data.Length));
             var state = SnapshotAttachmentsLocked();
             EmitLocked(new ChatOpAttachments(state));
-            return Task.FromResult(state.Last());
+            return Task.FromResult(state[^1]);
         }
     }
 
@@ -383,13 +374,12 @@ public sealed class ChatSession : IAsyncDisposable
             _attachments.RemoveAll(a => string.Equals(a.Id, id, StringComparison.Ordinal));
             var state = SnapshotAttachmentsLocked();
             EmitLocked(new ChatOpAttachments(state));
-            return Task.FromResult<IReadOnlyList<ChatAttachmentState>>(state);
+            return Task.FromResult(state);
         }
     }
 
     public Task SelectModelAsync(string key)
     {
-        key = key ?? string.Empty;
         lock (_gate)
         {
             if (_settings.ChatModels.All(model => model.Key != key))
@@ -453,7 +443,7 @@ public sealed class ChatSession : IAsyncDisposable
     /// <summary>允许/拒绝一条待审批的工具调用；消息 id 必须对应仍在等待的审批气泡。</summary>
     public Task DecideApprovalAsync(string messageId, bool approve)
     {
-        ToolApprovalRequest? request = null;
+        ToolApprovalRequest? request;
         lock (_gate)
         {
             if (!string.Equals(_approvalMessageId, messageId, StringComparison.Ordinal) || _approvalRequest is null)
@@ -469,12 +459,11 @@ public sealed class ChatSession : IAsyncDisposable
     /// <summary>切换工作区：目录必须存在；只记录为该会话的逻辑工作目录，不改变进程 cwd。</summary>
     public Task<ChatWorkspaceState?> SwitchWorkspaceAsync(string path)
     {
-        string? full = NormalizeDirectory(path);
+        var full = NormalizeDirectory(path);
         if (!string.IsNullOrWhiteSpace(path) && full is null)
             throw new ChatSessionException("invalid_argument", "工作区目录不存在");
 
         ChatWorkspaceState? workspace;
-        IReadOnlyList<ChatWorkspaceState> workspaces;
         string? newWorkspace;
         lock (_gate)
         {
@@ -486,7 +475,7 @@ public sealed class ChatSession : IAsyncDisposable
             _settings.ActiveWorkspacePath = full ?? string.Empty;
             _settings.Save();
             workspace = ToWorkspace(full);
-            workspaces = SnapshotWorkspacesLocked();
+            var workspaces = SnapshotWorkspacesLocked();
             EmitLocked(new ChatOpWorkspace(workspace, workspaces));
         }
 
@@ -499,10 +488,9 @@ public sealed class ChatSession : IAsyncDisposable
     /// <summary>从工作区历史里移除一项；删的是当前工作区时回落到应用目录。</summary>
     public Task<IReadOnlyList<ChatWorkspaceState>> DeleteWorkspaceAsync(string path)
     {
-        string? full = NormalizeDirectory(path);
+        var full = NormalizeDirectory(path);
         IReadOnlyList<ChatWorkspaceState> workspaces;
-        ChatWorkspaceState? active;
-        var cleared = false;
+        bool cleared;
         lock (_gate)
         {
             var key = full ?? path;
@@ -532,7 +520,7 @@ public sealed class ChatSession : IAsyncDisposable
 
             _settings.Save();
             workspaces = SnapshotWorkspacesLocked();
-            active = ToWorkspace(_workspacePath);
+            var active = ToWorkspace(_workspacePath);
             EmitLocked(new ChatOpWorkspace(active, workspaces));
         }
 
@@ -600,9 +588,6 @@ public sealed class ChatSession : IAsyncDisposable
                 if (answers.Count == 0)
                     throw new ChatSessionException("invalid_argument", "请先回答全部问题");
                 request.Submit(answers);
-                break;
-            default:
-                // prev/next/select/custom 是页面本地的交互，服务端无需处理
                 break;
         }
 

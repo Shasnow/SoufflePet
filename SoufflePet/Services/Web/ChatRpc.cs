@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
+using SoufflePet.Chat;
 using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 
