@@ -16,6 +16,10 @@
     "wakeWords": [],
     "replyProbability": 0,
     "proactiveReplyBlockedGroups": [],
+    "pokeLlmReply": false,
+    "pokeBackProbability": 0,
+    "pokeCooldownSeconds": 60,
+    "followPokeProbability": 0,
     "maxReplyChars": 1500,
     "downloadAttachments": true,
     "attachmentCacheDir": "attachments",
@@ -75,6 +79,30 @@
       "label": "禁止主动回复的群号",
       "type": "list",
       "description": "每行一个群号；这些群里不再按概率随机搭话，@、引用与唤醒词仍然生效。留空表示不限制。"
+    },
+    {
+      "key": "pokeLlmReply",
+      "label": "戳一戳智能回复",
+      "type": "boolean",
+      "description": "开启后把戳桌宠的事件转给桌宠，由大语言模型决定怎么回复。"
+    },
+    {
+      "key": "pokeBackProbability",
+      "label": "回戳概率（0-1）",
+      "type": "number",
+      "description": "大于 0 时按此概率自动回戳发起者，与智能回复互不影响；0 表示不回戳，1 表示每次都回戳。"
+    },
+    {
+      "key": "pokeCooldownSeconds",
+      "label": "戳一戳冷却（秒）",
+      "type": "number",
+      "description": "同一用户触发响应后的冷却时长，冷却内再次戳桌宠会被直接忽略；0 表示不冷却。"
+    },
+    {
+      "key": "followPokeProbability",
+      "label": "跟戳概率（0-1）",
+      "type": "number",
+      "description": "群里有人戳其他用户时，桌宠按此概率跟着戳被戳的人；0 表示关闭。"
     },
     {
       "key": "maxReplyChars",

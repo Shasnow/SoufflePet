@@ -23,6 +23,7 @@ namespace SoufflePet.Plugins.NapCat;
 /// 插件始终忽略桌宠自己发出的消息，避免自己回复自己。
 /// 支持按会话 id（group:群号 / private:QQ号）读写指定会话的消息。
 /// 同时提供群管理工具（禁言、解除禁言、全员禁言、踢出成员、修改群名片、查询成员），并按配置自动审批加群申请。
+/// 收到戳一戳时可以转发给桌宠智能回复，或按概率自动回戳，并对同一用户做冷却。
 /// </summary>
 public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 {
@@ -35,6 +36,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private NapCatQuoteTracker? _quotes;
     private NapCatGroupAdmin? _groupAdmin;
     private NapCatGroupJoinApprover? _joinApprover;
+    private NapCatPokeResponder? _pokeResponder;
 
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
@@ -61,6 +63,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _sender = new NapCatSender(Context.Logger, _connection, _quotes);
         _groupAdmin = new NapCatGroupAdmin(Context.Logger, _connection, _config);
         _joinApprover = new NapCatGroupJoinApprover(Context.Logger, _connection, _config);
+        _pokeResponder = new NapCatPokeResponder(Context.Logger, _connection, _config, HandlePokeResponse);
         _downloader = new NapCatAttachmentDownloader(
             Context.Logger,
             _config.AttachmentCacheDir,
@@ -299,7 +302,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _store?.StopAutoSave();
     }
 
-    /// <summary>NapCat 事件分派：消息交给平台逻辑，加群申请交给自动审批。</summary>
+    /// <summary>NapCat 事件分派：消息交给平台逻辑，加群申请交给自动审批，戳一戳交给响应器。</summary>
     private void HandleEvent(JsonElement root)
     {
         switch (NapCatMessageParser.GetString(root, "post_type"))
@@ -307,6 +310,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             case "message":
                 Context.Logger.LogDebug("收到 NapCat 消息：{Event}", root.ToString());
                 HandleMessage(root);
+                break;
+
+            case "notice":
+                Context.Logger.LogDebug("收到 NapCat 通知：{Event}", root.ToString());
+                _pokeResponder?.Handle(root, Volatile.Read(ref _selfId));
                 break;
 
             case "request":
@@ -513,5 +521,15 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         {
             Context.Logger.LogWarning(ex, "向宿主转发 NapCat 平台消息失败");
         }
+    }
+
+    /// <summary>戳一戳命中响应：记入会话历史并唤醒桌宠；自动回戳由响应器自己发送。</summary>
+    private void HandlePokeResponse(string conversationId, string line, string sender, long groupId)
+    {
+        var display = groupId > 0
+            ? $"群 {groupId.ToString(CultureInfo.InvariantCulture)}"
+            : sender;
+        _store?.RecordMessage(conversationId, line, display);
+        RaiseMentioned(line, sender, null);
     }
 }

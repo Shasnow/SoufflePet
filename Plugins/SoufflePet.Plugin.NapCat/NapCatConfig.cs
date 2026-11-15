@@ -31,6 +31,18 @@ internal sealed class NapCatConfig
     /// <summary>禁止主动回复的群号：这些群里不再按概率随机搭话，@、引用与唤醒词仍然生效。</summary>
     public HashSet<long> ProactiveReplyBlockedGroups { get; init; } = [];
 
+    /// <summary>是否把戳一戳事件转发给桌宠，由大语言模型决定怎么回复。</summary>
+    public bool PokeLlmReply { get; init; }
+
+    /// <summary>自动回戳的概率（0-1）；0 表示不回戳，1 表示每次必回。</summary>
+    public double PokeBackProbability { get; init; }
+
+    /// <summary>同一用户戳一戳的响应冷却秒数；0 表示不冷却。</summary>
+    public int PokeCooldownSeconds { get; init; } = 60;
+
+    /// <summary>跟戳概率（0-1）：别人戳的是其他用户时，桌宠按此概率跟着戳被戳的人；0 表示关闭。</summary>
+    public double FollowPokeProbability { get; init; }
+
     public int MaxReplyChars { get; init; } = 1500;
 
     /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
@@ -91,6 +103,10 @@ internal sealed class NapCatConfig
             WakeWords = ReadConfigWords(config, "wakeWords"),
             ReplyProbability = Math.Clamp(GetConfigDouble(config, "replyProbability", 0), 0, 1),
             ProactiveReplyBlockedGroups = ReadConfigIds(config, "proactiveReplyBlockedGroups"),
+            PokeLlmReply = GetConfigBool(config, "pokeLlmReply", false),
+            PokeBackProbability = Math.Clamp(GetConfigDouble(config, "pokeBackProbability", 0), 0, 1),
+            PokeCooldownSeconds = Math.Clamp(GetConfigInt(config, "pokeCooldownSeconds", 60), 0, 86400),
+            FollowPokeProbability = Math.Clamp(GetConfigDouble(config, "followPokeProbability", 0), 0, 1),
             MaxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000),
             DownloadAttachments = GetConfigBool(config, "downloadAttachments", true),
             RolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim(),
