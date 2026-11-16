@@ -289,6 +289,9 @@ public sealed partial class ChatTools
             WorkingDirectory = WorkspaceContext.Current,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // 输入也必须重定向：GUI 宿主没有有效的标准输入句柄，pwsh 会把它传给原生命令（git 等），
+            // 导致 CreateProcess 报「句柄无效」——原生命令零输出，而纯 PowerShell 命令看起来正常
+            RedirectStandardInput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
@@ -297,8 +300,13 @@ public sealed partial class ChatTools
         startInfo.ArgumentList.Add("-NoProfile");
         startInfo.ArgumentList.Add("-NonInteractive");
         startInfo.ArgumentList.Add("-Command");
-        // 强制 UTF-8，避免中文输出按控制台代码页解码成乱码
-        startInfo.ArgumentList.Add("$OutputEncoding=[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + command);
+        // 命令前先做三件事：强制 UTF-8（避免中文按控制台代码页解成乱码）、
+        // 关掉彩色输出（PS 7 的 $PSStyle 在 5.1 里不存在，需判空；NO_COLOR / TERM 让外部命令也别上色）
+        startInfo.ArgumentList.Add(
+            "$OutputEncoding=[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+            + "$env:NO_COLOR='1'; $env:TERM='dumb'; "
+            + "if ($null -ne $PSStyle) { $PSStyle.OutputRendering='PlainText' }; "
+            + command);
 
         using var process = new Process();
         process.StartInfo = startInfo;
@@ -349,6 +357,16 @@ public sealed partial class ChatTools
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+
+        // 输入管道给原生命令一个有效句柄即可，立即关闭让读 stdin 的命令立刻拿到 EOF，不会卡住
+        try
+        {
+            process.StandardInput.Close();
+        }
+        catch (InvalidOperationException)
+        {
+            // 进程已退出，无需关闭
+        }
 
         // 正常退出与超时只有「结束原因」不同：输出收集、收敛、拼装完全一样，
         // 所以只用一个 try 等到进程退出或被超时打断，最后按原因套不同的外壳。
