@@ -73,7 +73,7 @@ public sealed partial class ChatTools
     private const int SessionHistoryPreviewLength = 80;
 
     /// <summary>会话记录整体回传给模型的最大长度，超出截断。</summary>
-    private const int SessionHistoryOutputMaxLength = 12000;
+    private const int SessionHistoryOutputMaxLength = 32768;
 
     /// <summary>本地展示文件的最大字节数，超出时只回报文件信息、不展示。</summary>
     private const long ShowFileMaxBytes = 50L * 1024 * 1024;
