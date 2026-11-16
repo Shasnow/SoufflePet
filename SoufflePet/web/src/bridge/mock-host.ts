@@ -473,10 +473,10 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       {
         id: 'm-approval',
         kind: 'approval',
-        text: '模型请求执行命令，等待你的确认：\nrun_shell_command {"command":"node scripts/export.mjs"}',
+        text: '模型请求执行命令，等待你的确认：\npwsh {"command":"node scripts/export.mjs"}',
         time: timeLabel(13),
         approval: {
-          toolName: 'run_shell_command',
+          toolName: 'pwsh',
           detail: '{"command":"node scripts/export.mjs"}',
           pending: false,
           outcome: 'approved',

@@ -30,7 +30,7 @@ public sealed class ChatToolAccess
 
     /// <summary>为一次命令执行申请许可：完全访问直接放行，手动审批等待用户点击允许。</summary>
     public Task<bool> RequestShellApprovalAsync(string command, CancellationToken cancellationToken)
-        => RequestApprovalAsync("run_shell_command", command, cancellationToken);
+        => RequestApprovalAsync("pwsh", command, cancellationToken);
 
     /// <summary>为任意有副作用的工具申请许可（例如向平台发送文件）。</summary>
     public async Task<bool> RequestApprovalAsync(

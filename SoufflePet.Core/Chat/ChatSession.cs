@@ -1761,7 +1761,7 @@ public sealed class ChatSession : IAsyncDisposable
         var name = separator >= 0 ? toolName[(separator + 2)..] : toolName;
         return name switch
         {
-            "run_shell_command" => "执行命令",
+            "pwsh" => "执行命令",
             "write_file" => "写入文件",
             "edit_file" => "编辑文件",
             "send_attachment" => "发送文件",

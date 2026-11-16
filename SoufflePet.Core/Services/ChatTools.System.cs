@@ -92,7 +92,7 @@ public sealed partial class ChatTools
 
         if (GetVideoMediaType(info.Extension) is { } videoType)
             return [new TextContent($"「{info.Name}」是视频（{FormatSize(info.Length)}，{videoType}），无法直接作为内容读取；"
-                + "如需分析，可用 run_shell_command 配合 ffmpeg 抽取关键帧或音频，再读取生成的文件。")];
+                + "如需分析，可用 pwsh 配合 ffmpeg 抽取关键帧或音频，再读取生成的文件。")];
 
         offset = Math.Max(offset, 1);
         limit = Math.Clamp(limit, 1, ReadFileMaxLines);
@@ -195,7 +195,31 @@ public sealed partial class ChatTools
         _ => $"{bytes} 字节"
     };
 
-    private async Task<string> RunShellCommand(
+    /// <summary>命令执行优先用 PowerShell 7；未安装时回退到 Windows PowerShell。</summary>
+    private static readonly (string Executable, string Name)[] PowerShellHosts =
+    [
+        ("pwsh.exe", "PowerShell 7"),
+        ("powershell.exe", "Windows PowerShell"),
+    ];
+
+    /// <summary>CreateProcess 找不到可执行文件时的 Win32 错误码（ERROR_FILE_NOT_FOUND）；只有这种情况才回退到下一个宿主。</summary>
+    private const int ErrorFileNotFound = 2;
+
+    /// <summary>一条命令在某个 PowerShell 宿主里的结局。</summary>
+    private enum ShellRunState
+    {
+        /// <summary>可执行文件不存在，应回退到下一个宿主。</summary>
+        HostMissing,
+
+        /// <summary>进程没能启动，文本是给模型看的失败说明，不再回退。</summary>
+        StartFailed,
+
+        /// <summary>进程已结束（正常退出或超时被终止），文本是退出码与输出。</summary>
+        Completed,
+    }
+
+    /// <summary>执行 shell 命令：优先 PowerShell 7（pwsh），未安装时回退到 Windows PowerShell。</summary>
+    private async Task<string> RunPwshCommand(
         [Description(
             "要执行的 PowerShell 命令")]
         string command,
@@ -213,7 +237,53 @@ public sealed partial class ChatTools
                 : "用户没有允许这次命令执行，命令未运行。";
         }
 
-        var startInfo = new ProcessStartInfo("powershell.exe")
+        string? missingHost = null;
+        for (var i = 0; i < PowerShellHosts.Length; i++)
+        {
+            var (executable, shellName) = PowerShellHosts[i];
+            var (state, text) = await RunPowerShellHostAsync(executable, command, timeoutSecondsValue, cancellationToken);
+            switch (state)
+            {
+                case ShellRunState.HostMissing:
+                    // 该可执行文件不存在，换下一个；记下缺的是哪个，回退提示要按实际缺失的宿主说
+                    Logger.Debug("PowerShell host {Executable} not found, trying next", executable);
+                    missingHost ??= executable;
+                    continue;
+                case ShellRunState.StartFailed:
+                    return text;
+                default:
+                    // 回退时在首行标注实际宿主，避免模型以为新版语法一定可用；也避免混进命令输出正文
+                    return missingHost is null ? text : WithShellNote(text, $"{shellName}：未找到 {missingHost}");
+            }
+        }
+
+        var message = MissingHostsMessage();
+        Logger.Warning("no PowerShell host available, command not run: {Message}", message);
+        return message;
+    }
+
+    /// <summary>所有宿主都缺失时给模型的说明；宿主列表变化时文案自动跟着变。</summary>
+    internal static string MissingHostsMessage() =>
+        $"未找到 {string.Join(" 或 ", PowerShellHosts.Select(host => host.Executable))}：请安装 PowerShell 后重试。";
+
+    /// <summary>把宿主说明并入结果首行（首行是退出码或超时说明），不要追加在命令输出末尾。</summary>
+    internal static string WithShellNote(string text, string note)
+    {
+        var lineEnd = text.IndexOfAny(['\r', '\n']);
+        return lineEnd < 0 ? $"{text}（{note}）" : $"{text[..lineEnd]}（{note}）{text[lineEnd..]}";
+    }
+
+    /// <summary>
+    /// 在指定 PowerShell 主机里执行命令并收集输出；可执行文件不存在时返回 <see cref="ShellRunState.HostMissing" />，
+    /// 由调用方回退到下一个主机。
+    /// </summary>
+    private async Task<(ShellRunState State, string Text)> RunPowerShellHostAsync(
+        string executable,
+        string command,
+        int timeoutSecondsValue,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(executable)
         {
             // 命令在会话工作区里执行：每个会话有各自的逻辑工作目录，不能依赖进程 cwd
             WorkingDirectory = WorkspaceContext.Current,
@@ -265,9 +335,16 @@ public sealed partial class ChatTools
         {
             process.Start();
         }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorFileNotFound)
+        {
+            // 找不到可执行文件：交给调用方回退到下一个宿主
+            Logger.Debug(ex, "PowerShell host {Executable} not found", executable);
+            return (ShellRunState.HostMissing, string.Empty);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return $"命令启动失败：{ex.Message}";
+            Logger.Debug(ex, "start PowerShell host {Executable} failed", executable);
+            return (ShellRunState.StartFailed, $"命令启动失败：{ex.Message}");
         }
 
         process.BeginOutputReadLine();
@@ -319,7 +396,7 @@ public sealed partial class ChatTools
                 : "\n（无输出）");
         }
 
-        return result.ToString();
+        return (ShellRunState.Completed, result.ToString());
     }
 
     private static string JoinOutput(ConcurrentQueue<string> lines) =>

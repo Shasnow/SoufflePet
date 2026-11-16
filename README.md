@@ -60,7 +60,7 @@
 | 工具 | 作用 |
 | --- | --- |
 | `get_expressions` / `set_expression` | 列出与切换 Live2D 表情 |
-| `run_shell_command` | 执行 PowerShell 命令（超时与输出长度有上限） |
+| `pwsh` | 使用 PowerShell 7 执行命令（未安装 `pwsh.exe` 时自动回退到 Windows PowerShell），超时与输出长度有上限 |
 | `write_file` / `edit_file` | 新建或整体覆盖文本文件 / 定向替换一段文本；写入前走审批，写入用临时文件 + `File.Replace` 原子替换，旧版本备份到会话目录，写入后在工具气泡显示行级 diff |
 | `ask_user` | 向用户提问：分页面板 + 预设选项（可带说明）+ 自由输入，全部作答后结果回传模型 |
 | `remember` / `forget` / `recall` | 长期记忆的写入、删除与关键词检索 |

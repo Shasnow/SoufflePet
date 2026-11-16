@@ -59,7 +59,7 @@ public static class ToolDisplay
                 ? Compose("切换表情", expression)
                 : "恢复默认表情",
             "read_file" => Compose("读取", FileName(ReadString(root, "path"))),
-            "run_shell_command" => Compose("运行命令", ReadString(root, "command")),
+            "pwsh" => Compose("运行命令", ReadString(root, "command")),
             "list_windows" => "列出窗口",
             "ask_user" => Compose("提问", FirstQuestion(root)),
             "take_screenshot" => Compose("截图", Clip(ReadString(root, "window")) ?? "当前显示器"),

@@ -12,7 +12,7 @@ namespace SoufflePet.Core.Tests;
 public sealed class ToolDisplayTests
 {
     [Theory]
-    [InlineData("run_shell_command", "{\"command\":\"npm test\"}", "运行命令 · npm test")]
+    [InlineData("pwsh", "{\"command\":\"Get-ChildItem\"}", "运行命令 · Get-ChildItem")]
     [InlineData("read_file", "{\"path\":\"C:\\\\tmp\\\\a.txt\"}", "读取 · a.txt")]
     [InlineData("read_file", "{\"path\":\"@D:/work/b.cs\"}", "读取 · b.cs")]
     [InlineData("web_search", "{\"query\":\"Avalonia 12\"}", "搜索 · Avalonia 12")]
@@ -38,13 +38,13 @@ public sealed class ToolDisplayTests
 
     [Fact]
     public void MalformedArgumentsKeepVerb() =>
-        Assert.Equal("运行命令", ToolDisplay.Describe("run_shell_command", "{not json"));
+        Assert.Equal("运行命令", ToolDisplay.Describe("pwsh", "{not json"));
 
     [Fact]
     public void LongSubjectIsTruncated()
     {
         var command = new string('x', 100);
-        var label = ToolDisplay.Describe("run_shell_command", $"{{\"command\":\"{command}\"}}");
+        var label = ToolDisplay.Describe("pwsh", $"{{\"command\":\"{command}\"}}");
         Assert.NotNull(label);
         Assert.EndsWith("…", label);
         Assert.True(label!.Length < command.Length);

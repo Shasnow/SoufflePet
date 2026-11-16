@@ -161,7 +161,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
 
         async IAsyncEnumerable<LlmStreamEvent> ApprovalStreamAsync([EnumeratorCancellation] CancellationToken ct)
         {
-            var approved = await _access.RequestApprovalAsync("run_shell_command", "echo hi", ct);
+            var approved = await _access.RequestApprovalAsync("pwsh", "echo hi", ct);
             await Task.Yield();
             yield return new LlmTextDelta(approved ? "已执行" : "已拒绝");
         }
@@ -259,8 +259,8 @@ public sealed class ChatSessionTests : IAsyncLifetime
     public async Task ToolLabelIsPersistedAndRestored()
     {
         var llm = new FakeLlm((_, _, _) => Streams(
-            new LlmToolCallStartedEvent("call-1", "run_shell_command", "{\"command\":\"npm test\"}"),
-            new LlmToolCallEvent("call-1", "run_shell_command", "{\"command\":\"npm test\"}", "ok"),
+            new LlmToolCallStartedEvent("call-1", "pwsh", "{\"command\":\"npm test\"}"),
+            new LlmToolCallEvent("call-1", "pwsh", "{\"command\":\"npm test\"}", "ok"),
             new LlmTextDelta("完成")));
         var manager = CreateManager(llm);
         var session = manager.ActiveSession!;
@@ -709,7 +709,7 @@ public sealed class ChatSessionTests : IAsyncLifetime
 
         async IAsyncEnumerable<LlmStreamEvent> ApprovalStreamAsync([EnumeratorCancellation] CancellationToken ct)
         {
-            var approved = await _access.RequestApprovalAsync("run_shell_command", "echo two", ct);
+            var approved = await _access.RequestApprovalAsync("pwsh", "echo two", ct);
             await Task.Yield();
             yield return new LlmTextDelta(approved ? "允许执行" : "拒绝执行");
         }

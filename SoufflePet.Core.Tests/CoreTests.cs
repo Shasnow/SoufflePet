@@ -340,3 +340,37 @@ public sealed class PluginManifestTests
         Assert.Equal("approvalTools 中存在空工具名", manifest.Validate());
     }
 }
+
+public sealed class ShellHostNoticeTests
+{
+    [Fact]
+    public void FallbackNoteGoesToFirstLineOnly()
+    {
+        // 首行是退出码，输出正文不能被追加的说明污染（模型可能对输出做机器解析）
+        var text = "退出码 0\n输出：\n你好";
+
+        Assert.Equal("退出码 0（Windows PowerShell：未找到 pwsh.exe）\n输出：\n你好",
+            ChatTools.WithShellNote(text, "Windows PowerShell：未找到 pwsh.exe"));
+    }
+
+    [Fact]
+    public void FallbackNoteKeepsCrlfLineEnding()
+    {
+        Assert.Equal("退出码 1（PowerShell 7）\r\n输出：\r\nx",
+            ChatTools.WithShellNote("退出码 1\r\n输出：\r\nx", "PowerShell 7"));
+    }
+
+    [Fact]
+    public void FallbackNoteAppendsToSingleLineResult()
+    {
+        Assert.Equal("命令超过 30 秒未结束，已终止。（PowerShell 7）",
+            ChatTools.WithShellNote("命令超过 30 秒未结束，已终止。", "PowerShell 7"));
+    }
+
+    [Fact]
+    public void MissingHostsMessageListsEveryHost()
+    {
+        Assert.Equal("未找到 pwsh.exe 或 powershell.exe：请安装 PowerShell 后重试。",
+            ChatTools.MissingHostsMessage());
+    }
+}

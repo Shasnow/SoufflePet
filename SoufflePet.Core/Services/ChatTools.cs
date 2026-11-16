@@ -183,8 +183,8 @@ public sealed partial class ChatTools
                 "read_file",
                 "读取文件内容，支持文本、图片、音频"),
             AIFunctionFactory.Create(
-                RunShellCommand,
-                "run_shell_command",
+                RunPwshCommand,
+                "pwsh",
                 "执行 PowerShell 命令，返回退出码与输出"),
             AIFunctionFactory.Create(
                 AskUser,
