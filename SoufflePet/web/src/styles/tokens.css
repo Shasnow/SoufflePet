@@ -36,6 +36,8 @@
   --surface-3: oklch(0.32 0.012 var(--accent-h));
   --surface-hover: oklch(from var(--surface-2) calc(l + 0.03) c h);
   --surface-active: oklch(from var(--surface-2) calc(l + 0.05) c h);
+  /* 行内代码底色：比所在气泡（surface-2）再亮一档，而不是沉到底色 surface-0 */
+  --inline-code-bg: oklch(from var(--surface-2) calc(l + 0.07) c h);
 
   /* 文字 */
   --text-1: oklch(0.94 0.005 var(--accent-h));
@@ -98,6 +100,8 @@
   --surface-3: oklch(0.9 0.008 var(--accent-h));
   --surface-hover: oklch(from var(--surface-2) calc(l - 0.03) c h);
   --surface-active: oklch(from var(--surface-2) calc(l - 0.05) c h);
+  /* 浅色主题同样取「比气泡更亮」的方向 */
+  --inline-code-bg: oklch(from var(--surface-2) calc(l + 0.05) c h);
 
   --text-1: oklch(0.2 0.008 var(--accent-h));
   --text-2: oklch(0.38 0.01 var(--accent-h));

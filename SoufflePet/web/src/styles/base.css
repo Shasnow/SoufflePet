@@ -2165,7 +2165,7 @@ body.is-resizing-sidebar .sidebar {
 .md code {
   padding: 0.12em 0.35em;
   border-radius: 5px;
-  background: var(--surface-0);
+  background: var(--inline-code-bg);
   color: var(--text-1);
   font-family: var(--font-mono);
   font-size: 0.9em;
