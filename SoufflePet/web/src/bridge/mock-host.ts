@@ -1154,7 +1154,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             return
           }
           case 'chat.file.open':
-          case 'chat.link.open': {
+          case 'chat.link.open':
+          case 'chat.workspace.open': {
             response(id, null)
             return
           }

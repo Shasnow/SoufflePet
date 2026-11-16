@@ -25,6 +25,7 @@ import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { filterSessions, groupSessions, useSessionStore } from '@/stores/sessionStore'
 import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, useUiStore } from '@/stores/uiStore'
+import { useToastStore } from '@/stores/toastStore'
 import { Dialog } from '@/ui/Dialog'
 import { Popover } from '@/ui/Popover'
 import { chatRoute, extensionsRoute, navigate, SETTINGS_PANELS, settingsRoute, tasksRoute, useRoute } from '@/app/router'
@@ -44,6 +45,7 @@ export function Sidebar() {
   const removeChat = useChatStore((state) => state.removeSession)
   const setActive = useSessionStore((state) => state.setActive)
   const setDrawerOpen = useUiStore((state) => state.setDrawerOpen)
+  const pushToast = useToastStore((state) => state.push)
   const sidebarWidth = useUiStore((state) => state.sidebarWidth)
   const setSidebarWidth = useUiStore((state) => state.setSidebarWidth)
   const route = useRoute()
@@ -189,6 +191,16 @@ export function Sidebar() {
   const startRenameWorkspace = (key: string, name: string) => {
     setWorkspaceTitle(name)
     setRenamingWorkspace({ path: key, name })
+  }
+
+  /** 交给宿主用资源管理器打开工作区目录（网页层不能直接碰本机 Shell）。 */
+  const openWorkspaceFolder = async (path: string) => {
+    try {
+      await invoke('chat.workspace.open', { path })
+    } catch (error) {
+      console.warn('open workspace folder failed', error)
+      pushToast({ level: 'error', text: '打开工作区文件夹失败' })
+    }
   }
 
   const saveWorkspaceName = async () => {
@@ -469,6 +481,14 @@ export function Sidebar() {
                                 if (menuByPointer.current) event.preventDefault()
                               }}
                             >
+                              <DropdownMenu.Item
+                                className="menu-item"
+                                onSelect={() => void openWorkspaceFolder(group.key)}
+                              >
+                                <FolderOpen size={14} />
+                                打开文件夹
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Separator className="menu-sep" />
                               <DropdownMenu.Item
                                 className="menu-item"
                                 onSelect={() => startRenameWorkspace(group.key, group.name)}

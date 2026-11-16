@@ -368,6 +368,9 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 case "chat.link.open":
                     OpenLink(RequireString(parameters, "url"));
                     return null;
+                case "chat.workspace.open":
+                    OpenWorkspace(RequireString(parameters, "path"));
+                    return null;
 
                 default:
                     throw new BridgeRpcException("unknown_method", $"未知方法 {method}");
@@ -768,6 +771,40 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// 在资源管理器里打开工作区目录。只允许打开已登记的工作区，
+    /// 避免网页层借这个入口浏览本机任意目录。
+    /// </summary>
+    private void OpenWorkspace(string path)
+    {
+        string full;
+        try
+        {
+            full = Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+        {
+            throw new BridgeRpcException("invalid_argument", $"路径无效：{ex.Message}");
+        }
+
+        // 复用 SamePath：它会统一 GetFullPath 并裁掉尾随分隔符，避免「D:\foo」与「D:\foo\」被当成不同目录
+        var known = _settings.WorkspacePaths.Any(item => SamePath(item, full))
+            || SamePath(_settings.ActiveWorkspacePath, full);
+        if (!known)
+            throw new BridgeRpcException("forbidden", "只能打开已登记的工作区文件夹");
+        if (!Directory.Exists(full))
+            throw new BridgeRpcException("not_found", "工作区文件夹不存在");
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(full) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            throw new BridgeRpcException("io_error", $"打开文件夹失败：{ex.Message}");
         }
     }
 
