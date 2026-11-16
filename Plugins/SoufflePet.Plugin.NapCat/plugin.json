@@ -96,7 +96,7 @@
       "key": "pokeCooldownSeconds",
       "label": "戳一戳冷却（秒）",
       "type": "number",
-      "description": "同一用户触发响应后的冷却时长，冷却内再次戳桌宠会被直接忽略；0 表示不冷却。"
+      "description": "同一用户触发响应后的冷却时长，冷却内再次戳桌宠会被直接忽略，跟戳同一用户也受此限制；0 表示不冷却。"
     },
     {
       "key": "followPokeProbability",

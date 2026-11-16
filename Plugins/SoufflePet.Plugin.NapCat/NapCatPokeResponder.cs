@@ -16,7 +16,7 @@ namespace SoufflePet.Plugins.NapCat;
 /// <summary>
 /// 戳一戳响应：捕获「戳的是桌宠」的通知事件，按配置转发给桌宠、按概率回戳，
 /// 并对同一用户做冷却——冷却期内再次戳桌宠直接忽略，计时从上一次有效响应开始。
-/// 别人戳其他用户时，还可以按跟戳概率跟着戳被戳的人。
+/// 别人戳其他用户时，还可以按跟戳概率跟着戳被戳的人，跟戳同样受被戳用户的冷却限制。
 /// </summary>
 internal sealed class NapCatPokeResponder
 {
@@ -94,17 +94,22 @@ internal sealed class NapCatPokeResponder
         }
     }
 
-    /// <summary>跟戳：别人戳的是其他用户时，按配置概率跟着戳同一个人；仅群聊生效，避免私聊骚扰。</summary>
+    /// <summary>
+    /// 跟戳：别人戳的是其他用户时，按配置概率跟着戳同一个人；仅群聊生效，避免私聊骚扰。
+    /// 冷却按被戳的用户计算——同一用户短时间内不会被桌宠反复跟戳。
+    /// </summary>
     private void TryFollowPoke(long userId, long targetId, long groupId)
     {
         if (groupId <= 0 || targetId <= 0) return;
         if (_config.FollowPokeProbability <= 0) return;
+        if (IsCoolingDown(targetId)) return;
         if (_config.FollowPokeProbability < 1
             && Random.Shared.NextDouble() >= _config.FollowPokeProbability)
         {
             return;
         }
 
+        MarkResponded(targetId);
         _logger.LogInformation(
             "跟戳：{UserId} 戳了群 {GroupId} 的 {TargetId}，桌宠跟着戳了一下",
             userId,
