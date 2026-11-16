@@ -12,17 +12,20 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Serilog;
+using SoufflePet.Services;
 
 namespace SoufflePet.Models;
 
 /// <summary>
-/// 应用设置（SoufflePet.json）：唯一事实源。属性变化触发 PropertyChanged，
+/// 应用设置（用户数据目录下的 SoufflePet.json）：唯一事实源。属性变化触发 PropertyChanged，
 /// 持久化与运行时副作用由订阅者统一处理（接线见 App 组合根），写入方（托盘菜单/
 /// 设置界面等）只需给属性赋值，不自行 Save、不直接操作服务或窗口。
 /// </summary>
 public partial class SouffleSettings : ObservableObject
 {
-    private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "SoufflePet.json");
+    /// <summary>设置文件完整路径：用户数据目录（默认 ~/.souffle）下的 SoufflePet.json，可用 SOUFFLEPET_DATA_DIR 重定向。</summary>
+    public static string SettingsFilePath => Path.Combine(ChatMemory.SouffleHome, "SoufflePet.json");
+
     private static readonly JsonSerializerOptions JsonSerializerOptions = new()
     {
         WriteIndented = true,
@@ -81,7 +84,7 @@ public partial class SouffleSettings : ObservableObject
     [Description("是否开机自启动（写入当前用户 HKCU/.../Run 注册表项）")]
     public partial bool StartWithWindows { get; set; }
 
-    [Description("模型根目录（应用目录下 wwwroot 内的相对路径，默认 models）")]
+    [Description("模型根目录（用户数据目录下的相对路径，默认 models）")]
     public string ModelsDirectory { get; init; } = "models";
 
     [Description("Live2D 模型列表：启动时加载上次选中的模型（默认第一个），运行中可从桌宠右键菜单切换")]
@@ -318,6 +321,8 @@ public partial class SouffleSettings : ObservableObject
         {
             var json = JsonSerializer.Serialize(this, JsonSerializerOptions);
             var path = SettingsFilePath;
+            // 首次运行时用户数据目录可能还不存在
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             // 临时文件名带进程/线程标记，避免多个实例或杀软扫描时争用同一个 .tmp
             var temp = $"{path}.{Environment.ProcessId}.{Environment.CurrentManagedThreadId}.tmp";
             try

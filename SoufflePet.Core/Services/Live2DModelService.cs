@@ -20,7 +20,7 @@ public readonly record struct Live2DModelResult(bool Success, string Message, Li
 /// <summary> Live2D 模型文件管理：导入压缩包、删除模型目录、校验模型配置。配置列表本身由设置持有。</summary>
 public interface ILive2DModelService
 {
-    /// <summary>模型根目录：应用目录下的 <c>wwwroot/&lt;ModelsDirectory&gt;</c>。</summary>
+    /// <summary>模型根目录：用户数据目录下的 <c>&lt;ModelsDirectory&gt;</c>。</summary>
     string ModelsRoot { get; }
 
     /// <summary>
@@ -47,7 +47,14 @@ public sealed class Live2DModelService(SouffleSettings settings) : ILive2DModelS
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public string ModelsRoot => Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory);
+    public string ModelsRoot => ResolveModelsRoot(settings);
+
+    /// <summary>
+    /// 模型根目录：用户数据目录（默认 <c>~/.souffle</c>，可用 SOUFFLEPET_DATA_DIR 重定向）下的
+    /// <see cref="SouffleSettings.ModelsDirectory" />。渲染窗口、表情服务与导入/移除共用这一处解析。
+    /// </summary>
+    public static string ResolveModelsRoot(SouffleSettings settings) =>
+        Path.Combine(ChatMemory.SouffleHome, settings.ModelsDirectory);
 
     public Live2DModelResult Import(string archivePath)
     {

@@ -43,7 +43,7 @@ public sealed class PetExpressionService : IPetController
         var model = _settings.ActiveLive2DModel;
         if (model == null) return [];
 
-        var modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", _settings.ModelsDirectory, model.FolderName);
+        var modelDir = Path.Combine(Live2DModelService.ResolveModelsRoot(_settings), model.FolderName);
         var path = Path.Combine(modelDir, $"{model.FileStem}.model3.json");
         try
         {

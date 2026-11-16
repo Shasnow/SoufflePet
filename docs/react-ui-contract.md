@@ -491,7 +491,7 @@ type ChatOp =
    - 文件必须存在；
    - 目录必须存在；
    - `chat.file.open` 只允许当前会话已登记的附件或会话工作区内的文件，并拒绝 `.exe/.bat/.ps1/.dll/.lnk` 等可执行/脚本扩展名；
-   - 模型导入只允许 `wwwroot/models` 与用户选择的源目录；
+   - 模型导入只允许用户数据目录下的 `models`（`ModelsDirectory`）与用户选择的源目录；
    - 不暴露任意文件读取。
 4. 本地图片只走 `/local-file?token=`；token 随机、短期、只登记已校验路径/内存字节。同一路径复用 token（12 小时），过期 token 按分钟级批量清理，避免长会话/重同步累积。
 5. `chat.link.open` 只允许 `http/https`；`window.open`/外站导航由宿主 `NavigationStarted` 取消。

@@ -210,7 +210,7 @@ public sealed class SettingsSaveTests
     [Fact]
     public void ConcurrentSavesLeaveCompleteJson()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "SoufflePet.json");
+        // 用户数据目录由 TestEnvironment 在模块初始化时指到临时目录，这里直接读设置文件
         var settings = new SouffleSettings { PetName = "initial" };
 
         Parallel.For(0, 16, index =>
@@ -219,7 +219,7 @@ public sealed class SettingsSaveTests
             settings.Save();
         });
 
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        using var document = JsonDocument.Parse(File.ReadAllText(SouffleSettings.SettingsFilePath));
         Assert.True(document.RootElement.TryGetProperty("PetName", out var name));
         Assert.StartsWith("pet-", name.GetString());
     }

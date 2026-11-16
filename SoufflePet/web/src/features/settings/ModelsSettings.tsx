@@ -89,7 +89,7 @@ export function ModelsSettings() {
 
       <SettingsCard
         title="Live2D 模型"
-        desc="模型目录在应用目录的 wwwroot/models 下；切换后桌宠会立即重载。"
+        desc="模型目录在用户数据目录的 .souffle/models 下；切换后桌宠会立即重载。"
         actions={
           <>
             <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void importModel(true)}>

@@ -370,7 +370,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
             return;
         }
 
-        _modelDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", settings.ModelsDirectory, model.FolderName);
+        _modelDir = Path.Combine(Live2DModelService.ResolveModelsRoot(settings), model.FolderName);
 
         // 先确认 model3.json 存在：SDK 找不到时会兜底拼成「目录/模型名/模型名.model3.json」，
         // 报错信息看不出是配置写错，所以这里直接给出解析后的真实路径

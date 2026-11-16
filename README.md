@@ -42,7 +42,7 @@
 - 勾选要用的模型后点「保存配置」，勾选的模型才进入对话输入区的模型选择列表（未勾选的不显示，也不会被请求）。
 - 输入区的模型选择列表**按提供商分组**，点条目切换当前模型；提供商改名时，当前选中模型的键会同步改写，选中状态不会丢。
 
-配置写在 `SoufflePet.json`，唯一事实源是 `ChatProviders`：
+配置写在用户数据目录的 `~/.souffle/SoufflePet.json`（首次运行自动生成），唯一事实源是 `ChatProviders`：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -236,7 +236,7 @@ SoufflePet.sln
 │  │  ├─ NativePetControl.cs     #   OpenGL 渲染循环、逐像素命中检测
 │  │  └─ AvaloniaApi.cs          #   Avalonia GlInterface → OpenGLApi 桥接
 │  ├─ web/                       # React SPA 源码（Vite / React 19 / TS / Tailwind）
-│  ├─ wwwroot/                   # 前端产物（app/，构建生成）与 Live2D 模型资源（models/）
+│  ├─ wwwroot/                   # 前端产物（app/，构建生成）
 │  └─ Assets/                    # 应用图标等资源
 ├─ SoufflePet.Core/              # 无 Avalonia 的领域层：模型、记忆、LLM/工具/MCP/技能/插件/调度
 │  └─ Chat/                      #   会话状态机 / 会话索引与存储 / 平台消息触发路由
@@ -291,15 +291,15 @@ SoufflePet.sln
 
 ## 资源说明
 
-Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发任何模型资源**：模型的美术著作权归原作者所有。使用者需自行获取**已获得合法授权**的模型并放入对应目录。
+Live2D 模型资源位于用户数据目录的 `~/.souffle/models/`。**本项目不附带、不分发任何模型资源**：模型的美术著作权归原作者所有。使用者需自行获取**已获得合法授权**的模型并放入对应目录。
 
 ### 首次使用
 
-把获得授权的模型压缩包（zip）直接导入即可：主窗口左侧「更多 → Live2D 模型」打开设置页的模型面板，点「导入」选择压缩包，面板会自动解压到 `wwwroot/models/`、登记动作与表情，并设为当前模型。
+把获得授权的模型压缩包（zip）直接导入即可：主窗口左侧「更多 → Live2D 模型」打开设置页的模型面板，点「导入」选择压缩包，面板会自动解压到 `~/.souffle/models/`、登记动作与表情，并设为当前模型。
 
 也可以手动放置：
 
-1. 把模型放入 `wwwroot/models/目录名/`（`ModelsDirectory` 默认为 `models`）。
+1. 把模型放入 `~/.souffle/models/目录名/`（`ModelsDirectory` 默认为 `models`，相对于用户数据目录）。
 2. 确认该目录下存在 `主文件名.model3.json`（目录名与主文件名相同或不同都可以，见下）。
 3. 在模型管理面板里「打开目录」后手工添加，或在 `SoufflePet.json` 的 `Live2DModels` 里加一项：`Name` 写 `目录名/主文件名`，两者一致时只写一段即可。
 
@@ -307,7 +307,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 ### 配置模型
 
-修改 `SoufflePet.json`（首次运行自动生成，位于可执行文件同级目录）里的模型列表：
+修改 `SoufflePet.json`（首次运行自动生成，位于用户数据目录 `~/.souffle` 下）里的模型列表：
 
 ```json
 {
@@ -319,9 +319,9 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 }
 ```
 
-- `ModelsDirectory`：`wwwroot/` 内的模型根目录（相对路径）
+- `ModelsDirectory`：用户数据目录内的模型根目录（相对路径，默认 `models`，即 `~/.souffle/models`）
 - `Live2DModels`：可切换的模型列表，每项四个字段
-  - `Name`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `wwwroot/models/你的模型名/你的模型名.model3.json`）；不一致时写成 `目录名/主文件名`（对应 `wwwroot/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
+  - `Name`：模型目录名与 `model3.json` 主文件名。两者一致时写一段（`你的模型名`，对应 `~/.souffle/models/你的模型名/你的模型名.model3.json`）；不一致时写成 `目录名/主文件名`（对应 `~/.souffle/models/目录名/主文件名.model3.json`，分隔符用 `/` 或 `\` 均可）
   - `WatermarkPartId`：该模型的水印部件 Id（如 `Part13`），加载时把透明度压 0；留空表示不处理水印
   - `GameExpression` / `MusicExpression`：该模型在游戏 / 音乐状态下自动切换的表情名，取值须为模型 `model3.json` 中 `FileReferences.Expressions` 列出的表情文件名（去掉 `.exp3.json`）。默认「手柄」「麦克风」；表情名因模型而异，换模型后请在模型管理面板里按实际表情文件改，留空表示该模型不切换
 - 启动加载上次选中的模型（首次为列表第一项）；运行中可在桌宠右键菜单「切换模型」里换，选择会**写回配置**，重启沿用
@@ -332,7 +332,7 @@ Live2D 模型资源位于 `wwwroot/models/`。**本项目不附带、不分发�
 
 主窗口左侧「更多 → Live2D 模型」：
 
-- **导入**：选择一个 zip 压缩包，找其中层级最浅的 `*.model3.json` 作为主模型，解压到 `wwwroot/models/<目录名>/`；目录名优先取压缩包内主模型所在目录名，取不到时用压缩包文件名。导入后自动登记引用：
+- **导入**：选择一个 zip 压缩包，找其中层级最浅的 `*.model3.json` 作为主模型，解压到 `~/.souffle/models/<目录名>/`；目录名优先取压缩包内主模型所在目录名，取不到时用压缩包文件名。导入后自动登记引用：
   - 目录内所有 `*.exp3.json` 写进 `FileReferences.Expressions`（`Name` 为去掉后缀的文件名），已有的跳过
   - 目录内所有 `*.motion3.json` 写进 `FileReferences.Motions`：文件名含 `idle` / `待机` 的归到 `Idle` 组，其余每个文件自成一组（因此都能被 `StartRandomMotion` 的随机动作抽到）
   - 从 `.cdi3.json` 的 `Parts` 里找名称含「水印」或 `watermark` 的部件，自动填入 `WatermarkPartId`
