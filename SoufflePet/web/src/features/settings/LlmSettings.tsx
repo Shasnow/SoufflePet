@@ -131,19 +131,23 @@ export function LlmSettings() {
         baseUrl: draft.baseUrl,
         apiKey: draft.apiKey,
       })
-      const existing = new Set(draft.models.map((model) => model.modelId.toLowerCase()))
-      const additions = result.modelIds.filter((id) => !existing.has(id.toLowerCase()))
-      setDraft({
-        ...draft,
-        models: [
-          ...draft.models,
-          ...additions.map((modelId) => ({ modelId, isActive: false })),
-        ],
-      })
+      if (result.modelIds.length === 0) {
+        setFetchStatus('接口没有返回模型，已保留当前列表；可以手动添加')
+        return
+      }
+
+      // 以接口返回为准重建清单：上游已下架的模型直接移除，保留的项沿用本地自定义名称与启用状态
+      const upstream = new Set(result.modelIds.map((id) => id.toLowerCase()))
+      const existing = new Map(draft.models.map((model) => [model.modelId.toLowerCase(), model]))
+      const models = result.modelIds.map(
+        (modelId) => existing.get(modelId.toLowerCase()) ?? { modelId, isActive: false },
+      )
+      const additions = result.modelIds.filter((id) => !existing.has(id.toLowerCase())).length
+      const removed = draft.models.filter((model) => !upstream.has(model.modelId.toLowerCase())).length
+
+      setDraft({ ...draft, models })
       setFetchStatus(
-        result.modelIds.length === 0
-          ? '接口没有返回模型，可以手动添加'
-          : `获取到 ${result.modelIds.length} 个模型，新增 ${additions.length} 个`,
+        `获取到 ${result.modelIds.length} 个模型，新增 ${additions} 个${removed > 0 ? `，移除 ${removed} 个` : ''}`,
       )
     } catch (fetchError) {
       setFetchStatus(`获取失败：${errorMessage(fetchError)}`)
