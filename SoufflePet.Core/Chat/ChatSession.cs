@@ -1309,6 +1309,24 @@ public sealed class ChatSession : IAsyncDisposable
                     bubble.Usage = new ChatUsageState(toolInput, turn.OutputTokens ?? 0,
                         turn.CachedInputTokens ?? 0, turn.Model, turn.Time);
                 _messages.Add(bubble);
+
+                // 展示文件的调用落盘后只剩工具记录：按参数与结果把当时插在工具气泡之后的文件气泡补回来
+                if (ChatFileService.RestoreShownFile(turn.ToolName, turn.Arguments, turn.Result, _workspacePath)
+                    is { } shown)
+                {
+                    _messages.Add(NewMessage(
+                        ChatMessageKinds.Attachment,
+                        string.Empty,
+                        time: turn.Time,
+                        attachment: new ChatAttachmentState(
+                            NewMessageId("att"),
+                            shown.FileName,
+                            shown.FilePath,
+                            shown.IsImage,
+                            null,
+                            File.Exists(shown.FilePath) ? new FileInfo(shown.FilePath).Length : null)));
+                }
+
                 continue;
             }
 

@@ -351,6 +351,50 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ShownFileBubbleIsRestoredAfterRestart()
+    {
+        var file = Path.Combine(_root, "notes.md");
+        await File.WriteAllTextAsync(file, "hello");
+        var args = $"{{\"path\":{JsonSerializer.Serialize(file)},\"displayName\":\"笔记\"}}";
+
+        var llm = new FakeLlm((_, _, _) => StreamAsync());
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync()
+        {
+            yield return new LlmToolCallStartedEvent("call-1", "show_file", args);
+            _files.Show(new ChatFileDisplay(file, "笔记", false));
+            yield return new LlmToolCallEvent("call-1", "show_file", args, "已在对话窗口展示文件「笔记」。");
+            yield return new LlmTextDelta("完成");
+        }
+
+        await session.SendAsync("看看笔记", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var shown = session.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Attachment);
+        Assert.Equal(("笔记", file), (shown.Attachment!.Name, shown.Attachment.Path));
+
+        var id = session.Id;
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(id, CancellationToken.None);
+            var restored = opened.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Attachment);
+            Assert.Equal(("笔记", file, false), (restored.Attachment!.Name, restored.Attachment.Path,
+                restored.Attachment.IsImage));
+            Assert.Equal(5L, restored.Attachment.Size);
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ManagerCreatesRenamesSearchesAndDeletesWithRecycleBin()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));

@@ -87,8 +87,8 @@ public sealed partial class ChatTools
     /// <summary>写文件统一用不带 BOM 的 UTF-8。</summary>
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    /// <summary>按扩展名识别图片，决定平台按图片发送还是在窗口里预览。</summary>
-    private static readonly HashSet<string> ImageExtensions =
+    /// <summary>按扩展名识别图片，决定平台按图片发送还是在窗口里预览；历史恢复展示气泡时也用它。</summary>
+    internal static readonly HashSet<string> ImageExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" };
 
     /// <summary>一次提问最多展示的问题数，超出的忽略（面板放不下，也避免模型刷屏）。</summary>

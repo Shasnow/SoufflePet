@@ -28,9 +28,7 @@ public sealed partial class ChatTools
         var isImage = ImageExtensions.Contains(info.Extension);
         _files.Show(new ChatFileDisplay(fullPath, name, isImage));
 
-        return isImage
-            ? $"已在对话窗口展示图片「{name}」。"
-            : $"已在对话窗口展示文件「{name}」。";
+        return ChatFileService.ShownFileResult(name, isImage);
     }
 
     /// <summary>
