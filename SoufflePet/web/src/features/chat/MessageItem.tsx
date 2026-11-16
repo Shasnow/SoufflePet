@@ -251,7 +251,7 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
                   <FileText size={18} />
                 </span>
               )}
-              <span style={{ display: 'block', minWidth: 0 }}>
+              <span className="attachment-text">
                 <span className="attachment-name">{message.attachment?.name ?? '附件'}</span>
                 <span className="attachment-path">{message.attachment?.path ?? ''}</span>
               </span>
