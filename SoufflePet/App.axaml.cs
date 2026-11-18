@@ -9,6 +9,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using SoufflePet.Chat;
 using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 using SoufflePet.Services;
@@ -46,6 +47,9 @@ public class App : Application
             var loadedSettings = SouffleSettings.Load();
             var webDev = args.Contains("--web-dev");
             Logger.Information("Lifetime initialized webDev={WebDev}", webDev);
+
+            // 附件保留期清理只在启动时做一次，不挂在每次添加附件的热路径上
+            _ = System.Threading.Tasks.Task.Run(ChatSession.CleanupExpiredAttachments);
 
             // ===== 组合根：注册服务 =====
             var services = new ServiceCollection();

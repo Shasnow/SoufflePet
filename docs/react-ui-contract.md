@@ -254,6 +254,9 @@ interface AppSnapshotDto {
 | `chat.draft` | `{sessionId?,text}` | `null`（100 ms 防抖） |
 | `chat.attach.pick` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
 | `chat.attach.paste` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
+| `chat.attach.begin` | `{sessionId?,name,size}` | `{uploadId}`；拖拽上传按 128 KB 分块，单文件 ≤20MB、总计 ≤40MB、单次 ≤20 个 |
+| `chat.attach.chunk` | `{uploadId,data}` | `{size}`；`data` 为 base64，解码后 ≤128 KB（适配 256 KB 载荷上限） |
+| `chat.attach.finish` | `{sessionId?,uploads:string[]}` | `{attachments:AttachmentDto[],added:number}`；宿主落盘到 `~/.souffle/attachments/<sessionId>` 后按普通附件登记 |
 | `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
 | `chat.model.select` | `{sessionId?,key}` | `null` |
 | `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |

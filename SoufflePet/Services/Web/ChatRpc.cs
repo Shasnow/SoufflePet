@@ -13,6 +13,7 @@ using Serilog;
 using SoufflePet.Chat;
 using SoufflePet.Core.Chat;
 using SoufflePet.Models;
+using SoufflePet.Services;
 
 namespace SoufflePet.Services.Web;
 
@@ -56,6 +57,28 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".reg", ".lnk",
         ".url", ".jar", ".application", ".appref-ms",
     };
+
+    private const int MaxDroppedFiles = 20;
+    private const long MaxDroppedFileBytes = 20L * 1024 * 1024;
+    private const long MaxDroppedTotalBytes = 40L * 1024 * 1024;
+
+    /// <summary>单个上传分块的原始字节上限：base64 后约 171 KB，仍在桥接 256 KB 载荷契约内。</summary>
+    private const int MaxUploadChunkBytes = 128 * 1024;
+
+    /// <summary>页面拖入文件的分块上传状态：页面拿不到本地路径，只能分块传字节，由宿主拼成临时文件。</summary>
+    private sealed class PendingUpload
+    {
+        public required string SessionId { get; init; }
+
+        public required string Name { get; init; }
+
+        public required string TempPath { get; init; }
+
+        public long Written { get; set; }
+    }
+
+    private readonly Dictionary<string, PendingUpload> _uploads = [];
+    private readonly object _uploadGate = new();
 
     private readonly IAppWindowCommands _window;
     private readonly ChatSessionManager _sessions;
@@ -262,6 +285,20 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                     if (image is null) throw new BridgeRpcException("invalid_argument", "剪贴板里没有图片");
                     await session.AddPastedImageAsync(image.Data, image.FileName).ConfigureAwait(false);
                     return new { attachments = MapAttachments(session.Snapshot.Attachments) };
+                }
+                case "chat.attach.begin":
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    return BeginUpload(session, parameters);
+                }
+                case "chat.attach.chunk":
+                {
+                    return AppendUpload(parameters);
+                }
+                case "chat.attach.finish":
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    return await FinishUploadsAsync(session, parameters).ConfigureAwait(false);
                 }
                 case "chat.attach.remove":
                 {
@@ -666,6 +703,198 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         string.IsNullOrWhiteSpace(name) ? "舒" : name.Trim()[..1];
 
     // ===== 参数解析 =====
+
+    /// <summary>
+    /// 开始一次拖拽上传：只登记文件名与大小，字节由页面分块送来。
+    /// 桥梁单条载荷 256 KB，整文件一次性 base64 传不过来。
+    /// </summary>
+    private object BeginUpload(ChatSession session, JsonElement parameters)
+    {
+        var rawName = GetString(parameters, "name");
+        var name = Path.GetFileName(rawName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(name)) name = "file";
+
+        var size = GetLong(parameters, "size") ?? -1;
+        if (size <= 0) throw new BridgeRpcException("invalid_argument", "文件内容为空");
+        if (size > MaxDroppedFileBytes) throw new BridgeRpcException("invalid_argument", $"文件过大：{name}");
+
+        var directory = UploadDirectory(session.Id);
+        Directory.CreateDirectory(directory);
+
+        lock (_uploadGate)
+        {
+            if (_uploads.Count >= MaxDroppedFiles)
+                throw new BridgeRpcException("invalid_argument", $"一次最多拖入 {MaxDroppedFiles} 个文件");
+
+            // 清理一分钟以上没有继续上传的残留分块文件（页面中断、刷新等）
+            foreach (var stale in Directory.EnumerateFiles(directory, "*.part"))
+            {
+                if (File.GetLastWriteTimeUtc(stale) >= DateTime.UtcNow.AddMinutes(-1)) continue;
+                try
+                {
+                    File.Delete(stale);
+                    _uploads.Remove(Path.GetFileNameWithoutExtension(stale));
+                }
+                catch (IOException)
+                {
+                    // 还在被占用：下次再清
+                }
+            }
+
+            var uploadId = Guid.NewGuid().ToString("N");
+            var tempPath = Path.Combine(directory, uploadId + ".part");
+            File.WriteAllBytes(tempPath, []);
+            _uploads[uploadId] = new PendingUpload
+            {
+                SessionId = session.Id,
+                Name = name,
+                TempPath = tempPath,
+            };
+            return new { uploadId };
+        }
+    }
+
+    /// <summary>追加一个分块；单个分块解码后不得超过 128 KB。</summary>
+    private object AppendUpload(JsonElement parameters)
+    {
+        var uploadId = GetString(parameters, "uploadId");
+        var data = GetString(parameters, "data");
+        if (string.IsNullOrWhiteSpace(uploadId) || string.IsNullOrEmpty(data))
+            throw new BridgeRpcException("invalid_argument", "缺少上传内容");
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(data);
+        }
+        catch (FormatException)
+        {
+            throw new BridgeRpcException("invalid_argument", "上传内容损坏");
+        }
+
+        if (bytes.Length > MaxUploadChunkBytes)
+            throw new BridgeRpcException("invalid_argument", "单个分块过大");
+
+        lock (_uploadGate)
+        {
+            if (!_uploads.TryGetValue(uploadId, out var upload))
+                throw new BridgeRpcException("invalid_argument", "上传已失效，请重新拖入");
+
+            upload.Written += bytes.Length;
+            if (upload.Written > MaxDroppedFileBytes)
+                throw new BridgeRpcException("invalid_argument", $"文件过大：{upload.Name}");
+
+            using (var stream = new FileStream(upload.TempPath, FileMode.Append, FileAccess.Write, FileShare.None))
+                stream.Write(bytes);
+
+            return new { size = upload.Written };
+        }
+    }
+
+    /// <summary>
+    /// 结束本批上传：把临时文件移到会话附件目录并登记为附件。
+    /// 任一环节失败都回滚本批已落盘的文件，避免留下无人引用的副本。
+    /// </summary>
+    private async Task<object> FinishUploadsAsync(ChatSession session, JsonElement parameters)
+    {
+        var ids = ReadUploadIds(parameters);
+        var directory = Path.Combine(ChatMemory.SouffleHome, "attachments", session.Id);
+        var paths = new List<string>(ids.Count);
+        var temporary = new List<string>(ids.Count);
+        long total = 0;
+
+        try
+        {
+            lock (_uploadGate)
+            {
+                Directory.CreateDirectory(directory);
+                foreach (var id in ids)
+                {
+                    if (!_uploads.Remove(id, out var upload))
+                        throw new BridgeRpcException("invalid_argument", "上传已失效，请重新拖入");
+                    if (!string.Equals(upload.SessionId, session.Id, StringComparison.Ordinal))
+                        throw new BridgeRpcException("invalid_argument", "上传与会话不匹配");
+
+                    total += upload.Written;
+                    if (total > MaxDroppedTotalBytes)
+                        throw new BridgeRpcException("invalid_argument", "拖入的文件总大小超出限制");
+
+                    var target = Path.Combine(directory, $"{Guid.NewGuid():N}_{upload.Name}");
+                    temporary.Add(upload.TempPath);
+                    paths.Add(target);
+                    File.Move(upload.TempPath, target);
+                }
+            }
+
+            var before = session.Snapshot.Attachments.Count;
+            await session.AddAttachmentsAsync(paths).ConfigureAwait(false);
+            var attachments = session.Snapshot.Attachments;
+            return new { attachments = MapAttachments(attachments), added = attachments.Count - before };
+        }
+        catch
+        {
+            lock (_uploadGate)
+            {
+                foreach (var path in paths)
+                {
+                    try
+                    {
+                        if (File.Exists(path)) File.Delete(path);
+                    }
+                    catch (IOException)
+                    {
+                        // 删不掉就留给保留期清理
+                    }
+                }
+
+                foreach (var path in temporary)
+                {
+                    try
+                    {
+                        if (File.Exists(path)) File.Delete(path);
+                    }
+                    catch (IOException)
+                    {
+                        // 同上
+                    }
+                }
+            }
+
+            throw;
+        }
+    }
+
+    private static List<string> ReadUploadIds(JsonElement parameters)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("uploads", out var uploads)
+            || uploads.ValueKind != JsonValueKind.Array)
+            throw new BridgeRpcException("invalid_argument", "缺少 uploads");
+
+        var ids = new List<string>(uploads.GetArrayLength());
+        foreach (var item in uploads.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString())) continue;
+            ids.Add(item.GetString()!);
+        }
+
+        if (ids.Count == 0) throw new BridgeRpcException("invalid_argument", "没有可添加的文件");
+        if (ids.Count > MaxDroppedFiles)
+            throw new BridgeRpcException("invalid_argument", $"一次最多拖入 {MaxDroppedFiles} 个文件");
+
+        return ids;
+    }
+
+    private static string UploadDirectory(string sessionId) =>
+        Path.Combine(ChatMemory.SouffleHome, "attachments", sessionId, ".upload");
+
+    private static long? GetLong(JsonElement parameters, string name) =>
+        parameters.ValueKind == JsonValueKind.Object
+        && parameters.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt64(out var result)
+            ? result
+            : null;
 
     private static string? GetString(JsonElement parameters, string name) =>
         parameters.ValueKind == JsonValueKind.Object

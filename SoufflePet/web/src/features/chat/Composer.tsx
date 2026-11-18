@@ -18,6 +18,28 @@ interface ComposerProps {
   hero?: boolean
 }
 
+/** 把字节数格式化成附件副标题里的可读大小。 */
+function formatSize(bytes?: number): string {
+  if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[index]}`
+}
+
+/** 文件胶囊第二行：扩展名 · 大小，例如「LOG · 33.9 KB」。 */
+function attachmentMeta(name: string, size?: number): string {
+  const dot = name.lastIndexOf('.')
+  const extension = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : 'FILE'
+  const readable = formatSize(size)
+  return readable ? `${extension} · ${readable}` : extension
+}
+
 export function Composer({ chat, hero = false }: ComposerProps) {
   const petName = useAppStore((state) => state.pet.name)
   const setDraft = useChatStore((state) => state.setDraft)
@@ -133,26 +155,45 @@ export function Composer({ chat, hero = false }: ComposerProps) {
       <div className={`composer ${chat.generating ? 'is-disabled' : ''}`}>
         {chat.attachments.length > 0 ? (
           <div className="composer-attachments">
-            {chat.attachments.map((attachment) => (
-              <span key={attachment.id} className="attachment-chip" title={attachment.path}>
-                {attachment.isImage && attachment.url ? (
-                  <img src={attachment.url} alt="" width={18} height={18} style={{ borderRadius: 4, objectFit: 'cover' }} />
-                ) : attachment.isImage ? (
-                  <ImageIcon size={13} />
-                ) : (
-                  <FileText size={13} />
-                )}
-                <span className="name">{attachment.name}</span>
-                <button
-                  type="button"
-                  className="remove"
-                  aria-label={`移除附件 ${attachment.name}`}
-                  onClick={() => void removeAttachment(attachment.id)}
-                >
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
+            {chat.attachments.map((attachment) =>
+              attachment.isImage ? (
+                <span key={attachment.id} className="composer-thumb" title={attachment.name}>
+                  {attachment.url ? (
+                    <img src={attachment.url} alt={attachment.name} />
+                  ) : (
+                    <span className="composer-thumb-placeholder">
+                      <ImageIcon size={18} />
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="remove"
+                    aria-label={`移除附件 ${attachment.name}`}
+                    onClick={() => void removeAttachment(attachment.id)}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ) : (
+                <span key={attachment.id} className="composer-file" title={attachment.path}>
+                  <span className="composer-file-icon">
+                    <FileText size={16} />
+                  </span>
+                  <span className="composer-file-text">
+                    <span className="composer-file-name">{attachment.name}</span>
+                    <span className="composer-file-meta">{attachmentMeta(attachment.name, attachment.size)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="remove"
+                    aria-label={`移除附件 ${attachment.name}`}
+                    onClick={() => void removeAttachment(attachment.id)}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ),
+            )}
           </div>
         ) : null}
 

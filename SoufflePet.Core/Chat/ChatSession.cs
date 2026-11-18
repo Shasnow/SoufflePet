@@ -45,6 +45,9 @@ public sealed class ChatSession : IAsyncDisposable
     private static readonly string AttachmentDirectory = Path.Combine(
         ChatMemory.SouffleHome, "attachments");
 
+    /// <summary>拖拽 / 粘贴落盘的附件保留天数；每次新增附件时顺手清理过期文件。</summary>
+    private static readonly TimeSpan AttachmentRetention = TimeSpan.FromDays(7);
+
     /// <summary>
     /// 当前正在跑一轮对话的会话。工具线程发起审批/提问/展示文件时，按它路由到正确的会话，
     /// 多会话并行时不会串到别的窗口。
@@ -300,6 +303,7 @@ public sealed class ChatSession : IAsyncDisposable
     public Task<IReadOnlyList<ChatAttachmentState>> AddAttachmentsAsync(IReadOnlyList<string> paths)
     {
         var failed = new List<string>();
+        var added = 0;
         lock (_gate)
         {
             foreach (var path in paths)
@@ -342,10 +346,12 @@ public sealed class ChatSession : IAsyncDisposable
                     IsImagePath(full),
                     null,
                     size));
+                added += 1;
             }
 
             if (failed.Count > 0) Logger.Warning("attachments rejected names={Names}", string.Join(",", failed));
-            if (_attachments.Count == 0 && failed.Count > 0)
+            // 按「本批新增数」判断：草稿里已有附件时，整批被拒不能被静默吞掉
+            if (added == 0 && failed.Count > 0)
                 throw new ChatSessionException("invalid_argument", $"未能添加附件：{string.Join("、", failed)}");
 
             var state = SnapshotAttachmentsLocked();
@@ -1727,6 +1733,62 @@ public sealed class ChatSession : IAsyncDisposable
         if (ids is null) return [.. _attachments];
         var set = ids.ToHashSet(StringComparer.Ordinal);
         return [.. _attachments.Where(attachment => set.Contains(attachment.Id))];
+    }
+
+    /// <summary>
+    /// 清理附件目录中超过保留期的文件（含拖拽落盘的按会话子目录）。
+    /// 由宿主动作在启动时调用一次，不挂在每次添加附件的热路径上；失败不影响主流程。
+    /// </summary>
+    public static void CleanupExpiredAttachments()
+    {
+        try
+        {
+            if (!Directory.Exists(AttachmentDirectory)) return;
+            var threshold = DateTime.UtcNow - AttachmentRetention;
+            foreach (var file in Directory.EnumerateFiles(AttachmentDirectory, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) >= threshold) continue;
+                    File.Delete(file);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug(ex, "delete expired attachment failed path={Path}", file);
+                }
+            }
+
+            // 会话子目录里的文件删完后顺手移除空目录
+            foreach (var directory in Directory.EnumerateDirectories(AttachmentDirectory))
+            {
+                try
+                {
+                    if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug(ex, "delete empty attachment directory failed path={Path}", directory);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "cleanup attachments failed");
+        }
+    }
+
+    /// <summary>删除会话时一并清掉该会话拖入的附件副本（含未完成的上传分块）。</summary>
+    public static void DeleteSessionAttachments(string sessionId)
+    {
+        try
+        {
+            var directory = Path.Combine(AttachmentDirectory, sessionId);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning(ex, "delete session attachments failed id={Id}", sessionId);
+        }
     }
 
     private List<AttachmentEntry> PersistPendingImages(List<AttachmentEntry> attachments)

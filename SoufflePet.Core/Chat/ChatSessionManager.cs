@@ -614,6 +614,9 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
 
         foreach (var record in targets)
         {
+            // 附件副本与上传分块跟着会话一起清掉，避免删会话后长期残留
+            ChatSession.DeleteSessionAttachments(record.Id);
+
             // 草稿从没落过盘：删掉可能残留的空目录即可，不进回收站
             if (draftIds.Contains(record.Id))
             {

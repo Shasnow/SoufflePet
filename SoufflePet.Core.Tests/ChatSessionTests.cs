@@ -769,6 +769,24 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CleanupRemovesAttachmentsOlderThanSevenDays()
+    {
+        var directory = Path.Combine(ChatMemory.SouffleHome, "attachments", "old-session");
+        Directory.CreateDirectory(directory);
+        var expired = Path.Combine(directory, "expired.txt");
+        var fresh = Path.Combine(directory, "fresh.txt");
+        await File.WriteAllTextAsync(expired, "旧附件");
+        await File.WriteAllTextAsync(fresh, "新附件");
+        File.SetLastWriteTimeUtc(expired, DateTime.UtcNow.AddDays(-8));
+        File.SetLastWriteTimeUtc(fresh, DateTime.UtcNow.AddDays(-1));
+
+        ChatSession.CleanupExpiredAttachments();
+
+        Assert.False(File.Exists(expired));
+        Assert.True(File.Exists(fresh));
+    }
+
+    [Fact]
     public async Task DeletingActiveSessionSwitchesToRemainingThenCreatesReplacement()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("ok"))));

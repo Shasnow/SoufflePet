@@ -1088,6 +1088,36 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             response(id, { attachments: chat.attachments })
             return
           }
+          case 'chat.attach.begin':
+            response(id, { uploadId: newId('upload') })
+            return
+          case 'chat.attach.chunk':
+            response(id, { size: 0 })
+            return
+          case 'chat.attach.finish': {
+            const sessionId = targetSessionId(payload)
+            const chat = sessionId ? getSessionChat(sessionId) : undefined
+            if (!chat) {
+              fail(id, 'not_found', '会话不存在')
+              return
+            }
+            const uploads = Array.isArray(payload.uploads) ? payload.uploads.length : 0
+            if (uploads === 0) {
+              fail(id, 'invalid_argument', '没有可添加的文件')
+              return
+            }
+            const added = Array.from({ length: uploads }, (_, index) => ({
+              id: newId('att'),
+              name: `附件 ${index + 1}`,
+              path: `D:/mock/attachment-${index + 1}`,
+              isImage: false,
+              size: 0,
+            }))
+            chat.attachments = [...chat.attachments, ...added]
+            emitOps(sessionId!, [{ op: 'attachments', attachments: chat.attachments }])
+            response(id, { attachments: chat.attachments, added: added.length })
+            return
+          }
           case 'chat.attach.remove': {
             const sessionId = targetSessionId(payload)
             const chat = sessionId ? getSessionChat(sessionId) : undefined

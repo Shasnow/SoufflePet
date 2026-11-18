@@ -1173,6 +1173,46 @@ body.is-resizing-sidebar .sidebar {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+/* 拖拽文件到对话框：整页提示层，不拦截鼠标事件 */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--surface-0) 55%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
+.drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 30px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  box-shadow: var(--shadow-2);
+}
+
+.drop-card strong {
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.drop-card span {
+  color: var(--text-3);
+  font-size: 12px;
 }
 
 .welcome {
@@ -1943,8 +1983,130 @@ body.is-resizing-sidebar .sidebar {
 .composer-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 10px 12px 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 2px;
+}
+
+/* 图片附件：圆角方形预览，移除按钮悬停时浮在右上角 */
+.composer-thumb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.composer-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer-thumb-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-3);
+}
+
+.composer-thumb .remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-1);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.composer-thumb:hover .remove,
+.composer-thumb .remove:focus-visible {
+  opacity: 1;
+}
+
+/* 文件附件：圆角矩形胶囊，图标 + 文件名 + 扩展名/大小 */
+.composer-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  height: 48px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+
+.composer-file-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.composer-file-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.composer-file-name {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-file-meta {
+  color: var(--text-3);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.composer-file .remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.composer-file:hover .remove,
+.composer-file .remove:focus-visible {
+  opacity: 1;
+}
+
+.composer-file .remove:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
 }
 
 .composer-input {
@@ -2074,42 +2236,6 @@ body.is-resizing-sidebar .sidebar {
 
 .usage-foot-btn:hover {
   color: var(--text-2);
-}
-
-.attachment-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 200px;
-  height: 26px;
-  padding: 0 4px 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-1);
-  color: var(--text-2);
-  font-size: 11.5px;
-}
-
-.attachment-chip .name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.attachment-chip .remove {
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-3);
-}
-
-.attachment-chip .remove:hover {
-  background: var(--surface-3);
-  color: var(--text-1);
 }
 
 /* ============================== 设置页 ============================== */
