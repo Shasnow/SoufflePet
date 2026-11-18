@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Shasnow
 
 using System;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
@@ -21,7 +20,6 @@ public sealed class ChatTriggerRouter : IDisposable
 
     private const int PreviewLength = 80;
     private const string PlatformNoticePrefix = "[平台消息]";
-    private const string SystemPrefix = "[系统消息]";
 
     private readonly ChatSessionManager _sessions;
     private readonly PlatformService _platforms;
@@ -63,11 +61,10 @@ public sealed class ChatTriggerRouter : IDisposable
                 .ConfigureAwait(false);
 
             var senderName = notification.Sender is { Length: > 0 } name ? name : "未知发送者";
+            // display 只给界面用；发给模型的内容用 XML 标记包裹，避免和用户正文混淆
             var display = $"{PlatformNoticePrefix} {notification.PlatformId} · {senderName}：{Preview(notification.Content)}";
-            var prompt = new StringBuilder()
-                .Append(PlatformNoticePrefix)
-                .AppendLine($"「{notification.PlatformId}」<<<\n{notification.Content}\n>>>")
-                .ToString();
+            var prompt = $"<platform_message platform=\"{EscapeAttribute(notification.PlatformId)}\">\n" +
+                         $"{notification.Content}\n</platform_message>";
             _ = session.EnqueueSystemTurnAsync(prompt, display, isPlatformNotice: true);
         }
         catch (Exception ex)
@@ -93,10 +90,9 @@ public sealed class ChatTriggerRouter : IDisposable
                 .ConfigureAwait(false);
 
             var display = $"⏰ 定时任务「{trigger.Name}」：{Preview(trigger.Content)}";
-            var prompt = new StringBuilder()
-                .Append(SystemPrefix)
-                .Append("你被定时任务「").Append(trigger.Name).Append("」唤醒，请执行以下内容：\n")
-                .Append("<<<\n").Append(trigger.Content).Append("\n>>>").ToString();
+            var prompt = $"<scheduled_task name=\"{EscapeAttribute(trigger.Name)}\">\n" +
+                         $"你被定时任务「{trigger.Name}」唤醒，请执行以下内容：\n" +
+                         $"{trigger.Content}\n</scheduled_task>";
             _ = session.EnqueueSystemTurnAsync(prompt, display, isPlatformNotice: true);
         }
         catch (Exception ex)
@@ -104,6 +100,13 @@ public sealed class ChatTriggerRouter : IDisposable
             Logger.Warning(ex, "route scheduled task failed");
         }
     }
+
+    /// <summary>转义 XML 属性值，避免平台 id / 任务名里的引号或尖括号破坏标记结构。</summary>
+    private static string EscapeAttribute(string value) => value
+        .Replace("&", "&amp;")
+        .Replace("\"", "&quot;")
+        .Replace("<", "&lt;")
+        .Replace(">", "&gt;");
 
     private static string Preview(string content)
     {

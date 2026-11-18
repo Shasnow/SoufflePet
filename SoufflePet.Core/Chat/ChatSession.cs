@@ -37,7 +37,10 @@ public sealed class ChatSession : IAsyncDisposable
     private const int MaxVisibleMessages = 300;
     private const int TitleLength = 30;
     private const int WorkspaceNameLength = 40;
-    private const string SystemPrefix = "[系统消息]";
+
+    /// <summary>系统信息用 XML 标记包裹：追加在用户消息末尾，重建请求历史时按它裁掉。</summary>
+    private const string SystemInfoOpen = "<system_reminder>";
+    private const string SystemInfoClose = "</system_reminder>";
 
     private static readonly string AttachmentDirectory = Path.Combine(
         ChatMemory.SouffleHome, "attachments");
@@ -275,11 +278,11 @@ public sealed class ChatSession : IAsyncDisposable
 
     /// <summary>戳一戳：系统消息 + 自主回应。</summary>
     public Task WakeByPokeAsync() => EnqueueSystemTurnAsync(
-        $"{SystemPrefix}用户戳了你一下。", "👉 你被戳了一下，回应一下吧。", isPlatformNotice: true);
+        $"{SystemInfoOpen}用户戳了你一下。{SystemInfoClose}", "👉 你被戳了一下，回应一下吧。", isPlatformNotice: true);
 
     /// <summary>摸摸头：系统消息 + 自主回应。</summary>
     public Task WakeByHeadPatAsync() => EnqueueSystemTurnAsync(
-        $"{SystemPrefix}用户摸了摸你的头。", "🖐 摸摸头", isPlatformNotice: true);
+        $"{SystemInfoOpen}用户摸了摸你的头。{SystemInfoClose}", "🖐 摸摸头", isPlatformNotice: true);
 
     public Task StopAsync()
     {
@@ -1383,25 +1386,27 @@ public sealed class ChatSession : IAsyncDisposable
         var context = new StringBuilder();
         if (recall.Length > 0)
         {
-            context.AppendLine("[系统消息] 以下是与本轮提问相关的旧对话（来自长期记忆，仅供参考，不属于用户输入）：");
+            context.AppendLine("以下是与本轮提问相关的旧对话（来自长期记忆，仅供参考，不属于用户输入）：");
             context.AppendLine(recall);
         }
 
         if (_settings.TimeAwarenessEnabled)
         {
             var now = DateTimeOffset.Now;
-            context.Append("[系统消息] 当前时间 ")
+            context.Append("当前时间 ")
                 .Append(now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN")))
                 .Append(" UTC").Append(now.ToString("zzz"))
                 .Append(' ').Append(TimeZoneInfo.Local.Id);
         }
 
-        return context.Length == 0 ? messageText : $"{messageText}\n\n{context.ToString().TrimEnd()}";
+        return context.Length == 0
+            ? messageText
+            : $"{messageText}\n\n{SystemInfoOpen}\n{context.ToString().TrimEnd()}\n{SystemInfoClose}";
     }
 
     private static string StripTurnContext(string text)
     {
-        var index = text.IndexOf("\n\n" + SystemPrefix, StringComparison.Ordinal);
+        var index = text.IndexOf("\n\n" + SystemInfoOpen, StringComparison.Ordinal);
         return index < 0 ? text : text[..index];
     }
 
