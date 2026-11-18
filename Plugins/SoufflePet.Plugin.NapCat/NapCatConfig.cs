@@ -45,6 +45,21 @@ internal sealed class NapCatConfig
 
     public int MaxReplyChars { get; init; } = 1500;
 
+    /// <summary>分段正则：命中的内容作为分段点被移除，把回复切成多段；留空表示不分段。</summary>
+    public string SegmentRegex { get; init; } = string.Empty;
+
+    /// <summary>内容过滤正则：命中的内容从每段文本里移除；留空表示不过滤。</summary>
+    public string SegmentFilterRegex { get; init; } = string.Empty;
+
+    /// <summary>分段长度上限：消息字数超过此值时不分段（也不加分段延迟），默认 150。</summary>
+    public int SegmentMaxMessageChars { get; init; } = 150;
+
+    /// <summary>分段之间每字延迟（毫秒）：实际间隔 = 下一句字数 × 此值；0 表示不延迟。</summary>
+    public int SegmentDelayMsPerChar { get; init; }
+
+    /// <summary>单段之间的最大延迟（毫秒），避免长句等待过久。</summary>
+    public int SegmentMaxDelayMs { get; init; } = 3000;
+
     /// <summary>是否把收到的图片/文件下载到本地，并把路径写进消息。</summary>
     public bool DownloadAttachments { get; init; } = true;
 
@@ -108,6 +123,11 @@ internal sealed class NapCatConfig
             PokeCooldownSeconds = Math.Clamp(GetConfigInt(config, "pokeCooldownSeconds", 60), 0, 86400),
             FollowPokeProbability = Math.Clamp(GetConfigDouble(config, "followPokeProbability", 0), 0, 1),
             MaxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000),
+            SegmentRegex = GetConfigString(config, "segmentRegex", string.Empty).Trim(),
+            SegmentFilterRegex = GetConfigString(config, "segmentFilterRegex", string.Empty).Trim(),
+            SegmentMaxMessageChars = Math.Clamp(GetConfigInt(config, "segmentMaxMessageChars", 150), 1, 4000),
+            SegmentDelayMsPerChar = Math.Clamp(GetConfigInt(config, "segmentDelayMsPerChar", 0), 0, 500),
+            SegmentMaxDelayMs = Math.Clamp(GetConfigInt(config, "segmentMaxDelayMs", 3000), 0, 60000),
             DownloadAttachments = GetConfigBool(config, "downloadAttachments", true),
             RolePrompt = GetConfigString(config, "rolePrompt", string.Empty).Trim(),
             ManagedGroups = ReadConfigIds(config, "managedGroups"),

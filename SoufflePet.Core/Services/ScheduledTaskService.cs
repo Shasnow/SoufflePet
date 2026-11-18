@@ -118,13 +118,14 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         RunOnUiThread(() =>
         {
             LoadRecentLogs();
-            RefreshCore();
+            // 启动时检查：每日任务今天的触发时刻已过、且当天还没跑过，就立刻补跑一次
+            RefreshCore(catchUpMissedDaily: true);
         });
         var enabled = _settings.ScheduledTasks.Count(t => t.Enabled);
         Logger.Information("scheduled task service started, enabled={Enabled}", enabled);
     }
 
-    public void Refresh() => RunOnUiThread(RefreshCore);
+    public void Refresh() => RunOnUiThread(() => RefreshCore());
 
     public void RunNow(ScheduledTask task)
     {
@@ -338,7 +339,7 @@ public sealed class ScheduledTaskService : IScheduledTaskService
         Completed = task.Completed,
     };
 
-    private void RefreshCore()
+    private void RefreshCore(bool catchUpMissedDaily = false)
     {
         if (_disposed) return;
 
@@ -351,13 +352,42 @@ public sealed class ScheduledTaskService : IScheduledTaskService
                 continue;
             }
 
+            // 已到点但还没执行的（含启动补跑）：保留原时刻，别被这次刷新改到下一次
+            if (task.NextRunAt is { } pending && pending <= now) continue;
+
             // 间隔任务沿用既有倒计时：Refresh 会被列出任务、打开窗口、任意增删改反复调用。
             if (task.Kind == ScheduledTaskKind.Interval && task.NextRunAt is not null) continue;
+
+            if (catchUpMissedDaily && ShouldCatchUpDaily(task, now))
+            {
+                // 交给 OnTick 走正常触发链路（等 500ms 下限），这里只把下次时间拉到当前
+                task.NextRunAt = now;
+                AddLog($"任务「{task.Name}」今天的触发时间（{DailyTimeText(task)}）已过，开始补跑");
+                continue;
+            }
+
             task.NextRunAt = ComputeNext(task, now);
         }
 
         ArmTimerCore();
     }
+
+    /// <summary>
+    /// 每日任务是否需要补跑：今天的触发时刻已过，且今天还没有在触发时刻之后执行过
+    /// （上一次执行早于今天的触发时刻，或从未执行）。仅在服务启动时判断。
+    /// </summary>
+    internal static bool ShouldCatchUpDaily(ScheduledTask task, DateTime now)
+    {
+        if (task.Kind != ScheduledTaskKind.Daily || !task.Enabled) return false;
+
+        var slot = now.Date + DailyTimeOfDay(task);
+        if (slot > now) return false;
+        return task.LastRunAt is not { } last || last < slot;
+    }
+
+    private static TimeSpan DailyTimeOfDay(ScheduledTask task) => task.TimeOfDay ?? new TimeSpan(9, 0, 0);
+
+    private static string DailyTimeText(ScheduledTask task) => DailyTimeOfDay(task).ToString(@"hh\:mm");
 
     private void OnTimer()
     {

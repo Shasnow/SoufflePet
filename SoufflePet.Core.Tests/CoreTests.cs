@@ -193,6 +193,34 @@ public sealed class ScheduledTaskTests
     }
 
     [Fact]
+    public void CatchesUpMissedDailyTask()
+    {
+        var now = new DateTime(2026, 11, 5, 10, 0, 0);
+        var task = new ScheduledTask { Kind = ScheduledTaskKind.Daily, TimeOfDay = new TimeSpan(9, 0, 0) };
+
+        // 今天 09:00 已过且从未执行：需要补跑
+        Assert.True(ScheduledTaskService.ShouldCatchUpDaily(task, now));
+
+        // 今天已经在触发时刻之后跑过：不再补跑
+        task.LastRunAt = new DateTime(2026, 11, 5, 9, 0, 30);
+        Assert.False(ScheduledTaskService.ShouldCatchUpDaily(task, now));
+
+        // 上次执行早于今天的触发时刻（例如昨天）：仍要补跑
+        task.LastRunAt = new DateTime(2026, 11, 4, 9, 0, 0);
+        Assert.True(ScheduledTaskService.ShouldCatchUpDaily(task, now));
+
+        // 今天的触发时刻还没到：不补跑
+        Assert.False(ScheduledTaskService.ShouldCatchUpDaily(task, new DateTime(2026, 11, 5, 8, 0, 0)));
+
+        // 停用或非每日任务不参与补跑
+        task.Enabled = false;
+        Assert.False(ScheduledTaskService.ShouldCatchUpDaily(task, now));
+        task.Enabled = true;
+        task.Kind = ScheduledTaskKind.Weekly;
+        Assert.False(ScheduledTaskService.ShouldCatchUpDaily(task, now));
+    }
+
+    [Fact]
     public void PreviewTaskDoesNotMutateSource()
     {
         var original = new ScheduledTask { Name = "old", Content = "a" };

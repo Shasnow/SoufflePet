@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SoufflePet.Plugin.Sdk;
@@ -21,30 +23,60 @@ internal sealed class NapCatSender
     /// <summary>文件走 base64 上传的上限；更大的文件传本地绝对路径，避免内存与 WebSocket 压力。</summary>
     private const long MaxBase64FileBytes = 10L * 1024 * 1024;
 
+    /// <summary>配置正则的匹配超时：写出灾难性回溯时按「不分段 / 不过滤」降级，别把发送路径卡死。</summary>
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(500);
+
     private readonly ILogger _logger;
     private readonly NapCatConnection _connection;
     private readonly NapCatQuoteTracker _quotes;
+    private readonly NapCatConfig _config;
+    private readonly Regex? _segmentRegex;
+    private readonly Regex? _filterRegex;
 
-    public NapCatSender(ILogger logger, NapCatConnection connection, NapCatQuoteTracker quotes)
+    public NapCatSender(
+        ILogger logger,
+        NapCatConnection connection,
+        NapCatQuoteTracker quotes,
+        NapCatConfig config)
     {
         _logger = logger;
         _connection = connection;
         _quotes = quotes;
+        _config = config;
+        _segmentRegex = CompileRegex(config.SegmentRegex, "分段正则");
+        _filterRegex = CompileRegex(config.SegmentFilterRegex, "内容过滤正则");
     }
 
-    /// <summary>向指定会话发送文本，按配置的字数上限拆成多条。</summary>
-    public async Task SendMessageAsync(
-        (string Kind, long Id) conversation,
-        string message,
-        int maxReplyChars)
+    /// <summary>
+    /// 向指定会话发送文本：先按分段正则切分并过滤内容，再按字数上限拆分，
+    /// 每条之间按下一句的长度计算间隔（模拟打字速度），避免长回复瞬间刷屏。
+    /// </summary>
+    public async Task SendMessageAsync((string Kind, long Id) conversation, string message)
     {
         var socket = _connection.Socket;
         if (socket is not { State: WebSocketState.Open })
             throw new InvalidOperationException("NapCat WebSocket 未连接，消息没有发送。");
 
+        var text = message.Trim();
+        if (text.Length == 0) return;
+
+        // 超过长度上限时不分段（也不加分段延迟），只做内容过滤与字数上限拆分
+        var enableSegmentation = text.Length <= _config.SegmentMaxMessageChars;
+        var chunks = BuildChunks(text, enableSegmentation);
+        if (chunks.Count == 0) return;
+
         var isGroup = conversation.Kind == "group";
-        foreach (var chunk in SplitMessage(message, maxReplyChars))
+        for (var index = 0; index < chunks.Count; index++)
         {
+            // 间隔按「下一句」长度计算：分段模式下，发第 2 条起先等待与本条长度相关的时间
+            if (index > 0 && enableSegmentation)
+            {
+                var delay = ComputeDelay(chunks[index]);
+                if (delay > 0)
+                    await Task.Delay(delay, _connection.ShutdownToken).ConfigureAwait(false);
+            }
+
+            var chunk = chunks[index];
             var parameters = isGroup
                 ? new Dictionary<string, object?>
                 {
@@ -72,7 +104,102 @@ internal sealed class NapCatSender
             _quotes.RememberSentMessageId(sentId);
         }
 
-        _logger.LogInformation("已向{Kind} {Id} 发送消息", isGroup ? "群" : "用户", conversation.Id);
+        _logger.LogInformation(
+            "已向{Kind} {Id} 发送 {Count} 段消息",
+            isGroup ? "群" : "用户",
+            conversation.Id,
+            chunks.Count);
+    }
+
+    /// <summary>按分段正则切分，移除过滤正则命中的内容，再对每段按字数上限二次拆分。</summary>
+    private List<string> BuildChunks(string text, bool enableSegmentation)
+    {
+        var segments = enableSegmentation && _segmentRegex is not null
+            ? SplitAtMatches(text, _segmentRegex)
+            : [text];
+
+        var chunks = new List<string>();
+        foreach (var raw in segments)
+        {
+            var segment = FilterText(raw);
+            segment = segment.Trim();
+            if (segment.Length == 0) continue;
+
+            chunks.AddRange(SplitMessage(segment, _config.MaxReplyChars));
+        }
+
+        return chunks;
+    }
+
+    /// <summary>
+    /// 按分段正则切分：只取匹配区间作为切分点，分隔符本身丢弃。
+    /// 不用 <see cref="Regex.Split" />——它会把用户写的具名捕获组内容也塞进结果，标点会被当成一条消息发出去。
+    /// 匹配超时（灾难性回溯）时退化为整条不切分。
+    /// </summary>
+    private string[] SplitAtMatches(string text, Regex regex)
+    {
+        var segments = new List<string>();
+        var start = 0;
+        try
+        {
+            foreach (Match match in regex.Matches(text))
+            {
+                if (match.Index > start) segments.Add(text[start..match.Index]);
+                start = match.Index + match.Length;
+            }
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            _logger.LogWarning(ex, "分段正则匹配超时，本次不分段：{Pattern}", regex.ToString());
+            return [text];
+        }
+
+        if (start < text.Length) segments.Add(text[start..]);
+        return [.. segments];
+    }
+
+    /// <summary>应用内容过滤正则；匹配超时时保留原文，不影响发送。</summary>
+    private string FilterText(string text)
+    {
+        if (_filterRegex is null) return text;
+
+        try
+        {
+            return _filterRegex.Replace(text, string.Empty);
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            _logger.LogWarning(ex, "内容过滤正则匹配超时，本次不过滤：{Pattern}", _filterRegex.ToString());
+            return text;
+        }
+    }
+
+    /// <summary>间隔 = 下一句字数 × 每字毫秒，受单次上限约束；配置为 0 时不等待。</summary>
+    private int ComputeDelay(string nextChunk)
+    {
+        var perChar = _config.SegmentDelayMsPerChar;
+        if (perChar <= 0) return 0;
+
+        return Math.Min(nextChunk.Length * perChar, _config.SegmentMaxDelayMs);
+    }
+
+    /// <summary>编译配置里的正则；非法表达式记警告并忽略，避免影响发送。匹配超时按降级处理（见调用处）。</summary>
+    private Regex? CompileRegex(string? pattern, string label)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return null;
+
+        try
+        {
+            return new Regex(
+                pattern,
+                RegexOptions.Compiled | RegexOptions.Multiline,
+                RegexTimeout);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "{Label} 配置无效，已忽略：{Pattern}", label, pattern);
+            return null;
+        }
     }
 
     /// <summary>

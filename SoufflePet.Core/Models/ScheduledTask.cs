@@ -47,7 +47,8 @@ public partial class WeekdayOption : ObservableObject
 
 /// <summary>
 /// 一条定时任务：触发时把 <see cref="Content" /> 作为提示词交给桌宠发起一轮对话。
-/// 随 SoufflePet.json 持久化；<see cref="NextRunAt" /> / <see cref="LastRunAt" /> 为运行态信息，由调度器维护、不落盘。
+/// 随 SoufflePet.json 持久化；<see cref="NextRunAt" /> 为运行态信息、由调度器维护不落盘，
+/// <see cref="LastRunAt" /> 需要落盘——启动时据此判断每日任务当天是否已经跑过、要不要补跑。
 /// </summary>
 public partial class ScheduledTask : ObservableObject
 {
@@ -116,9 +117,8 @@ public partial class ScheduledTask : ObservableObject
     [ObservableProperty]
     public partial string? ModelKey { get; set; }
 
-    /// <summary>上次触发时间（本地时间）；不持久化。</summary>
+    /// <summary>上次触发时间（本地时间）；落盘保存，重启后用于判断每日任务当天是否需要补跑。</summary>
     [ObservableProperty]
-    [JsonIgnore]
     public partial DateTime? LastRunAt { get; set; }
 
     /// <summary>下次预计触发时间（本地时间）；由调度器维护，不持久化。</summary>

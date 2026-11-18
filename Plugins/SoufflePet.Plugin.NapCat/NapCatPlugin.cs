@@ -60,7 +60,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
         _connection = new NapCatConnection(Context.Logger, _config.AccessToken, HandleEvent);
         _quotes = new NapCatQuoteTracker(Context.Logger, _connection);
-        _sender = new NapCatSender(Context.Logger, _connection, _quotes);
+        _sender = new NapCatSender(Context.Logger, _connection, _quotes, _config);
         _groupAdmin = new NapCatGroupAdmin(Context.Logger, _connection, _config);
         _joinApprover = new NapCatGroupJoinApprover(Context.Logger, _connection, _config);
         _pokeResponder = new NapCatPokeResponder(Context.Logger, _connection, _config, HandlePokeResponse);
@@ -175,7 +175,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                 $"无法识别的会话 id「{conversationId}」，应形如 group:12345 或 private:777。",
                 nameof(conversationId));
 
-        await _sender!.SendMessageAsync(conversation, message, _config.MaxReplyChars).ConfigureAwait(false);
+        await _sender!.SendMessageAsync(conversation, message).ConfigureAwait(false);
     }
 
     /// <summary>向指定会话发送图片或文件；conversationId 形如 group:12345 或 private:777。</summary>

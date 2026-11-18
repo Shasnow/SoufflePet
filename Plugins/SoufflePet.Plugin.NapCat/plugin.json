@@ -21,6 +21,11 @@
     "pokeCooldownSeconds": 60,
     "followPokeProbability": 0,
     "maxReplyChars": 1500,
+    "segmentRegex": "",
+    "segmentFilterRegex": "",
+    "segmentMaxMessageChars": 150,
+    "segmentDelayMsPerChar": 0,
+    "segmentMaxDelayMs": 3000,
     "downloadAttachments": true,
     "attachmentCacheDir": "attachments",
     "rolePrompt": "",
@@ -109,6 +114,36 @@
       "label": "单条消息字数上限",
       "type": "number",
       "description": "超长回复会拆成多条发送，范围 200-4000。"
+    },
+    {
+      "key": "segmentRegex",
+      "label": "分段正则",
+      "type": "text",
+      "description": "命中的内容作为分段点被移除，把回复切成多段发送。例如 [。！？\\n]+ 按句末标点分段；留空表示不分段。"
+    },
+    {
+      "key": "segmentFilterRegex",
+      "label": "内容过滤正则",
+      "type": "text",
+      "description": "命中的内容会从每段文本里移除。例如 <think>[\\s\\S]*?</think> 去掉思考标签；留空表示不过滤。"
+    },
+    {
+      "key": "segmentMaxMessageChars",
+      "label": "分段长度上限",
+      "type": "number",
+      "description": "消息字数超过此值时不分段、也不加分段延迟，只做内容过滤与字数上限拆分；默认 150。"
+    },
+    {
+      "key": "segmentDelayMsPerChar",
+      "label": "分段每字延迟（毫秒）",
+      "type": "number",
+      "description": "段与段之间的间隔 = 下一句字数 × 此值，模拟打字节奏；0 表示不延迟。"
+    },
+    {
+      "key": "segmentMaxDelayMs",
+      "label": "分段最大延迟（毫秒）",
+      "type": "number",
+      "description": "单段间隔的上限，避免长句等待过久；默认 3000。"
     },
     {
       "key": "downloadAttachments",
