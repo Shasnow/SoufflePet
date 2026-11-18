@@ -1088,6 +1088,15 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             response(id, { attachments: chat.attachments })
             return
           }
+          case 'chat.mention.search':
+            response(id, {
+              entries: [
+                { name: 'docs', path: 'docs', isDirectory: true },
+                { name: 'README.md', path: 'README.md', isDirectory: false },
+                { name: 'src', path: 'src', isDirectory: true },
+              ],
+            })
+            return
           case 'chat.attach.begin':
             response(id, { uploadId: newId('upload') })
             return

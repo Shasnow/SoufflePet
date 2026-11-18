@@ -402,6 +402,16 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                     OpenFile(session, RequireString(parameters, "path"));
                     return null;
                 }
+                case "chat.mention.search":
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    return new
+                    {
+                        entries = SearchMentionEntries(
+                            session.Snapshot.Workspace?.Path,
+                            GetString(parameters, "query")),
+                    };
+                }
                 case "chat.link.open":
                     OpenLink(RequireString(parameters, "url"));
                     return null;
@@ -895,6 +905,73 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         && value.TryGetInt64(out var result)
             ? result
             : null;
+
+    /// <summary>
+    /// 输入框里 @ 引用的候选：按「已进入的目录 + 关键字」列出工作区条目。
+    /// <c>query</c> 形如 <c>tools/re</c> 时先进入 tools 目录，再用 re 过滤；文件夹排在文件前面。
+    /// 只枚举工作区内的目录，越界路径直接返回空。
+    /// </summary>
+    private static List<object> SearchMentionEntries(string? workspacePath, string? query)
+    {
+        const int limit = 50;
+        if (string.IsNullOrWhiteSpace(workspacePath)) return [];
+
+        List<object> empty = [];
+        string root;
+        try
+        {
+            root = Path.GetFullPath(workspacePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return empty;
+        }
+
+        if (!Directory.Exists(root)) return empty;
+
+        var raw = (query ?? string.Empty).Replace('\\', '/');
+        var slash = raw.LastIndexOf('/');
+        var prefix = slash >= 0 ? raw[..slash] : string.Empty;
+        var fragment = slash >= 0 ? raw[(slash + 1)..] : raw;
+
+        string current;
+        try
+        {
+            current = string.IsNullOrEmpty(prefix) ? root : Path.GetFullPath(Path.Combine(root, prefix));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return empty;
+        }
+
+        if (!string.Equals(current, root, StringComparison.OrdinalIgnoreCase)
+            && !current.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return empty;
+        if (!Directory.Exists(current)) return empty;
+
+        try
+        {
+            var entries = new DirectoryInfo(current)
+                .EnumerateFileSystemInfos()
+                .Where(info => info.Name.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(info => info is DirectoryInfo)
+                .ThenBy(info => info.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(limit)
+                .Select(info => (object)new
+                {
+                    name = info.Name,
+                    path = string.IsNullOrEmpty(prefix) ? info.Name : $"{prefix}/{info.Name}",
+                    isDirectory = info is DirectoryInfo,
+                })
+                .ToList();
+            return entries;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return empty;
+        }
+    }
 
     private static string? GetString(JsonElement parameters, string name) =>
         parameters.ValueKind == JsonValueKind.Object

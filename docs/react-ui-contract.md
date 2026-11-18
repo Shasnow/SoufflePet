@@ -252,6 +252,7 @@ interface AppSnapshotDto {
 | `chat.send` | `{sessionId?,text,attachmentIds?:string[]}` | `null`；事件 `chat.ops` |
 | `chat.stop` | `{sessionId?}` | `null` |
 | `chat.draft` | `{sessionId?,text}` | `null`（100 ms 防抖） |
+| `chat.mention.search` | `{sessionId?,query}` | `{entries:{name,path,isDirectory}[]}`；`query` 形如 `tools/re` 先进入 `tools` 再按 `re` 过滤，文件夹优先、最多 50 条，`path` 相对工作区 |
 | `chat.attach.pick` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
 | `chat.attach.paste` | `{sessionId?}` | `{attachments:AttachmentDto[]}` |
 | `chat.attach.begin` | `{sessionId?,name,size}` | `{uploadId}`；拖拽上传按 128 KB 分块，单文件 ≤20MB、总计 ≤40MB、单次 ≤20 个 |

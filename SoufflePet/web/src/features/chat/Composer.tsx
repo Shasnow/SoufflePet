@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 import { FileText, Image as ImageIcon, Paperclip, Send, Square, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { AttachmentDto, ChatSnapshotDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
@@ -10,12 +10,31 @@ import { useChatStore } from '@/stores/chatStore'
 import { useToastStore } from '@/stores/toastStore'
 import { ApprovalPicker } from './ApprovalPicker'
 import { AskPanel } from './AskPanel'
+import { MentionPicker, type MentionEntry } from './MentionPicker'
 import { ModelPicker } from './ModelPicker'
 import { WorkspacePicker } from './WorkspacePicker'
 
 interface ComposerProps {
   chat: ChatSnapshotDto
   hero?: boolean
+}
+
+/** 正在输入的 @ 引用片段：query 是 @ 之后、光标之前的文本。 */
+interface MentionToken {
+  query: string
+  start: number
+  end: number
+}
+
+/** 找出光标前正在输入的 @ 引用；@ 必须在行首或空白之后，且之后不能有空白。 */
+function findMentionToken(value: string, caret: number): MentionToken | null {
+  const before = value.slice(0, caret)
+  const at = before.lastIndexOf('@')
+  if (at < 0) return null
+  if (at > 0 && !/\s/.test(before[at - 1])) return null
+  const query = before.slice(at + 1)
+  if (/\s/.test(query)) return null
+  return { query, start: at, end: caret }
 }
 
 /** 把字节数格式化成附件副标题里的可读大小。 */
@@ -51,6 +70,11 @@ export function Composer({ chat, hero = false }: ComposerProps) {
   // 等待同步给宿主的草稿：卸载（切换会话）时补发一次，避免最后 100ms 的输入丢失
   const pendingDraft = useRef<string | null>(null)
   const sessionId = chat.sessionId
+  const [mention, setMention] = useState<MentionToken | null>(null)
+  const [mentionEntries, setMentionEntries] = useState<MentionEntry[]>([])
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionLoading, setMentionLoading] = useState(false)
+  const mentionRequest = useRef(0)
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -67,6 +91,33 @@ export function Composer({ chat, hero = false }: ComposerProps) {
       }
     }
   }, [sessionId])
+
+  useEffect(() => {
+    if (!mention) {
+      setMentionEntries([])
+      return
+    }
+
+    const seq = ++mentionRequest.current
+    setMentionLoading(true)
+    // 输入时逐字查询：防抖后再问宿主，避免每个字符一次 RPC
+    const timer = window.setTimeout(() => {
+      void invoke<{ entries: MentionEntry[] }>('chat.mention.search', { sessionId, query: mention.query })
+        .then((result) => {
+          if (mentionRequest.current !== seq) return
+          setMentionEntries(result.entries)
+          setMentionIndex(0)
+        })
+        .catch(() => {
+          if (mentionRequest.current === seq) setMentionEntries([])
+        })
+        .finally(() => {
+          if (mentionRequest.current === seq) setMentionLoading(false)
+        })
+    }, 120)
+
+    return () => window.clearTimeout(timer)
+  }, [mention, sessionId])
 
   const syncDraft = (value: string) => {
     setDraft(sessionId, value)
@@ -92,6 +143,7 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     const text = chat.draft.trim()
     if (!text && chat.attachments.length === 0) return
 
+    setMention(null)
     try {
       await invoke('chat.send', {
         sessionId,
@@ -136,6 +188,24 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     if (last) void removeAttachment(last.id)
   }
 
+  /** 把选中的候选替换掉 @ 片段：文件补一个空格收尾，目录保留列表继续往下钻。 */
+  const pickMention = (entry: MentionEntry) => {
+    if (!mention) return
+    const inserted = `@${entry.path}${entry.isDirectory ? '/' : ' '}`
+    const next = `${chat.draft.slice(0, mention.start)}${inserted}${chat.draft.slice(mention.end)}`
+    syncDraft(next)
+
+    const caret = mention.start + inserted.length
+    setMention(entry.isDirectory ? { query: `${entry.path}/`, start: mention.start, end: caret } : null)
+
+    const textarea = textareaRef.current
+    if (!textarea) return
+    window.requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(caret, caret)
+    })
+  }
+
   const canSend = chat.draft.trim().length > 0 || chat.attachments.length > 0 || chat.generating
   // 还没发过消息的新会话（含从工作区新建的）可以随意切换工作区；
   // 一旦有对话内容，绑定工作区的会话就不再提供入口
@@ -153,6 +223,15 @@ export function Composer({ chat, hero = false }: ComposerProps) {
       ) : null}
 
       <div className={`composer ${chat.generating ? 'is-disabled' : ''}`}>
+        {mention ? (
+          <MentionPicker
+            entries={mentionEntries}
+            activeIndex={mentionIndex}
+            loading={mentionLoading}
+            onHover={setMentionIndex}
+            onPick={pickMention}
+          />
+        ) : null}
         {chat.attachments.length > 0 ? (
           <div className="composer-attachments">
             {chat.attachments.map((attachment) =>
@@ -204,14 +283,41 @@ export function Composer({ chat, hero = false }: ComposerProps) {
           autoFocus={hero}
           placeholder={`和${petName}说点什么…`}
           aria-label="输入消息"
-          onChange={(event) => syncDraft(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value
+            syncDraft(value)
+            setMention(findMentionToken(value, event.target.selectionStart ?? value.length))
+          }}
           onCompositionStart={() => {
             composing.current = true
           }}
           onCompositionEnd={() => {
             composing.current = false
           }}
+          onBlur={() => setMention(null)}
           onKeyDown={(event) => {
+            if (mention && mentionEntries.length > 0 && !composing.current) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setMentionIndex((index) => (index + 1) % mentionEntries.length)
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setMentionIndex((index) => (index - 1 + mentionEntries.length) % mentionEntries.length)
+                return
+              }
+              if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault()
+                pickMention(mentionEntries[Math.min(mentionIndex, mentionEntries.length - 1)])
+                return
+              }
+            }
+            if (event.key === 'Escape' && mention) {
+              event.preventDefault()
+              setMention(null)
+              return
+            }
             if (event.key === 'Enter' && !event.shiftKey && !composing.current) {
               event.preventDefault()
               void send()

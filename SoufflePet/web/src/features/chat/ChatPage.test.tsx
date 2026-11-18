@@ -69,4 +69,24 @@ describe('ChatPage 拖拽附件', () => {
     })
     expect(screen.queryByText('松开以添加附件')).toBeNull()
   })
+
+  it('输入 @ 时列出工作区条目，回车插入引用', async () => {
+    vi.mocked(invoke).mockImplementation((async (method: string) => {
+      if (method === 'session.open') return snapshot
+      if (method === 'chat.mention.search') {
+        return { entries: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }] }
+      }
+      return null
+    }) as never)
+
+    render(<ChatPage sessionId="s1" />)
+    const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: '@no', selectionStart: 3 } })
+
+    const option = await screen.findByRole('option')
+    expect(option.textContent).toContain('notes.md')
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(input.value).toBe('@notes.md '))
+  })
 })
