@@ -174,6 +174,8 @@ public sealed class LlmChatService(
         BuildWorkspaceBlock(systemPrompt);
         // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
         skills.BuildCatalog(systemPrompt);
+        // 子代理用法：静态说明，告诉模型何时创建子代理以及三个工具怎么配合
+        BuildSubagentBlock(systemPrompt);
         // 消息平台：只有真的接入了平台才注入使用说明，没有平台时提示词里不出现这类内容
         BuildPlatformBlock(systemPrompt);
         // 长期记忆里的用户档案：只在 remember / forget 后变化，放在系统提示词最末位，尽量少影响前缀
@@ -774,11 +776,17 @@ public sealed class LlmChatService(
         public string? Error { get; init; }
     }
 
-    /// <summary>
-    /// 消息平台使用说明：只有当前接入了至少一个平台时才生成，否则返回空串（不注入系统提示词）。
-    /// 平台可通过 <see cref="SoufflePet.Plugin.Sdk.IMessagePlatform.RolePrompt" /> 说明自身角色，
-    /// 非空时汇总为「平台角色」一并注入；全部为空则不出现该段。
-    /// </summary>
+    /// <summary>子代理工具的使用说明：静态块，不随轮次变化，不影响前缀缓存。</summary>
+    private static void BuildSubagentBlock(StringBuilder builder)
+    {
+        builder.AppendLine();
+        builder.AppendLine("## 子代理");
+        builder.AppendLine();
+        builder.AppendLine("使用 `subagent` 启动独立的委派任务，并在它们运行期间继续执行其他有用工作。子代理在独立子会话里后台运行，执行过程不占用你的上下文。");
+        builder.AppendLine("在向用户提供最终答案之前，务必收集完成该任务所需的所有子智能体结果。");
+    }
+
+    /// <summary>追加消息平台接入说明；没有接入平台时这段不出现。</summary>
     private void BuildPlatformBlock(StringBuilder builder)
     {
         var entries = platforms.Platforms

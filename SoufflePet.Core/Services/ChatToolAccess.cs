@@ -32,6 +32,12 @@ public sealed class ChatToolAccess
     public Task<bool> RequestShellApprovalAsync(string command, CancellationToken cancellationToken)
         => RequestApprovalAsync("pwsh", command, cancellationToken);
 
+    /// <summary>
+    /// 审批兜底超时：子代理会话里的审批提示不一定被用户看到，
+    /// 没有上限的话工具（以及整个子会话）会一直挂在那里。
+    /// </summary>
+    private static readonly TimeSpan ApprovalTimeout = TimeSpan.FromMinutes(10);
+
     /// <summary>为任意有副作用的工具申请许可（例如向平台发送文件）。</summary>
     public async Task<bool> RequestApprovalAsync(
         string toolName,
@@ -46,6 +52,9 @@ public sealed class ChatToolAccess
 
         // 停止对话时同步取消等待，避免工具循环卡住
         using var registration = cancellationToken.Register(request.Cancel);
+        var decided = await Task.WhenAny(request.Decision, Task.Delay(ApprovalTimeout, CancellationToken.None))
+            .ConfigureAwait(false);
+        if (decided != request.Decision) request.Cancel(); // 超时按用户未允许处理
         return await request.Decision.ConfigureAwait(false);
     }
 }

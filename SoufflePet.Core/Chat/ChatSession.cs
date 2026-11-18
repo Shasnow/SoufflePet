@@ -606,10 +606,69 @@ public sealed class ChatSession : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>等待当前轮次和排队中的系统对话全部结束（测试用）。</summary>
-    public Task WaitForIdleAsync()
+    /// <summary>
+    /// 等待当前轮次和排队中的系统对话全部结束（测试与子代理等待用）。
+    /// 等待期间若又开了新一轮（例如用户直接给子会话发消息），会继续等到再次空闲。
+    /// </summary>
+    public async Task WaitForIdleAsync()
     {
-        lock (_gate) return _idle?.Task ?? Task.CompletedTask;
+        while (true)
+        {
+            Task idle;
+            lock (_gate) idle = _idle?.Task ?? Task.CompletedTask;
+            await idle.ConfigureAwait(false);
+            if (!IsBusy) return;
+        }
+    }
+
+    /// <summary>是否卡在需要用户处理的审批/提问上；子代理会话里的这类提示在父会话看不到，界面据此提醒。</summary>
+    public bool IsWaitingForUser
+    {
+        get
+        {
+            lock (_gate) return _approvalRequest is not null || _askRequest is not null;
+        }
+    }
+
+    /// <summary>当前正在执行工具的会话 id；工具在子会话里运行，据此把子代理挂到正确的父会话下。</summary>
+    public static string? CurrentTurnId => CurrentTurn.Value?.Id;
+
+    /// <summary>最近一条有正文的助手消息，供子代理等待结束后回传结论。</summary>
+    public string? LastAssistantText
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _messages
+                    .LastOrDefault(message => message.Kind == ChatMessageKinds.Assistant
+                                              && !string.IsNullOrWhiteSpace(message.Text))
+                    ?.Text;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 最后一轮提问的回答：最近一条用户消息之后、最后一条有正文的助手消息。
+    /// 与 <see cref="LastAssistantText" /> 不同，它不会把上一轮的结论当成本轮的回答。
+    /// </summary>
+    public string? LastAnswerText
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var lastUserIndex = _messages.FindLastIndex(message => message.Kind == ChatMessageKinds.User);
+                for (var index = _messages.Count - 1; index > lastUserIndex; index--)
+                {
+                    var message = _messages[index];
+                    if (message.Kind == ChatMessageKinds.Assistant && !string.IsNullOrWhiteSpace(message.Text))
+                        return message.Text;
+                }
+
+                return null;
+            }
+        }
     }
 
     // ===== 会话轮次 =====
@@ -652,6 +711,8 @@ public sealed class ChatSession : IAsyncDisposable
 
     private void BeginTurnLocked()
     {
+        // 旧的等待状态没结束就换新的，会让之前的等待者永远醒不来（例如排队轮次还在处理时又直接发消息）
+        _idle?.TrySetResult();
         _generating = true;
         _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _cts?.Dispose();
@@ -1028,7 +1089,10 @@ public sealed class ChatSession : IAsyncDisposable
                     if (_disposed || _generating || _pendingTurns.Count == 0) break;
                     turn = _pendingTurns.Dequeue();
                     _generating = true;
-                    _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    // 复用上一轮尚未完成的等待状态：等待者（子代理 wait_agent / 测试）要一直等到
+                    // 包括排队消息在内的所有轮次结束，不能被中途替换成新的 TCS 而永远醒不来。
+                    if (_idle is null || _idle.Task.IsCompleted)
+                        _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     _cts?.Dispose();
                     _cts = new CancellationTokenSource();
                     EmitLocked(new ChatOpTurn(true));

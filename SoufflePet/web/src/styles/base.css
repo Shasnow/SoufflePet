@@ -187,6 +187,46 @@
   font-size: 13px;
 }
 
+/* 子会话面包屑：父会话可点击跳回，当前子会话只展示 */
+.topbar-crumbs {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.topbar-crumb {
+  max-width: 180px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.topbar-crumb::after {
+  content: '›';
+  margin: 0 6px;
+  color: var(--text-3);
+}
+
+.topbar-crumb:hover {
+  color: var(--text-1);
+  text-decoration: underline;
+}
+
+.topbar-crumb.is-current {
+  color: var(--text-1);
+  cursor: default;
+}
+
+.topbar-crumb.is-current::after {
+  content: none;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -1261,6 +1301,155 @@ body.is-resizing-sidebar .sidebar {
   background: var(--surface-1);
   border-color: var(--line);
   overflow: hidden;
+}
+
+/* 顶栏子代理数量与弹出面板 */
+.subagent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subagent-chip:hover {
+  color: var(--text-1);
+  border-color: var(--accent);
+}
+
+.subagent-chip-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: subagent-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes subagent-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.subagent-popover {
+  min-width: 320px;
+  max-width: 380px;
+  padding: 4px;
+}
+
+.subagent-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.subagent-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.subagent-panel-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.subagent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.subagent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.subagent-item:hover {
+  background: var(--surface-3);
+}
+
+.subagent-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.subagent-dot.is-running {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.subagent-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.subagent-item-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-item-sub {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-item-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.subagent-item-count {
+  font-size: 10px;
+}
+
+.subagent-item-arrow {
+  flex: none;
+  color: var(--text-3);
 }
 
 .bubble-reasoning {

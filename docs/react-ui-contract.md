@@ -182,6 +182,8 @@ interface SessionSummaryDto {
   messageCount: number
   lastUserText?: string
   modelKey?: string
+  generating?: boolean
+  parentSessionId?: string   // 非空表示子代理会话：侧栏不列出，从父会话子代理气泡进入
 }
 
 interface ThemeDto {

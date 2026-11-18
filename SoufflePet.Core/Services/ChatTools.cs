@@ -131,6 +131,7 @@ public sealed partial class ChatTools
     private readonly ChatFileService _files;
     private readonly IScheduledTaskService _scheduledTasks;
     private readonly IStatisticsService _statistics;
+    private readonly ISubagentService _subagents;
 
     public ChatTools(
         SouffleSettings settings,
@@ -145,7 +146,8 @@ public sealed partial class ChatTools
         PlatformService platforms,
         ChatFileService files,
         IScheduledTaskService scheduledTasks,
-        IStatisticsService statistics)
+        IStatisticsService statistics,
+        ISubagentService subagents)
     {
         _settings = settings;
         _httpClientFactory = httpClientFactory;
@@ -160,6 +162,7 @@ public sealed partial class ChatTools
         _files = files;
         _scheduledTasks = scheduledTasks;
         _statistics = statistics;
+        _subagents = subagents;
         Tools =
         [
             AIFunctionFactory.Create(
@@ -186,6 +189,18 @@ public sealed partial class ChatTools
                 RunPwshCommand,
                 "pwsh",
                 "执行 PowerShell 命令，返回退出码与输出"),
+            AIFunctionFactory.Create(
+                SpawnSubagent,
+                "subagent",
+                "创建子代理执行独立子任务：子代理在独立子会话里后台运行，立即返回，不会阻塞当前回复"),
+            AIFunctionFactory.Create(
+                WaitForAgent,
+                "wait_agent",
+                "等待子代理当前一轮结束并返回它的结论；留空 agent 时等待全部直接子代理"),
+            AIFunctionFactory.Create(
+                SendMessageToAgent,
+                "send_message",
+                "继续给子代理发消息：空闲时开始新一轮，执行中则排队"),
             AIFunctionFactory.Create(
                 AskUser,
                 "ask_user",

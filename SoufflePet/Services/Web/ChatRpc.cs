@@ -554,9 +554,11 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         [.. workspaces.Select(workspace => new WorkspaceDto(workspace.Path, workspace.Name))];
 
     private SessionSummaryDto MapSession(SessionRecord record) =>
-        MapSession(record, _sessions.GeneratingSessionIds().Contains(record.Id));
+        MapSession(record,
+            _sessions.GeneratingSessionIds().Contains(record.Id),
+            _sessions.WaitingForUserSessionIds().Contains(record.Id));
 
-    private SessionSummaryDto MapSession(SessionRecord record, bool generating) => new(
+    private SessionSummaryDto MapSession(SessionRecord record, bool generating, bool waitingForUser = false) => new(
         record.Id,
         record.Title,
         record.WorkspacePath,
@@ -566,12 +568,16 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         record.MessageCount,
         record.LastUserText,
         record.ModelKey,
-        generating);
+        generating,
+        record.ParentSessionId,
+        waitingForUser);
 
     private IReadOnlyList<SessionSummaryDto> MapSessions(IReadOnlyList<SessionRecord> records)
     {
         var generating = _sessions.GeneratingSessionIds();
-        return [.. records.Select(record => MapSession(record, generating.Contains(record.Id)))];
+        var waiting = _sessions.WaitingForUserSessionIds();
+        return [.. records.Select(record =>
+            MapSession(record, generating.Contains(record.Id), waiting.Contains(record.Id)))];
     }
 
     private IReadOnlyList<object> MapOps(IReadOnlyList<ChatOp> ops) => [.. ops.Select(MapOp)];

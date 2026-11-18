@@ -552,6 +552,106 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     })
   }
 
+  /// 子代理场景：父会话只有 subagent / wait_agent 两个工具气泡，完整过程在子会话里。
+  function pushSubagentSession(): void {
+    const childId = 's-subagent-child'
+    const child = emptyChat(childId)
+    child.messages = [
+      {
+        id: 'm-child-user',
+        kind: 'user',
+        text: '调研项目里缓存命中率是怎么统计的：找到计算代码，说明公式与统计点。',
+        time: timeLabel(60 * 9),
+      },
+      {
+        id: 'm-child-reasoning',
+        kind: 'reasoning',
+        text: '先定位 token 统计相关代码，再看命中率的分母是输入 token 还是总 token。',
+        time: timeLabel(60 * 9),
+        expanded: false,
+        reasoningDone: true,
+      },
+      {
+        id: 'm-child-tool',
+        kind: 'tool',
+        text: '调用工具 grep',
+        time: timeLabel(60 * 9),
+        expanded: false,
+        tool: {
+          name: 'grep',
+          label: 'grep · CachedInputTokens',
+          args: '{\n  "pattern": "CachedInputTokens|缓存" \n}',
+          result: 'LlmChatService.cs:412: CachedInputTokens = usage.CachedInputTokens\nStatisticsService.cs:88: 命中率 = cached / input',
+        },
+      },
+      {
+        id: 'm-child-answer',
+        kind: 'assistant',
+        text: '结论：命中率 = 缓存读取 token ÷ 输入 token，统计点在 `UsageCapsule` 与 `StatisticsService`；分母只算输入，不含输出与思考 token。',
+        time: timeLabel(60 * 8),
+      },
+    ]
+    sessions.push({
+      summary: {
+        ...summary(childId, '调研缓存口径', WORKSPACE, child.messages.length, iso(60 * 8), '调研项目里缓存命中率是怎么统计的'),
+        parentSessionId: 's-subagent',
+      },
+      chat: child,
+    })
+
+    const id = 's-subagent'
+    const chat = emptyChat(id)
+    chat.messages = [
+      {
+        id: 'm-sub-user',
+        kind: 'user',
+        text: '帮我调研项目里缓存命中率的统计口径，并给一个简短结论。',
+        time: timeLabel(60 * 10),
+      },
+      {
+        id: 'm-sub-spawn',
+        kind: 'tool',
+        text: '调用工具 subagent',
+        time: timeLabel(60 * 10),
+        expanded: true,
+        tool: {
+          name: 'subagent',
+          label: '子代理 · 调研缓存口径',
+          args: '{\n  "prompt": "调研项目里缓存命中率的统计口径，找到计算代码并给出公式",\n  "description": "调研缓存口径"\n}',
+          result: JSON.stringify({
+            status: 'started',
+            sessionId: childId,
+            name: '调研缓存口径',
+            hint: '用 wait_agent 等待结果，或 send_message 继续给它发消息',
+          }),
+        },
+      },
+      {
+        id: 'm-sub-wait',
+        kind: 'tool',
+        text: '调用工具 wait_agent',
+        time: timeLabel(60 * 8),
+        expanded: false,
+        tool: {
+          name: 'wait_agent',
+          label: '等待子代理 · 调研缓存口径',
+          args: '{\n  "timeout_ms": 30000\n}',
+          result: '子代理已完成：\n- 调研缓存口径：命中率 = 缓存读取 token ÷ 输入 token，统计点在 StatisticsService。',
+        },
+      },
+      {
+        id: 'm-sub-answer',
+        kind: 'assistant',
+        text: '结论：项目里的缓存命中率 = 缓存读取 token ÷ 输入 token，只统计输入侧；完整调研过程在子会话「调研缓存口径」里。',
+        time: timeLabel(60 * 8),
+      },
+    ]
+    sessions.push({
+      summary: summary(id, '调研缓存命中口径', WORKSPACE, chat.messages.length, iso(60 * 8), '帮我调研缓存命中率的统计口径'),
+      chat,
+    })
+  }
+
   // 默认活动会话是空的「新会话」，让首屏显示欢迎页；历史会话可在侧栏切换。
   sessions.push({
     summary: summary('s-welcome', '新会话', WORKSPACE, 0, iso(1)),
@@ -560,6 +660,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
   pushRichSession()
   pushSecondSession()
   if (scenario === 'long') pushLongSession()
+  if (scenario === 'subagent') pushSubagentSession()
 
   if (scenario === 'empty') {
     sessions.splice(1)
@@ -569,6 +670,8 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
     activeId = 's-rich'
   } else if (scenario === 'long') {
     activeId = 's-long'
+  } else if (scenario === 'subagent') {
+    activeId = 's-subagent'
   } else if (scenario === 'ask') {
     activeId = 's-rich'
     const chat = getSessionChat('s-rich')

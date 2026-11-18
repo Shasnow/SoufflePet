@@ -143,6 +143,10 @@ export interface SessionSummaryDto {
   modelKey?: string
   /** 该会话是否正在生成回复；宿主在生成开始/结束时推送 session.updated 刷新 */
   generating?: boolean
+  /** 父会话 id；非空表示这是子代理会话，侧栏不列出，由父会话的面包屑进入 */
+  parentSessionId?: string
+  /** 正卡在审批/提问上等用户处理：子代理会话的提示不在当前页面，据此提醒 */
+  waitingForUser?: boolean
 }
 
 export interface ThemeDto {

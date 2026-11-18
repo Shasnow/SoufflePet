@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 using Microsoft.Extensions.DependencyInjection;
+using SoufflePet.Core.Chat;
 using SoufflePet.Services.Plugins;
 
 namespace SoufflePet.Services;
@@ -29,6 +30,11 @@ public static class CoreServiceCollectionExtensions
         services.AddSingleton(McpToolCache.Load());
         services.AddSingleton<ISkillService, SkillService>();
         services.AddSingleton<IPluginService, PluginService>();
+
+        // 子代理：用工厂委托延迟解析 ChatSessionManager，避免
+        // ChatTools → ISubagentService → ChatSessionManager → ChatTools 的构造环
+        services.AddSingleton<Func<ChatSessionManager>>(sp => () => sp.GetRequiredService<ChatSessionManager>());
+        services.AddSingleton<ISubagentService, SubagentService>();
 
         // LLM / 工具 / 调度 / Live2D 文件操作
         services.AddSingleton<ChatTools>();

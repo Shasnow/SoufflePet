@@ -122,7 +122,10 @@ public sealed record SessionSummaryDto(
     int MessageCount,
     string? LastUserText,
     string? ModelKey,
-    bool Generating);
+    bool Generating,
+    string? ParentSessionId = null,
+    /// <summary>正卡在审批/提问上等用户处理；子代理会话的提示不在当前页面，界面据此提醒。</summary>
+    bool WaitingForUser = false);
 
 public sealed record AppSnapshotDto(
     int ProtocolVersion,

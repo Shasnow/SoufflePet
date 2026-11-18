@@ -289,12 +289,58 @@ public sealed class ChatSessionStore
             var temp = IndexPath + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(index, JsonOptions));
             File.Move(temp, IndexPath, overwrite: true);
+            LinkParentSessions(index);
         }
         catch (Exception ex)
         {
             Logger.Warning(ex, "save session index failed");
         }
     }
+
+    /// <summary>索引损坏从目录重建时，用它还原子会话的父 id。</summary>
+    private const string ParentLinkFileName = "parent.json";
+
+    /// <summary>把子会话的父 id 写进会话目录：索引丢失后重建也能还原父子关系，子会话不会重新出现在侧栏。</summary>
+    private void LinkParentSessions(ChatSessionIndex index)
+    {
+        foreach (var record in index.Sessions)
+        {
+            if (record.ParentSessionId is not { Length: > 0 } parent) continue;
+
+            try
+            {
+                var directory = SessionDirectory(record.Id, record.WorkspacePath);
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(
+                    Path.Combine(directory, ParentLinkFileName),
+                    JsonSerializer.Serialize(new ParentLink(parent)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.Warning(ex, "write parent link failed id={Id}", record.Id);
+            }
+        }
+    }
+
+    private static string? ReadParentLink(string directory)
+    {
+        var path = Path.Combine(directory, ParentLinkFileName);
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ParentLink>(File.ReadAllText(path)) is { ParentSessionId.Length: > 0 } link
+                ? link.ParentSessionId
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            Logger.Debug(ex, "read parent link failed path={Path}", path);
+            return null;
+        }
+    }
+
+    private sealed record ParentLink(string ParentSessionId);
 
     /// <summary>
     /// 生成一条会话记录但不在磁盘上创建任何东西（草稿会话：首条消息发出时才落盘）。
@@ -406,7 +452,11 @@ public sealed class ChatSessionStore
             updated,
             lines.Count,
             lastUser?.Text,
-            model));
+            model)
+        {
+            // 子会话的父 id 存在目录里的 parent.json：索引丢了也能还原，不会当成普通会话列出来
+            ParentSessionId = ReadParentLink(directory),
+        });
     }
 
     private static List<ConversationLine> TryReadLines(string path)

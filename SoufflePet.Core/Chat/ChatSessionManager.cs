@@ -173,6 +173,18 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>正卡在审批/提问上等用户处理的会话；子代理会话的提示不在当前页面，界面据此提醒。</summary>
+    public HashSet<string> WaitingForUserSessionIds()
+    {
+        lock (_gate)
+        {
+            return _open
+                .Where(pair => pair.Value.IsWaitingForUser)
+                .Select(pair => pair.Key)
+                .ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
     public event Action<ChatOpBatch>? OpsProduced;
 
     public event Action<ChatSessionListPayload>? SessionsChanged;
@@ -388,6 +400,73 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
         return session;
     }
 
+    /// <summary>
+    /// 创建一个子代理会话：立即写入索引与会话列表（但侧栏按 ParentSessionId 隐藏），
+    /// 不切换当前活动会话，也不占用草稿名额。子会话沿用父会话的工作区与模型。
+    /// </summary>
+    public async Task<SessionRecord> CreateChildAsync(
+        string parentSessionId,
+        string title,
+        string? modelKey,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        SessionRecord parent;
+        lock (_gate)
+        {
+            parent = _records.FirstOrDefault(record => record.Id == parentSessionId)
+                     ?? throw new ChatSessionException("not_found", "父会话不存在");
+        }
+
+        var model = NormalizeModelKey(modelKey) ?? NormalizeModelKey(parent.ModelKey);
+        var record = _store.NewDraftRecord(parent.WorkspacePath) with
+        {
+            Title = string.IsNullOrWhiteSpace(title) ? "子代理" : title.Trim(),
+            ParentSessionId = parentSessionId,
+            ModelKey = model,
+        };
+
+        lock (_gate)
+        {
+            _records.Add(record);
+        }
+
+        Save();
+        RaiseSessionsChanged();
+        Logger.Information("child session created id={Id} parent={Parent} title={Title}", record.Id, parentSessionId, record.Title);
+        return record;
+    }
+
+    /// <summary>某个会话直接派生的子代理会话（按创建时间排序）。</summary>
+    public IReadOnlyList<SessionRecord> ChildSessions(string parentSessionId)
+    {
+        lock (_gate)
+        {
+            return [.. _records
+                .Where(record => string.Equals(record.ParentSessionId, parentSessionId, StringComparison.Ordinal))
+                .OrderBy(record => record.CreatedAt)];
+        }
+    }
+
+    /// <summary>会话层级深度：普通会话为 0，子代理为 1，子代理再派生的为 2，以此类推。</summary>
+    public int DepthOf(string sessionId)
+    {
+        lock (_gate)
+        {
+            var depth = 0;
+            var current = _records.FirstOrDefault(record => record.Id == sessionId);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (current?.ParentSessionId is { Length: > 0 } parentId && seen.Add(current.Id))
+            {
+                depth++;
+                current = _records.FirstOrDefault(record => record.Id == parentId);
+            }
+
+            return depth;
+        }
+    }
+
     public async Task<ChatSession> OpenAsync(string sessionId, CancellationToken cancellationToken)
     {
         var session = await ResolveAsync(sessionId, cancellationToken).ConfigureAwait(false);
@@ -495,41 +574,67 @@ public sealed class ChatSessionManager : IAsyncDisposable, IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        ChatSession? session = null;
-        SessionRecord? record;
-        bool draft;
+        List<SessionRecord> targets;
+        List<ChatSession> openSessions = [];
+        HashSet<string> removedIds;
+        HashSet<string> draftIds;
         lock (_gate)
         {
-            record = _records.FirstOrDefault(item => item.Id == sessionId);
-            if (record is null) throw new ChatSessionException("not_found", "会话不存在");
-            draft = _drafts.Remove(sessionId);
-            _open.Remove(sessionId, out session);
+            if (_records.All(item => item.Id != sessionId))
+                throw new ChatSessionException("not_found", "会话不存在");
+
+            // 子代理会话跟着父会话一起删：它们不在侧栏列出，父会话没了就再也进不去
+            removedIds = new HashSet<string>(StringComparer.Ordinal) { sessionId };
+            bool grown;
+            do
+            {
+                grown = false;
+                foreach (var candidate in _records)
+                {
+                    if (candidate.ParentSessionId is { Length: > 0 } parent
+                        && removedIds.Contains(parent) && removedIds.Add(candidate.Id))
+                        grown = true;
+                }
+            } while (grown);
+
+            targets = [.. _records.Where(record => removedIds.Contains(record.Id))];
+            draftIds = [.. targets.Where(record => _drafts.Remove(record.Id)).Select(record => record.Id)];
+
+            foreach (var id in removedIds)
+            {
+                if (_open.Remove(id, out var open) && open is not null) openSessions.Add(open);
+            }
         }
 
-        if (session is not null)
+        foreach (var session in openSessions)
         {
             await session.StopAsync().ConfigureAwait(false);
             await session.DisposeAsync().ConfigureAwait(false);
         }
 
-        // 草稿从没落过盘：删掉可能残留的空目录即可，不进回收站
-        if (draft)
+        foreach (var record in targets)
         {
-            _store.DeleteDraft(record.Id, record.WorkspacePath);
-        }
-        else if (!_store.Delete(record))
-        {
-            throw new ChatSessionException("io_error", "删除会话目录失败");
+            // 草稿从没落过盘：删掉可能残留的空目录即可，不进回收站
+            if (draftIds.Contains(record.Id))
+            {
+                _store.DeleteDraft(record.Id, record.WorkspacePath);
+                continue;
+            }
+
+            // 目录缺失（子代理创建后还没落盘就失败）不该挡住记录清理，失败只记日志
+            if (!_store.Delete(record))
+                Logger.Debug("delete session directory skipped id={Id}", record.Id);
         }
 
         string? nextActive;
         lock (_gate)
         {
-            _records.RemoveAll(record => record.Id == sessionId);
-            if (string.Equals(_activeId, sessionId, StringComparison.Ordinal))
+            _records.RemoveAll(record => removedIds.Contains(record.Id));
+            if (_activeId is { } active && removedIds.Contains(active))
             {
+                // 子代理会话不在侧栏列出，不能作为新的活动会话
                 _activeId = _records
-                    .Where(record => !_drafts.Contains(record.Id))
+                    .Where(record => !_drafts.Contains(record.Id) && record.ParentSessionId is null)
                     .OrderByDescending(record => record.UpdatedAt)
                     .Select(record => record.Id)
                     .FirstOrDefault();

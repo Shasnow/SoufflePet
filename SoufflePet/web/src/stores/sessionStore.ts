@@ -56,6 +56,31 @@ export function sortSessions(sessions: SessionSummaryDto[]): SessionSummaryDto[]
   return [...sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }
 
+/** 侧栏只列普通会话：子代理会话属于父会话的展开视图，不单独出现在列表里。 */
+export function visibleSessions(sessions: SessionSummaryDto[]): SessionSummaryDto[] {
+  return sessions.filter((session) => !session.parentSessionId)
+}
+
+/** 某个会话的祖先链（根 → 直接父级）；父会话缺失时截断，避免死循环。 */
+export function ancestorsOf(
+  sessions: SessionSummaryDto[],
+  sessionId: string | null,
+): SessionSummaryDto[] {
+  if (!sessionId) return []
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const chain: SessionSummaryDto[] = []
+  const seen = new Set<string>()
+  let current = byId.get(sessionId)
+  while (current?.parentSessionId && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentSessionId)
+    if (!parent) break
+    chain.unshift(parent)
+    current = parent
+  }
+  return chain
+}
+
 export function groupSessions(
   sessions: SessionSummaryDto[],
   workspaces: { path: string; name: string }[] = [],

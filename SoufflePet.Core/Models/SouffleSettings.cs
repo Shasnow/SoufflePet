@@ -164,6 +164,9 @@ public partial class SouffleSettings : ObservableObject
     [Description("最大工具调用轮数")]
     public int MaxToolRounds { get; init; } = 10;
 
+    [Description("子代理最大嵌套深度：子代理再创建子代理时超过此深度将被拒绝")]
+    public int MaxSubagentDepth { get; set; } = 2;
+
     [ObservableProperty]
     [Description("对话历史窗口高水位（用户提问轮数）：超过后一次性裁到 HistoryKeepTurns；越小越省 token，但上下文越短")]
     public partial int HistoryWindowTurns { get; set; } = 50;

@@ -141,7 +141,9 @@ public sealed record SessionRecord(
     string? LastUserText,
     string? ModelKey,
     /// <summary>会话用途；后台事件按用途查找专用会话，不再跟随用户当前选中的会话。</summary>
-    SessionKind Kind = SessionKind.Normal);
+    SessionKind Kind = SessionKind.Normal,
+    /// <summary>父会话 id：非空表示这是子代理会话（子会话），侧栏不列出，只在父会话的面包屑里进入。</summary>
+    string? ParentSessionId = null);
 
 /// <summary>会话摘要变化（重命名/首条消息生成标题/一轮结束）。</summary>
 public sealed record ChatSessionSummary(

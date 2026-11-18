@@ -23,7 +23,7 @@ import { invoke } from '@/bridge/client'
 import type { SessionSummaryDto, WorkspaceDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
-import { filterSessions, groupSessions, useSessionStore } from '@/stores/sessionStore'
+import { filterSessions, groupSessions, useSessionStore, visibleSessions } from '@/stores/sessionStore'
 import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, useUiStore } from '@/stores/uiStore'
 import { useToastStore } from '@/stores/toastStore'
 import { Dialog } from '@/ui/Dialog'
@@ -81,7 +81,9 @@ export function Sidebar() {
     window.setTimeout(() => searchButton.current?.focus(), 0)
   }
 
-  const filtered = useMemo(() => filterSessions(sessions, query), [sessions, query])
+  // 子代理会话不在侧栏列出：它们从父会话的子代理工具气泡进入。
+  const listed = useMemo(() => visibleSessions(sessions), [sessions])
+  const filtered = useMemo(() => filterSessions(listed, query), [listed, query])
   // 搜索时不显示没有命中会话的空工作区分组
   const groups = useMemo(
     () => groupSessions(filtered, query ? [] : workspaces),
