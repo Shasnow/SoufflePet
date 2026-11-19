@@ -1,21 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Serilog;
 using SoufflePet.Plugin.Sdk;
 
 namespace SoufflePet.Services;
 
-/// <summary>一条需要桌宠处理的平台消息；由插件推送后、交给对话层之前生成。</summary>
-public sealed record PlatformNotification(string PlatformId, string Content, string? Sender = null);
-
 /// <summary>
 /// 消息平台服务：收集插件提供的消息平台，统一收发消息，
-/// 并转发平台通过 <see cref="IMessagePlatform.OnMentioned" /> 主动上报的提醒。
+/// 并转发平台通过 <see cref="IMessagePlatform.OnMentioned" /> 主动上报的消息。
 /// </summary>
 public class PlatformService : IDisposable
 {
@@ -41,7 +32,7 @@ public class PlatformService : IDisposable
     private bool _disposed;
 
     /// <summary>插件推送了一条需要桌宠处理的消息；可能在后台线程触发。</summary>
-    public event EventHandler<PlatformNotification>? Notified;
+    public event EventHandler<PlatformIncomingMessage>? Notified;
 
     /// <summary>已注册的消息平台快照（按注册顺序）。</summary>
     public IReadOnlyList<IMessagePlatform> Platforms
@@ -276,7 +267,13 @@ public class PlatformService : IDisposable
             if (!Remember(platformId, message.MessageId)) return;
 
             var sender = string.IsNullOrWhiteSpace(message.Sender) ? null : message.Sender.Trim();
-            var notification = new PlatformNotification(platformId, message.Content.Trim(), sender);
+            var context = string.IsNullOrWhiteSpace(message.Context) ? null : message.Context.Trim();
+            var notification = new PlatformIncomingMessage(
+                platformId,
+                message.Content.Trim(),
+                sender,
+                message.MessageId?.Trim(),
+                context);
 
             Logger.Information("platform {Platform} pushed a message from {Sender}", platformId, sender ?? "未知");
             Notified?.Invoke(this, notification);

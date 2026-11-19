@@ -13,17 +13,16 @@ namespace SoufflePet.Plugins.NapCat;
 /// <summary>把 OneBot 消息事件解析成可读正文：支持数组段格式，也兼容 string + CQ 码格式。</summary>
 internal static class NapCatMessageParser
 {
-    /// <summary>解析阶段给引用段留的占位，反查拿到正文后原地替换。</summary>
-    public const string QuotePlaceholder = "（引用）";
+    /// <summary>解析阶段给引用段留的占位；反查拿到正文后原地替换，反查失败时就显示它。</summary>
+    public const string QuotePlaceholder = "引用消息";
 
     /// <summary>消息字符串里 OneBot 的 CQ 码，用于解析 message_format=string 的平台。</summary>
     private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);
 
-    /// <summary>解析消息正文；<paramref name="isSentBySelf" /> 用于判断被引用消息是否由桌宠自己发出。</summary>
+    /// <summary>解析消息正文；引用内容稍后统一用 get_msg 反查补上，解析阶段只留占位。</summary>
     public static NapCatParsedMessage ParseMessage(
         JsonElement root,
         long selfId,
-        Func<string?, bool> isSentBySelf,
         bool collectAttachments = false,
         bool collectForwards = false)
     {
@@ -32,20 +31,19 @@ internal static class NapCatMessageParser
             || root.TryGetProperty("content", out message))
         {
             if (message.ValueKind == JsonValueKind.Array)
-                return ParseSegments(message, selfId, isSentBySelf, collectAttachments, collectForwards);
+                return ParseSegments(message, selfId, collectAttachments, collectForwards);
             if (message.ValueKind == JsonValueKind.String)
                 return ParseCqCode(
-                    message.GetString() ?? string.Empty, selfId, isSentBySelf, collectAttachments, collectForwards);
+                    message.GetString() ?? string.Empty, selfId, collectAttachments, collectForwards);
         }
 
         return ParseCqCode(
-            GetString(root, "raw_message") ?? string.Empty, selfId, isSentBySelf, collectAttachments, collectForwards);
+            GetString(root, "raw_message") ?? string.Empty, selfId, collectAttachments, collectForwards);
     }
 
     private static NapCatParsedMessage ParseSegments(
         JsonElement segments,
         long selfId,
-        Func<string?, bool> isSentBySelf,
         bool collectAttachments,
         bool collectForwards)
     {
@@ -63,14 +61,13 @@ internal static class NapCatMessageParser
             switch (GetString(segment, "type"))
             {
                 case "reply":
-                    // 引用的消息是桌宠自己发出的，同样视为在叫桌宠；正文内容稍后用 get_msg 反查补上
+                    // 正文内容稍后用 get_msg 反查补上；是否需要唤醒由反查结果决定
                     var id = GetString(data, "id") ?? GetString(data, "message_id");
                     if (string.IsNullOrWhiteSpace(id)) break;
 
                     // 先用占位表示这是一条引用，读历史时也能看出回复关系
                     builder.Append(QuotePlaceholder);
                     quotedId ??= id;
-                    if (isSentBySelf(id)) mentionsSelf = true;
 
                     break;
 
@@ -139,7 +136,6 @@ internal static class NapCatMessageParser
     private static NapCatParsedMessage ParseCqCode(
         string raw,
         long selfId,
-        Func<string?, bool> isSentBySelf,
         bool collectAttachments,
         bool collectForwards)
     {
@@ -165,7 +161,6 @@ internal static class NapCatMessageParser
 
                     builder.Append(QuotePlaceholder);
                     quotedId ??= id;
-                    if (isSentBySelf(id)) mentionsSelf = true;
 
                     break;
 

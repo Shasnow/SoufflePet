@@ -221,7 +221,7 @@ internal sealed class MyFilter
 public interface IMessagePlatform
 {
     string Id { get; }
-    string? RolePrompt { get; }
+    string? PlatformPrompt { get; }
     Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync();
     Task<string> GetMessagesAsync(string conversationId, int limit = 20);
     Task SendMessageAsync(string conversationId, string message);
@@ -233,7 +233,7 @@ public interface IMessagePlatform
 | 成员 | 说明 |
 | --- | --- |
 | `Id` | 平台标识，模型工具里的 `platform` 参数用它；与 `plugin.json` 的 `id` 无关 |
-| `RolePrompt` | 平台角色说明，注入系统提示词（如「这是你自己的 QQ」「你正在托管主人的 QQ」）；null 或空白时不注入 |
+| `PlatformPrompt` | 平台提示词，注入系统提示词（如「这是你自己的 QQ」「你正在托管主人的 QQ」，或引用/@ 等平台消息写法）；null 或空白时不注入 |
 | `GetConversationsAsync` | 返回已知会话，按最近活跃排序；只返回本次运行期间收到过消息的会话也可以 |
 | `GetMessagesAsync` | 返回该会话最近消息的文本，格式自定，但应带上会话 id 与发送者 |
 | `SendMessageAsync` | 向指定会话发送文本 |
@@ -273,7 +273,7 @@ public sealed class DemoPlatformPlugin : PluginBase, IMessagePlatform
 {
     public string Id => "demo";
 
-    public string? RolePrompt => null;
+    public string? PlatformPrompt => null;
 
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;
 

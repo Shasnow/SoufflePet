@@ -29,7 +29,7 @@ internal sealed class BrowserHost
     private const int MaxElements = 200;
 
     /// <summary>回传给模型的正文上限（字符），超出截断。</summary>
-    private const int MaxPageText = 6000;
+    private const int MaxPageText = 8192;
 
     /// <summary>点击/截图前的稳定等待：跳转与渲染都是异步的，立刻回读拿到的还是旧画面。</summary>
     private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(400);

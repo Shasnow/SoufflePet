@@ -89,7 +89,7 @@ internal sealed class NapCatForwardResolver
             {
                 if (node.ValueKind != JsonValueKind.Object) continue;
 
-                var text = Summarize(NapCatMessageParser.ParseMessage(node, selfId, _ => false).Text);
+                var text = Summarize(NapCatMessageParser.ParseMessage(node, selfId).Text);
                 var sender = GetNodeSender(node);
                 var label = sender.Length == 0 ? text : $"{sender}：{text}";
 

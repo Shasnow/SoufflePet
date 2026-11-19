@@ -12,11 +12,13 @@ namespace SoufflePet.Plugin.Sdk;
 /// <param name="Content">消息正文。</param>
 /// <param name="Sender">发送者昵称，未知时为 null。</param>
 /// <param name="MessageId">平台侧的消息 id，用于宿主去重；平台没有 id 时可为 null。</param>
+/// <param name="Context">触发消息前的最近对话，供模型理解上下文；没有上下文时为 null。</param>
 public sealed record PlatformIncomingMessage(
     string PlatformId,
     string Content,
     string? Sender = null,
-    string? MessageId = null);
+    string? MessageId = null,
+    string? Context = null);
 
 /// <summary>
 /// 消息平台里的一个会话（私聊或群聊）。
@@ -59,11 +61,11 @@ public interface IMessagePlatform
     string Id { get; }
 
     /// <summary>
-    /// 平台角色说明：告诉模型这个平台在它眼里的身份，例如「这是你自己的 QQ」或「你正在托管主人的 QQ」。
-    /// 宿主会把它注入系统提示词，模型据此理解平台消息里的身份与语气；
-    /// 返回 null 或空白时，该平台不注入角色说明。
+    /// 平台提示词：告诉模型这个平台在它眼里的身份与额外约定，
+    /// 例如「这是你自己的 QQ」「你正在托管主人的 QQ」，或平台特有的消息写法（引用、@ 等）。
+    /// 宿主会把它注入系统提示词；返回 null 或空白时，该平台不注入提示词。
     /// </summary>
-    string? RolePrompt { get; }
+    string? PlatformPrompt { get; }
 
     /// <summary>
     /// 列出当前已知的会话（按最近活跃排序）。插件可以只返回本次运行期间收到过消息的会话。

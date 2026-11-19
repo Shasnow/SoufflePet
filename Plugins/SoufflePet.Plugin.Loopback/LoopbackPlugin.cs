@@ -21,7 +21,7 @@ namespace SoufflePet.Plugins.Loopback;
 /// 在 127.0.0.1 上监听一个极简 HTTP 端口，外部脚本用
 /// <c>GET /send?text=…</c> 就能把一条消息推给桌宠（等同于平台里被 @ 一次）；
 /// 桌宠通过 <c>send_platform_message</c> 发出的回复记录在 <c>GET /replies</c> 里，方便脚本断言。
-/// 只监听回环地址，不对外暴露；没有平台角色说明（RolePrompt 为 null），不额外改动系统提示词。
+/// 只监听回环地址，不对外暴露；没有平台提示词（PlatformPrompt 为 null），不额外改动系统提示词。
 /// </summary>
 public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
 {
@@ -45,8 +45,8 @@ public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
 
     public string Id => "loopback";
 
-    /// <summary>测试平台不注入角色说明，保持系统提示词干净（也便于对照缓存命中）。</summary>
-    public string? RolePrompt => null;
+    /// <summary>测试平台不注入平台提示词，保持系统提示词干净（也便于对照缓存命中）。</summary>
+    public string? PlatformPrompt => null;
 
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;
 

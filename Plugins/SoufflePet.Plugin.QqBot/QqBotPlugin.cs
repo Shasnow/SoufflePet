@@ -109,8 +109,8 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     /// <summary>平台 id，供工具的 platform 参数使用。</summary>
     public string Id => "qqbot";
 
-    /// <summary>平台角色说明，交给宿主注入系统提示词；未配置时返回 null（不注入）。</summary>
-    public string? RolePrompt => _rolePrompt.Length == 0 ? null : _rolePrompt;
+    /// <summary>平台提示词，交给宿主注入系统提示词；未配置时返回 null（不注入）。</summary>
+    public string? PlatformPrompt => _rolePrompt.Length == 0 ? null : _rolePrompt;
 
     /// <summary>收到需要桌宠处理的消息时触发，由宿主订阅后唤醒桌宠。</summary>
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;

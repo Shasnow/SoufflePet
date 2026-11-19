@@ -794,7 +794,8 @@ public sealed class LlmChatService(
             .GroupBy(platform => platform.Id, StringComparer.OrdinalIgnoreCase)
             .Select(group => (
                 Id: group.Key,
-                Role: group.Select(platform => platform.RolePrompt).FirstOrDefault(role => !string.IsNullOrWhiteSpace(role))))
+                Prompt: group.Select(platform => platform.PlatformPrompt)
+                    .FirstOrDefault(prompt => !string.IsNullOrWhiteSpace(prompt))))
             // 平台由插件注册，枚举顺序可能变化；固定成按 id 排序，保证这段系统提示词逐字节稳定
             .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -805,15 +806,24 @@ public sealed class LlmChatService(
         builder.AppendLine();
         builder.Append("已接入消息平台：").AppendLine(string.Join("、", entries.Select(entry => entry.Id)));
 
-        var roles = entries.Where(entry => !string.IsNullOrWhiteSpace(entry.Role)).ToList();
-        if (roles.Count > 0)
+        var prompts = entries.Where(entry => !string.IsNullOrWhiteSpace(entry.Prompt)).ToList();
+        if (prompts.Count > 0)
         {
-            builder.AppendLine("各平台角色（据此理解消息里的身份与语气）：");
-            foreach (var entry in roles)
-                builder.Append("- ").Append(entry.Id).Append('：').AppendLine(entry.Role!.Trim());
+            builder.AppendLine("各平台提示词：");
+            foreach (var entry in prompts)
+            {
+                // 平台提示词可能是多行：首行跟在列表项后面，其余行续行缩进，避免与全局说明混在一起
+                var lines = entry.Prompt!.Trim().Split('\n');
+                builder.Append("- ").Append(entry.Id).Append(':').AppendLine(lines[0].TrimEnd('\r'));
+                for (var index = 1; index < lines.Length; index++)
+                {
+                    var line = lines[index].TrimEnd('\r').Trim();
+                    if (line.Length > 0) builder.Append("  ").AppendLine(line);
+                }
+            }
         }
         builder.AppendLine();
-        builder.AppendLine("当消息被 `<platform_message>` 标记包裹时：先用 `get_platform_messages` 工具查看该会话最近的上下文，决定回复时用 `send_platform_message` 工具发送消息");
+        builder.AppendLine("当消息被 `<platform_message>` 标记包裹时：`<context>` 是此前的会话记录，`<content>` 是本次需要回应的消息；信息不足时再用 `get_platform_messages` 查看该会话更早的消息，回复用 `send_platform_message` 工具发送");
     }
 
     /// <summary>

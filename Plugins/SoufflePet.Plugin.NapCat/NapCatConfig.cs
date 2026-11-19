@@ -66,7 +66,7 @@ internal sealed class NapCatConfig
     /// <summary>附件缓存目录（绝对路径）。</summary>
     public string AttachmentCacheDir { get; init; } = string.Empty;
 
-    /// <summary>平台角色说明（例如「你正在托管主人的 QQ」），注入系统提示词；为空则不注入。</summary>
+    /// <summary>平台提示词里的身份说明（例如「你正在托管主人的 QQ」），注入系统提示词；为空则不注入。</summary>
     public string RolePrompt { get; init; } = string.Empty;
 
     /// <summary>允许群管理工具操作的群号；为空表示不暴露群管理工具。</summary>

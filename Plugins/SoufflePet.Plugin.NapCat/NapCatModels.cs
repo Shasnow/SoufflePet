@@ -29,6 +29,17 @@ internal sealed record NapCatPendingForward(string Placeholder, string ForwardId
 /// <summary>被引用消息的摘要信息。</summary>
 internal sealed record NapCatQuotedMessage(bool IsSelf, string Sender, string Summary);
 
+/// <summary>
+/// 会话里的一条消息：展示行用于读取历史与反查引用和 @，
+/// 消息 id 用于把补全后的正文写回同一条记录。
+/// </summary>
+internal sealed record NapCatStoredMessage(
+    string MessageId,
+    string Line,
+    long UserId,
+    string Sender,
+    DateTimeOffset ReceivedAt);
+
 /// <summary>落盘的会话缓存。</summary>
 internal sealed class NapCatConversationCache
 {
@@ -43,5 +54,5 @@ internal sealed class NapCatConversationCacheEntry
 
     public DateTimeOffset LastActive { get; set; }
 
-    public List<string> Messages { get; set; } = [];
+    public List<NapCatStoredMessage> Messages { get; set; } = [];
 }
