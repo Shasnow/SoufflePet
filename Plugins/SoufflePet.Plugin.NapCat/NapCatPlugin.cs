@@ -523,9 +523,6 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private bool RollReplyChance()
         => _config.ReplyProbability > 0 && Random.Shared.NextDouble() < _config.ReplyProbability;
 
-    /// <summary>唤醒时附带的最近消息条数：模型在实践中很少主动调用 get_platform_messages，上下文要随唤醒一起给。</summary>
-    private const int WakeContextMessages = 10;
-
     private void RaiseMentioned(string conversationId, string content, string sender, string? messageId)
     {
         var handler = OnMentioned;
@@ -546,10 +543,13 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         }
     }
 
-    /// <summary>把最近消息作为上下文交给宿主，模型不必再调 get_platform_messages 也能看懂上下文。</summary>
+    /// <summary>按配置的条数把最近消息作为上下文交给宿主，模型不必再调 get_platform_messages 也能看懂上下文。</summary>
     private string? BuildWakeContext(string conversationId, string content, string? messageId)
     {
-        var messages = _store?.GetRecentMessages(conversationId, WakeContextMessages + 1) ?? [];
+        var count = _config.WakeContextMessages;
+        if (count <= 0) return null;
+
+        var messages = _store?.GetRecentMessages(conversationId, count + 1) ?? [];
         var lines = new List<string>();
         foreach (var item in messages)
         {
@@ -565,7 +565,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             && string.Equals(lines[^1], content, StringComparison.Ordinal))
             lines.RemoveAt(lines.Count - 1);
 
-        if (lines.Count > WakeContextMessages) lines = [.. lines.TakeLast(WakeContextMessages)];
+        if (lines.Count > count) lines = [.. lines.TakeLast(count)];
         return lines.Count == 0 ? null : string.Join('\n', lines);
     }
 

@@ -14,6 +14,7 @@
     "allowedGroups": [],
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
+    "wakeContextMessages": 50,
     "replyProbability": 0,
     "proactiveReplyBlockedGroups": [],
     "pokeLlmReply": false,
@@ -72,6 +73,12 @@
       "label": "唤醒词",
       "type": "list",
       "description": "每行一个词；仅对群聊生效，消息正文含有任意一个（不区分大小写）就唤醒桌宠（无需 @）。留空表示不启用。"
+    },
+    {
+      "key": "wakeContextMessages",
+      "label": "唤醒附带的上下文条数",
+      "type": "number",
+      "description": "唤醒桌宠时附带该会话最近多少条消息，让模型不必主动调用 get_platform_messages 也能看懂上下文；0 表示不附带。"
     },
     {
       "key": "replyProbability",
