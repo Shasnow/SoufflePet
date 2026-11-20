@@ -14,27 +14,27 @@ namespace Live2DCSharpSDK.App;
 public class LAppModel : CubismUserModel
 {
     /// <summary>
-    /// モデルセッティング情報
+    /// 模型设置信息
     /// </summary>
     private readonly ModelSettingObj _modelSetting;
     /// <summary>
-    /// モデルセッティングが置かれたディレクトリ
+    /// 模型设置所在目录
     /// </summary>
     private readonly string _modelHomeDir;
     /// <summary>
-    /// モデルに設定されたまばたき機能用パラメータID
+    /// 模型中配置的眨眼功能参数 ID
     /// </summary>
     private readonly List<string> _eyeBlinkIds = [];
     /// <summary>
-    /// モデルに設定されたリップシンク機能用パラメータID
+    /// 模型中配置的口型同步功能参数 ID
     /// </summary>
     private readonly List<string> _lipSyncIds = [];
     /// <summary>
-    /// 読み込まれているモーションのリスト
+    /// 已加载的动作列表
     /// </summary>
     private readonly Dictionary<string, ACubismMotion> _motions = [];
     /// <summary>
-    /// 読み込まれている表情のリスト
+    /// 已加载的表情列表
     /// </summary>
     private readonly Dictionary<string, ACubismMotion> _expressions = [];
 
@@ -147,7 +147,7 @@ public class LAppModel : CubismUserModel
     public List<string> Parameters => new(Model.ParameterIds);
 
     /// <summary>
-    /// デルタ時間の積算値[秒]
+    /// 增量时间累计值[秒]
     /// </summary>
     public float UserTimeSeconds { get; set; }
 
@@ -173,27 +173,27 @@ public class LAppModel : CubismUserModel
     public Action<LAppModel>? PhysicsInputUpdate;
 
     /// <summary>
-    /// パラメータID: ParamAngleX
+    /// 参数 ID: ParamAngleX
     /// </summary>
     public string IdParamAngleX { get; set; }
     /// <summary>
-    /// パラメータID: ParamAngleY
+    /// 参数 ID: ParamAngleY
     /// </summary>
     public string IdParamAngleY { get; set; }
     /// <summary>
-    /// パラメータID: ParamAngleZ
+    /// 参数 ID: ParamAngleZ
     /// </summary>
     public string IdParamAngleZ { get; set; }
     /// <summary>
-    /// パラメータID: ParamBodyAngleX
+    /// 参数 ID: ParamBodyAngleX
     /// </summary>
     public string IdParamBodyAngleX { get; set; }
     /// <summary>
-    /// パラメータID: ParamEyeBallX
+    /// 参数 ID: ParamEyeBallX
     /// </summary>
     public string IdParamEyeBallX { get; set; }
     /// <summary>
-    /// パラメータID: ParamEyeBallXY
+    /// 参数 ID: ParamEyeBallY
     /// </summary>
     public string IdParamEyeBallY { get; set; }
 
@@ -201,7 +201,7 @@ public class LAppModel : CubismUserModel
         .GetId(CubismDefaultParameterId.ParamBreath);
 
     /// <summary>
-    /// wavファイルハンドラ
+    /// wav 文件处理器
     /// </summary>
     //LAppWavFileHandler _wavFileHandler;
 
@@ -245,7 +245,7 @@ public class LAppModel : CubismUserModel
         Updating = true;
         Initialized = false;
 
-        //Cubism Model
+        //Cubism 模型
         var path = _modelSetting.FileReferences?.Moc;
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -260,7 +260,7 @@ public class LAppModel : CubismUserModel
             LoadModel(File.ReadAllBytes(path), _mocConsistency);
         }
 
-        //Expression
+        //表情
         if (_modelSetting.FileReferences?.Expressions?.Count > 0)
         {
             for (int i = 0; i < _modelSetting.FileReferences.Expressions.Count; i++)
@@ -287,7 +287,7 @@ public class LAppModel : CubismUserModel
             }
         }
 
-        //Physics
+        //物理
         path = _modelSetting.FileReferences?.Physics;
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -298,7 +298,7 @@ public class LAppModel : CubismUserModel
             }
         }
 
-        //Pose
+        //姿势
         path = _modelSetting.FileReferences?.Pose;
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -309,7 +309,7 @@ public class LAppModel : CubismUserModel
             }
         }
 
-        //EyeBlink
+        //眨眼
         if (_modelSetting.IsExistEyeBlinkParameters())
         {
             _eyeBlink = new CubismEyeBlink(_modelSetting);
@@ -317,7 +317,7 @@ public class LAppModel : CubismUserModel
 
         LoadBreath();
 
-        //UserData
+        //用户数据
         path = _modelSetting.FileReferences?.UserData;
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -328,13 +328,13 @@ public class LAppModel : CubismUserModel
             }
         }
 
-        // EyeBlinkIds
+        // 眨眼参数 ID
         if (_eyeBlink != null)
         {
             _eyeBlinkIds.AddRange(_eyeBlink.ParameterIds);
         }
 
-        // LipSyncIds
+        // 口型同步参数 ID
         if (_modelSetting.IsExistLipSyncParameters())
         {
             foreach (var item in _modelSetting.Groups)
@@ -354,7 +354,7 @@ public class LAppModel : CubismUserModel
             _lipSyncIds.Add(CubismDefaultParameterId.ParamMouthForm);
         }
 
-        //Layout
+        //布局
         Dictionary<string, float> layout = [];
         _modelSetting.GetLayoutMap(layout);
         ModelMatrix.SetupFromLayout(layout);
@@ -389,7 +389,7 @@ public class LAppModel : CubismUserModel
         _motions.Clear();
         _expressions.Clear();
 
-        // Motions 整个节点缺失时（例如只带物理、不带动作的模型）这里是 null，
+        // 当 Motions 节点整体缺失时（例如只有物理、没有动作的模型），这里是 null，
         // 只给 FileReferences 判空会在卸载时抛 NullReferenceException
         if (_modelSetting.FileReferences?.Motions is { Count: > 0 } motions)
         {
@@ -408,7 +408,7 @@ public class LAppModel : CubismUserModel
 
     public void LoadBreath()
     {
-        //Breath
+        //呼吸
         _breath = new()
         {
             Parameters =
@@ -458,7 +458,7 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// レンダラを再構築する
+    /// 重建渲染器
     /// </summary>
     public void ReloadRenderer()
     {
@@ -470,7 +470,7 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// モデルの更新処理。モデルのパラメータから描画状態を決定する。
+    /// 模型更新处理。根据模型参数决定绘制状态。
     /// </summary>
     public void Update()
     {
@@ -482,17 +482,17 @@ public class LAppModel : CubismUserModel
         _dragY = _dragManager.FaceY;
 
         //-----------------------------------------------------------------
-        Model.LoadParameters(); // 前回セーブされた状態をロード
+        Model.LoadParameters(); // 加载上一次保存的状态
         if (_motionManager.IsFinished() && RandomMotion)
         {
-            // モーションの再生がない場合、待機モーションの中からランダムで再生する
+            // 没有动作在播放时，从待机动作中随机播放一个
             StartRandomMotion(LAppDefine.MotionGroupIdle, MotionPriority.PriorityIdle);
         }
         else
         {
-            _motionManager.UpdateMotion(Model, deltaTimeSeconds); // モーションを更新
+            _motionManager.UpdateMotion(Model, deltaTimeSeconds); // 更新动作
         }
-        Model.SaveParameters(); // 状態を保存
+        Model.SaveParameters(); // 保存状态
 
         //-----------------------------------------------------------------
 
@@ -502,9 +502,9 @@ public class LAppModel : CubismUserModel
         // 自动眨眼：待机动作是循环动作（Loop=true），每帧都会更新参数，
         // 因此不能照搬官方示例的 !motionUpdated 门控，否则永远不会眨眼。
         // 动作已通过 SetEffectIds 排除眨眼参数，这里直接叠加眨眼值即可。
-        _eyeBlink?.UpdateParameters(Model, deltaTimeSeconds); // 目パチ
+        _eyeBlink?.UpdateParameters(Model, deltaTimeSeconds); // 眨眼
 
-        _expressionManager?.UpdateMotion(Model, deltaTimeSeconds); // 表情でパラメータ更新（相対変化）
+        _expressionManager?.UpdateMotion(Model, deltaTimeSeconds); // 通过表情更新参数（相对变化）
         ApplyManualExpressions(deltaTimeSeconds);                  // 手动多选表情：按权重叠加写回
 
         if (CustomValueUpdate)
@@ -513,23 +513,23 @@ public class LAppModel : CubismUserModel
         }
         else if (EnableFaceTracking)
         {
-            //ドラッグによる変化
-            //ドラッグによる顔の向きの調整
-            Model.AddParameterValue(IdParamAngleX, _dragX * 30); // -30から30の値を加える
+            //拖拽带来的变化
+            //根据拖拽调整面部朝向
+            Model.AddParameterValue(IdParamAngleX, _dragX * 30); // 加上 -30 到 30 的值
             Model.AddParameterValue(IdParamAngleY, _dragY * 30);
             Model.AddParameterValue(IdParamAngleZ, _dragX * _dragY * -30);
 
-            //ドラッグによる体の向きの調整
-            Model.AddParameterValue(IdParamBodyAngleX, _dragX * 10); // -10から10の値を加える
+            //根据拖拽调整身体朝向
+            Model.AddParameterValue(IdParamBodyAngleX, _dragX * 10); // 加上 -10 到 10 的值
 
-            //ドラッグによる目の向きの調整
-            Model.AddParameterValue(IdParamEyeBallX, _dragX); // -1から1の値を加える
+            //根据拖拽调整视线方向
+            Model.AddParameterValue(IdParamEyeBallX, _dragX); // 加上 -1 到 1 的值
             Model.AddParameterValue(IdParamEyeBallY, _dragY);
         }
         // 目光跟随关闭：跳过拖拽角度参数。LoadParameters 每帧重置为保存值，
         // 上一帧的角度自然回正，无需手动清理拖拽残留值。
 
-        // 呼吸など
+        // 呼吸等
         _breath?.UpdateParameters(Model, deltaTimeSeconds);
 
         // 手柄摇杆/按键：由宿主实时写入（必须在 SaveParameters 之后——Update 开头会
@@ -541,13 +541,13 @@ public class LAppModel : CubismUserModel
         // 模型自定义物理输入（VTS 面捕映射参数）：同样在物理演算之前写入
         PhysicsInputUpdate?.Invoke(this);
 
-        // 物理演算の設定
+        // 物理演算设置
         _physics?.Evaluate(Model, deltaTimeSeconds);
 
-        // リップシンクの設定
+        // 口型同步设置
         if (_lipSync)
         {
-            // リアルタイムでリップシンクを行う場合、システムから音量を取得して0〜1の範囲で値を入力します。
+            // 实时进行口型同步时，从系统获取音量并以 0〜1 的范围输入数值。
             // 口型音量改由外部每帧写入，不再写死 0：
             //   第 1 个口型参数（Ids[0]，嘴开闭）写 LipSyncValue，其余（Ids[1]，水平宽窄）写 LipSyncWideValue
             for (int i = 0; i < _lipSyncIds.Count; ++i)
@@ -557,16 +557,16 @@ public class LAppModel : CubismUserModel
             }
         }
 
-        // ポーズの設定
+        // 姿势设置
         _pose?.UpdateParameters(Model, deltaTimeSeconds);
 
         Model.Update();
     }
 
     /// <summary>
-    /// モデルを描画する処理。モデルを描画する空間のView-Projection行列を渡す。
+    /// 模型绘制处理。传入模型绘制空间的 View-Projection 矩阵。
     /// </summary>
-    /// <param name="matrix">View-Projection行列</param>
+    /// <param name="matrix">View-Projection 矩阵</param>
     public void Draw(CubismMatrix44 matrix)
     {
         if (Model == null)
@@ -584,13 +584,13 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// 引数で指定したモーションの再生を開始する。
+    /// 开始播放参数指定的动作。
     /// </summary>
-    /// <param name="group">モーショングループ名</param>
-    /// <param name="no">グループ内の番号</param>
-    /// <param name="priority">優先度</param>
-    /// <param name="onFinishedMotionHandler">モーション再生終了時に呼び出されるコールバック関数。NULLの場合、呼び出されない。</param>
-    /// <returns>開始したモーションの識別番号を返す。個別のモーションが終了したか否かを判定するIsFinished()の引数で使用する。開始できない時は「-1」</returns>
+    /// <param name="group">动作组名</param>
+    /// <param name="no">组内编号</param>
+    /// <param name="priority">优先级</param>
+    /// <param name="onFinishedMotionHandler">动作播放结束时调用的回调函数。为 NULL 时不会调用。</param>
+    /// <returns>返回开始播放的动作识别号。可作为判断单个动作是否结束的 IsFinished() 参数使用。无法开始时返回「-1」</returns>
     public CubismMotionQueueEntry? StartMotion(string name, MotionPriority priority, FinishedMotionCallback? onFinishedMotionHandler = null)
     {
         var temp = name.Split("_");
@@ -615,7 +615,7 @@ public class LAppModel : CubismUserModel
 
         var item = _modelSetting.FileReferences.Motions[group][no];
 
-        //ex) idle_0
+        //例如 idle_0
         string name = $"{group}_{no}";
 
         CubismMotion motion;
@@ -648,7 +648,7 @@ public class LAppModel : CubismUserModel
             motion.OnFinishedMotion = onFinishedMotionHandler;
         }
 
-        //voice
+        //语音
         string voice = item.Sound;
         if (!string.IsNullOrWhiteSpace(voice))
         {
@@ -662,12 +662,12 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// ランダムに選ばれたモーションの再生を開始する。
+    /// 开始播放随机选中的动作。
     /// </summary>
-    /// <param name="group">モーショングループ名</param>
-    /// <param name="priority">優先度</param>
-    /// <param name="onFinishedMotionHandler">モーション再生終了時に呼び出されるコールバック関数。NULLの場合、呼び出されない。</param>
-    /// <returns>開始したモーションの識別番号を返す。個別のモーションが終了したか否かを判定するIsFinished()の引数で使用する。開始できない時は「-1」</returns>
+    /// <param name="group">动作组名</param>
+    /// <param name="priority">优先级</param>
+    /// <param name="onFinishedMotionHandler">动作播放结束时调用的回调函数。为 NULL 时不会调用。</param>
+    /// <returns>返回开始播放的动作识别号。可作为判断单个动作是否结束的 IsFinished() 参数使用。无法开始时返回「-1」</returns>
     public object? StartRandomMotion(string group, MotionPriority priority, FinishedMotionCallback? onFinishedMotionHandler = null)
     {
         if (_modelSetting.FileReferences?.Motions?.ContainsKey(group) == true)
@@ -680,9 +680,9 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// 引数で指定した表情モーションをセットする
+    /// 设置由参数指定的表情动作
     /// </summary>
-    /// <param name="expressionID">表情モーションのID</param>
+    /// <param name="expressionID">表情动作 ID</param>
     public void SetExpression(string expressionID)
     {
         // 表情名不存在时直接忽略：切换模型后旧模型的自动表情配置（settings 里的表情名）
@@ -699,7 +699,7 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// ランダムに選ばれた表情モーションをセットする
+    /// 设置随机选中的表情动作
     /// </summary>
     public void SetRandomExpression()
     {
@@ -801,7 +801,7 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// イベントの発火を受け取る
+    /// 接收事件触发
     /// </summary>
     /// <param name="eventValue"></param>
     protected override void MotionEventFired(string eventValue)
@@ -811,16 +811,16 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// 当たり判定テスト。
-    /// 指定IDの頂点リストから矩形を計算し、座標が矩形範囲内か判定する。
+    /// 命中检测。
+    /// 根据指定 ID 的顶点列表计算矩形，判断坐标是否在矩形范围内。
     /// </summary>
-    /// <param name="hitAreaName">当たり判定をテストする対象のID</param>
-    /// <param name="x">判定を行うX座標</param>
-    /// <param name="y">判定を行うY座標</param>
+    /// <param name="hitAreaName">需要进行命中检测的目标 ID</param>
+    /// <param name="x">判定用的 X 坐标</param>
+    /// <param name="y">判定用的 Y 坐标</param>
     /// <returns></returns>
     public bool HitTest(string hitAreaName, float x, float y)
     {
-        // 透明時は当たり判定なし。
+        // 透明时不做命中检测。
         if (Opacity < 1)
         {
             return false;
@@ -837,11 +837,11 @@ public class LAppModel : CubismUserModel
                 }
             }
         }
-        return false; // 存在しない場合はfalse
+        return false; // 不存在时返回 false
     }
 
     /// <summary>
-    /// モデルを描画する処理。モデルを描画する空間のView-Projection行列を渡す。
+    /// 模型绘制处理。传入模型绘制空间的 View-Projection 矩阵。
     /// </summary>
     protected void DoDraw()
     {
@@ -854,22 +854,22 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// モーションデータをグループ名から一括で解放する。
-    /// モーションデータの名前は内部でModelSettingから取得する。
+    /// 按组名批量释放动作数据。
+    /// 动作数据的名称在内部从 ModelSetting 获取。
     /// </summary>
-    /// <param name="group">モーションデータのグループ名</param>
+    /// <param name="group">动作数据组名</param>
     private void ReleaseMotionGroup(string group)
     {
         var list = _modelSetting.FileReferences.Motions[group];
         for (int i = 0; i < list.Count; i++)
         {
             string voice = list[i].Sound;
-            //TODO Voice
+            //TODO 语音
         }
     }
 
     /// <summary>
-    /// OpenGLのテクスチャユニットにテクスチャをロードする
+    /// 将纹理加载到 OpenGL 的纹理单元中
     /// </summary>
     private void SetupTextures()
     {
@@ -888,34 +888,34 @@ public class LAppModel : CubismUserModel
     }
 
     /// <summary>
-    /// モーションデータをグループ名から一括でロードする。
-    /// モーションデータの名前は内部でModelSettingから取得する。
+    /// 按组名批量加载动作数据。
+    /// 动作数据的名称在内部从 ModelSetting 获取。
     /// </summary>
-    /// <param name="group">モーションデータのグループ名</param>
+    /// <param name="group">动作数据组名</param>
     private void PreloadMotionGroup(string group)
     {
-        // グループに登録されているモーション数を取得
+        // 获取该组中登记的动作数量
         var list = _modelSetting.FileReferences.Motions[group];
 
         for (int i = 0; i < list.Count; i++)
         {
             var item = list[i];
-            //ex) idle_0
-            // モーションのファイル名とパスの取得
+            //例如 idle_0
+            // 获取动作的文件名与路径
             string name = $"{group}_{i}";
             var path = Path.GetFullPath(_modelHomeDir + item.File);
 
-            // モーションデータの読み込み
+            // 读取动作数据
             var tmpMotion = new CubismMotion(path);
 
-            // フェードインの時間を取得
+            // 获取淡入时间
             float fadeTime = item.FadeInTime;
             if (fadeTime >= 0.0f)
             {
                 tmpMotion.FadeInSeconds = fadeTime;
             }
 
-            // フェードアウトの時間を取得
+            // 获取淡出时间
             fadeTime = item.FadeOutTime;
             if (fadeTime >= 0.0f)
             {
