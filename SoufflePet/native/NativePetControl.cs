@@ -94,6 +94,15 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     /// <summary>VTS 面捕映射：把标准角度参数同步到模型作者在 .vtube.json 声明的自定义物理输入。</summary>
     private VtsInputBinding[] _vtsInputs = [];
 
+    /// <summary>
+    /// 宿主目光跟随已经直接写入的标准参数。.vtube.json 里针对这些参数的条目是给 VTS 自己的
+    /// FaceAngleX/Y/Z 用的，宿主再套一遍等于二次缩放（如本模型 ParamAngleY 为 -15~15 → -30~30，
+    /// 放大 2 倍），叠加后立刻撞上参数上下限：头部在边缘长时间不动，物理驱动的头发/衣摆
+    /// 也随之"冻住"再突然跳变。因此这些目标参数一律跳过，只保留自定义物理输入。
+    /// </summary>
+    private static readonly HashSet<string> HostDrivenParameters =
+        ["ParamAngleX", "ParamAngleY", "ParamAngleZ", "ParamBodyAngleX"];
+
     /// <summary>隐藏超时后的卸载请求：窗口层置位，渲染线程在下一次拿到的帧里释放模型。</summary>
     private volatile bool _unloadRequested;
 
@@ -920,9 +929,10 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
     }
 
     /// <summary>
-    /// 解析模型目录下的 *.vtube.json，只取 Input 为面捕角度（FaceAngleX/Y/Z）的条目：
-    /// 这类模型的 physics3.json 用作者自定义的参数（AngleX、PositionX 等）当物理输入，
-    /// 宿主不产生这些值，物理链就会一直停在默认值上。
+    /// 解析模型目录下的 *.vtube.json，只取 Input 为面捕角度（FaceAngleX/Y/Z）、且输出为
+    /// 宿主尚未驱动的自定义参数的条目：这类模型的 physics3.json 用作者自定义的参数
+    /// （AngleX、PositionX 等）当物理输入，宿主不产生这些值，物理链就会一直停在默认值上。
+    /// 输出是 ParamAngleX/Y/Z、ParamBodyAngleX 的条目会被跳过（见 <see cref="HostDrivenParameters"/>）。
     /// </summary>
     private void LoadVtsInputMappings()
     {
@@ -952,6 +962,7 @@ public class NativePetControl(SouffleSettings settings) : OpenGlControlBase
 
                 if (source == null
                     || string.IsNullOrWhiteSpace(setting.OutputLive2D)
+                    || HostDrivenParameters.Contains(setting.OutputLive2D)
                     || setting.InputRangeLower == setting.InputRangeUpper)
                 {
                     continue;
