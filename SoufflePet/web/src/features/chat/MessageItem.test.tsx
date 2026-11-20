@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Shasnow
 
 import { describe, expect, it, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import type { ChatMessageDto } from '@/bridge/contracts'
 import { MessageItem } from './MessageItem'
 
@@ -66,5 +66,40 @@ describe('MessageItem', () => {
     const title = container.querySelector('.bubble-tool .collapse-title')
     expect(title?.textContent).toBe('运行命令 · npm test')
     expect(title?.getAttribute('title')).toBe('run_shell_command')
+  })
+
+  it('系统消息可展开查看原始文本', () => {
+    const message: ChatMessageDto = {
+      id: 'm-notice',
+      kind: 'notice',
+      text: '⏰ 定时任务「日报」：整理今天的日报',
+      rawText: '<scheduled_task name="日报">\n整理今天的日报，并按项目汇总\n</scheduled_task>',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+    }
+
+    const { container } = render(<MessageItem sessionId="s1" message={message} streaming={false} />)
+    expect(container.querySelector('.notice-raw')).toBeNull()
+    const toggle = container.querySelector('.notice-toggle') as HTMLButtonElement
+    expect(toggle.textContent).toContain('查看原文')
+
+    fireEvent.click(toggle)
+    expect(container.querySelector('.notice-raw')?.textContent).toContain('按项目汇总')
+    expect(toggle.textContent).toContain('收起原文')
+
+    fireEvent.click(toggle)
+    expect(container.querySelector('.notice-raw')).toBeNull()
+  })
+
+  it('原始文本与摘要相同时不显示展开入口', () => {
+    const message: ChatMessageDto = {
+      id: 'm-notice-plain',
+      kind: 'notice',
+      text: '同一条内容',
+      rawText: '同一条内容',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+    }
+
+    const { container } = render(<MessageItem sessionId="s1" message={message} streaming={false} />)
+    expect(container.querySelector('.notice-toggle')).toBeNull()
   })
 })

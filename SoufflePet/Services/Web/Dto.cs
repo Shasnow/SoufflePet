@@ -96,7 +96,8 @@ public sealed record ChatMessageDto(
     ToolDetailDto? Tool = null,
     UsageDto? Usage = null,
     AttachmentDto? Attachment = null,
-    ApprovalDetailDto? Approval = null);
+    ApprovalDetailDto? Approval = null,
+    string? RawText = null);
 
 public sealed record ChatSnapshotDto(
     string SessionId,

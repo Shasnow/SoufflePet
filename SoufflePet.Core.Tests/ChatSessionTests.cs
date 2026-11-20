@@ -130,6 +130,45 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SystemNoticeKeepsRawTextForExpansion()
+    {
+        var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("收到"))));
+        var session = manager.ActiveSession!;
+        const string prompt = "<scheduled_task name=\"日报\">\n整理今天的日报\n</scheduled_task>";
+        const string display = "⏰ 定时任务「日报」：整理今天的日报";
+
+        await session.EnqueueSystemTurnAsync(prompt, display, isPlatformNotice: true);
+        var notice = await WaitForAsync(() =>
+            session.Snapshot.Messages.FirstOrDefault(message => message.Kind == ChatMessageKinds.Notice));
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(display, notice.Text);
+        Assert.Equal(prompt, notice.RawText);
+
+        // 重新打开会话后，摘要与原始文本都要恢复
+        var id = session.Id;
+        await manager.DisposeAsync();
+        _manager = null!;
+
+        var reloaded = new ChatSessionManager(_settings, _factory, _store);
+        try
+        {
+            var opened = await reloaded.OpenAsync(id, CancellationToken.None);
+            var restored = opened.Snapshot.Messages.First(message => message.Kind == ChatMessageKinds.Notice);
+            Assert.Equal(display, restored.Text);
+            Assert.Equal(prompt, restored.RawText);
+
+            // 只有提醒气泡带原文：普通用户/助手消息不下发重复的原始文本
+            Assert.All(opened.Snapshot.Messages.Where(message => message.Kind != ChatMessageKinds.Notice),
+                message => Assert.Null(message.RawText));
+        }
+        finally
+        {
+            await reloaded.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task CloseUnloadsIdleSessionAndReopensFromDisk()
     {
         var manager = CreateManager(new FakeLlm((_, _, _) => Streams(new LlmTextDelta("好"))));

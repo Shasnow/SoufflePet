@@ -1330,6 +1330,39 @@ body.is-resizing-sidebar .sidebar {
   font-size: 13px;
 }
 
+/* 系统/平台提醒：display 摘要展开查看原始文本 */
+.notice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notice-toggle:hover {
+  color: var(--text-1);
+}
+
+.notice-raw {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .bubble-approval {
   border-color: var(--warning);
   background: var(--warning-soft);

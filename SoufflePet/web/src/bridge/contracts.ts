@@ -113,6 +113,8 @@ export interface ChatMessageDto {
   usage?: UsageDto
   attachment?: AttachmentDto
   approval?: ApprovalDetailDto
+  /** 展示文本背后的原始内容（系统/平台提醒）；与 text 不同时气泡可展开查看。 */
+  rawText?: string
 }
 
 export interface ChatSnapshotDto {

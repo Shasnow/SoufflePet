@@ -180,7 +180,8 @@ public sealed class SubagentService(SouffleSettings settings, Func<ChatSessionMa
         var session = await manager.ResolveAsync(target.Id, cancellationToken).ConfigureAwait(false);
         if (session.IsBusy)
         {
-            await session.EnqueueSystemTurnAsync(message, ChatSession.PreviewNotice(message), isPlatformNotice: false)
+            // 系统注入的提醒（与平台消息同类）：重开会话后保持提醒气泡与「查看原文」入口
+            await session.EnqueueSystemTurnAsync(message, ChatSession.PreviewNotice(message), isPlatformNotice: true)
                 .ConfigureAwait(false);
             return $"子代理「{target.Title}」正在执行，消息已排队，会在当前轮结束后处理。";
         }

@@ -33,6 +33,7 @@ function reasoningHeader(message: ChatMessageDto): string {
 function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
   const [copied, setCopied] = useState(false)
   const [deciding, setDeciding] = useState(false)
+  const [rawExpanded, setRawExpanded] = useState(false)
 
   const copy = async () => {
     try {
@@ -170,18 +171,40 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
       )
     }
 
-    case 'notice':
+    case 'notice': {
+      const rawText = message.rawText?.trim() ?? ''
+      const canExpand = rawText.length > 0 && rawText !== message.text.trim()
       return (
         <div className="message-row" data-kind="notice">
           <div className="bubble bubble-notice">
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <Info size={14} style={{ marginTop: 3, flex: 'none', color: 'var(--text-3)' }} />
-              <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
+                {rawExpanded && canExpand ? <pre className="notice-raw">{rawText}</pre> : null}
+                {canExpand ? (
+                  <button
+                    type="button"
+                    className="notice-toggle"
+                    onClick={() => setRawExpanded((value) => !value)}
+                  >
+                    <ChevronDown
+                      size={11}
+                      style={{
+                        transform: rawExpanded ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 120ms ease',
+                      }}
+                    />
+                    {rawExpanded ? '收起原文' : '查看原文'}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
           {meta}
         </div>
       )
+    }
 
     case 'approval':
       return (

@@ -1103,7 +1103,7 @@ public sealed class ChatSession : IAsyncDisposable
                     _cts = new CancellationTokenSource();
                     EmitLocked(new ChatOpTurn(true));
 
-                    var notice = NewMessage(ChatMessageKinds.Notice, turn.Display);
+                    var notice = NewMessage(ChatMessageKinds.Notice, turn.Display, rawText: turn.Prompt);
                     _messages.Add(notice);
                     EmitLocked(new ChatOpMessageAdd(notice.ToState()));
                 }
@@ -1431,7 +1431,9 @@ public sealed class ChatSession : IAsyncDisposable
             var kind = isPlatformNotice ? ChatMessageKinds.Notice
                 : isUser ? ChatMessageKinds.User
                 : ChatMessageKinds.Assistant;
-            var restored = NewMessage(kind, DisplayText(bubbleText), time: turn.Time);
+            var restored = NewMessage(kind, DisplayText(bubbleText), time: turn.Time,
+                // 只有系统/平台提醒需要「查看原文」：普通用户消息的原始文本就是正文（还可能带 @绝对路径），不必再下发一份
+                rawText: isPlatformNotice ? turn.Text : null);
             if (!isUser && turn.InputTokens is { } input)
                 restored.Usage = new ChatUsageState(input, turn.OutputTokens ?? 0,
                     turn.CachedInputTokens ?? 0, turn.Model, turn.Time);
@@ -1919,7 +1921,8 @@ public sealed class ChatSession : IAsyncDisposable
         ChatToolState? tool = null,
         ChatAttachmentState? attachment = null,
         ChatApprovalState? approval = null,
-        DateTimeOffset? time = null) =>
+        DateTimeOffset? time = null,
+        string? rawText = null) =>
         new()
         {
             Id = NewMessageId("m"),
@@ -1931,6 +1934,7 @@ public sealed class ChatSession : IAsyncDisposable
             Tool = tool,
             Attachment = attachment,
             Approval = approval,
+            RawText = rawText,
         };
 
     public async ValueTask DisposeAsync()
@@ -2009,6 +2013,9 @@ public sealed class ChatSession : IAsyncDisposable
 
         public ChatApprovalState? Approval { get; set; }
 
+        /// <summary>展示文本背后的原始内容；界面据此提供「查看原文」。</summary>
+        public string? RawText { get; set; }
+
         public void Apply(ChatMessagePatch patch)
         {
             if (patch.Kind is not null) Kind = patch.Kind;
@@ -2033,6 +2040,7 @@ public sealed class ChatSession : IAsyncDisposable
             Tool,
             Usage,
             Attachment,
-            Approval);
+            Approval,
+            RawText);
     }
 }

@@ -532,7 +532,8 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         MapAttachment(message.Attachment),
         message.Approval is { } approval
             ? new ApprovalDetailDto(approval.ToolName, approval.Detail, approval.Pending, approval.Outcome)
-            : null);
+            : null,
+        message.RawText);
 
     private static IReadOnlyList<FileDiffDto>? MapDiffs(IReadOnlyList<ChatFileDiffState>? diffs)
     {

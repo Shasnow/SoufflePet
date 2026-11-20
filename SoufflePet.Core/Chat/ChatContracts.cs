@@ -100,7 +100,8 @@ public sealed record ChatMessageState(
     ChatToolState? Tool = null,
     ChatUsageState? Usage = null,
     ChatAttachmentState? Attachment = null,
-    ChatApprovalState? Approval = null);
+    ChatApprovalState? Approval = null,
+    string? RawText = null);
 
 /// <summary>一个会话的完整快照：页面刷新或切回会话时据此重建界面。</summary>
 public sealed record ChatSessionSnapshot(

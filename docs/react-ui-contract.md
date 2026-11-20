@@ -155,6 +155,7 @@ interface ChatMessageDto {
     pending: boolean
     outcome?: 'approved' | 'rejected' | 'cancelled'
   }
+  rawText?: string               // display 文本背后的原始内容；与 text 不同时气泡可展开查看
 }
 
 interface ChatSnapshotDto {
