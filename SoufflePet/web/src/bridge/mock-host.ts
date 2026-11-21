@@ -22,6 +22,7 @@ import type {
   ScheduledTaskLogDto,
   SessionSummaryDto,
   SkillDto,
+  SlashCommandDto,
   TaskDto,
   TaskInputDto,
   ThemeDto,
@@ -67,6 +68,110 @@ const MODELS: ChatModelDto[] = [
     modelId: 'gpt-4.1',
   },
 ]
+
+const SLASH_COMMANDS: SlashCommandDto[] = [
+  {
+    name: 'model',
+    usage: '/model [模型名称/模型ID]',
+    summary: '切换当前会话使用的对话模型',
+    description: '切换当前会话使用的对话模型：可以填模型名称、模型标识或序号；不带参数时列出全部可用模型。',
+    argumentKind: 'model',
+    argumentLabel: '模型名称/模型ID',
+    aliases: ['m', 'models'],
+  },
+  {
+    name: 'approval',
+    usage: '/approval [manual/full]',
+    summary: '切换工具审批模式',
+    description: 'manual 每次调用工具都要确认，full 直接放行。',
+    argumentKind: 'approval',
+    argumentLabel: 'manual/full',
+    aliases: ['approve'],
+  },
+  {
+    name: 'stop',
+    usage: '/stop',
+    summary: '停止当前正在生成的回复',
+    description: '停止当前会话正在生成的回复，已输出的内容会保留。',
+    argumentKind: 'none',
+    aliases: ['cancel'],
+  },
+  {
+    name: 'help',
+    usage: '/help',
+    summary: '列出全部命令',
+    description: '列出全部命令与用法。',
+    argumentKind: 'none',
+    aliases: ['?'],
+  },
+]
+
+interface MockCommandResult {
+  ok: boolean
+  message: string
+  modelKey?: string
+  ops?: ChatOp[]
+}
+
+/** mock 宿主里的命令执行：语义与宿主一致，错误信息可直接展示。 */
+function executeMockCommand(
+  command: SlashCommandDto,
+  argument: string,
+  chat: ChatSnapshotDto,
+): MockCommandResult {
+  if (command.name === 'help') {
+    return {
+      ok: true,
+      message: SLASH_COMMANDS.map((item) => `${item.usage} · ${item.summary}`).join('\n'),
+    }
+  }
+
+  if (command.name === 'model') {
+    if (!argument) {
+      const listing = MODELS.map(
+        (model, index) => `  ${index + 1}. ${model.name}（${model.provider} · ${model.modelId}）`,
+      ).join('\n')
+      return { ok: false, message: `当前模型：${chat.selectedModelKey ?? '未选择'}。\n可用模型：\n${listing}` }
+    }
+
+    const query = argument.toLowerCase()
+    const model =
+      MODELS.find((item) => item.name.toLowerCase() === query) ??
+      MODELS.find((item) => item.modelId.toLowerCase() === query) ??
+      MODELS.find((item) => `${item.provider}/${item.modelId}`.toLowerCase() === query) ??
+      MODELS.find(
+        (item) => item.name.toLowerCase().includes(query) || item.modelId.toLowerCase().includes(query),
+      )
+    if (!model) {
+      return { ok: false, message: `没有匹配「${argument}」的模型，输入 /model 查看当前可用模型。` }
+    }
+
+    chat.selectedModelKey = model.key
+    return {
+      ok: true,
+      message: `已切换模型：${model.name}，本会话立即生效，并记为默认模型（新会话沿用）。`,
+      modelKey: model.key,
+      ops: [{ op: 'models', models: MODELS, selectedModelKey: model.key }],
+    }
+  }
+
+  if (command.name === 'approval') {
+    const mode = argument.toLowerCase()
+    if (mode !== 'manual' && mode !== 'full') {
+      return { ok: false, message: `未知的审批模式「${argument}」，只能是 manual 或 full。` }
+    }
+    chat.approvalMode = mode
+    return {
+      ok: true,
+      message: mode === 'full'
+        ? '已切换为 full：工具调用直接放行（全局默认，当前及之后新开的会话都生效）。'
+        : '已切换为 manual：工具调用前需要确认（全局默认，当前及之后新开的会话都生效）。',
+      ops: [{ op: 'approval', mode }],
+    }
+  }
+
+  return { ok: true, message: `${command.summary}。` }
+}
 
 const USAGE_SESSION: UsageDto = {
   inputTokens: 12_480,
@@ -1154,6 +1259,47 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             chat.selectedModelKey = key
             emitOps(sessionId!, [{ op: 'models', models: MODELS, selectedModelKey: key }])
             response(id, null)
+            return
+          }
+          case 'chat.command.list':
+            response(id, { commands: SLASH_COMMANDS })
+            return
+          case 'chat.command.execute': {
+            const sessionId = targetSessionId(payload)
+            const chat = sessionId ? getSessionChat(sessionId) : undefined
+            if (!chat) {
+              fail(id, 'not_found', '会话不存在')
+              return
+            }
+
+            const text = String(payload.text ?? '').trim()
+            const body = text.replace(/^\//, '')
+            const space = body.search(/\s/)
+            const name = space < 0 ? body : body.slice(0, space)
+            const argument = space < 0 ? '' : body.slice(space + 1).trim()
+            const command = SLASH_COMMANDS.find(
+              (item) => item.name === name || item.aliases.includes(name),
+            )
+            if (!command) {
+              response(id, { ok: false, command: name, message: `没有 /${name} 这条命令，输入 /help 查看全部命令。` })
+              return
+            }
+
+            const result = executeMockCommand(command, argument, chat)
+            if (result.ok) {
+              // 与宿主一致：命令来自输入框时成功后清掉草稿（默认 true），
+              // 否则重新打开会话时快照会带回旧命令、面板自动弹回
+              if (payload.clearDraft !== false) chat.draft = ''
+              const notice = {
+                id: newId('m'),
+                kind: 'notice' as const,
+                text: `${command.usage} · ${result.message}`,
+                time: timeLabel(),
+              }
+              chat.messages = [...chat.messages, notice]
+              emitOps(sessionId!, [{ op: 'msg:add', msg: notice }, ...(result.ops ?? [])])
+            }
+            response(id, { ok: result.ok, command: command.name, message: result.message, modelKey: result.modelKey })
             return
           }
           case 'chat.approval.mode': {

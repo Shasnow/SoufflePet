@@ -293,6 +293,29 @@ public sealed class ChatSession : IAsyncDisposable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 追加一条界面提示气泡（命令的执行结果等）：只出现在当前会话的可见消息里，
+    /// 不写进模型上下文，也不改标题。
+    /// 注意这些气泡**不落盘**：页面刷新后仍在（会话还在内存里），但会话关闭 / 空闲卸载
+    /// 或应用重启后就不会再出现（历史只保存用户/助手消息）。
+    /// </summary>
+    public Task AddNoticeAsync(string text, string? rawText = null)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+
+        lock (_gate)
+        {
+            if (_disposed) return Task.CompletedTask;
+            var message = NewMessage(ChatMessageKinds.Notice, text, rawText: rawText);
+            _messages.Add(message);
+            EmitLocked(new ChatOpMessageAdd(message.ToState()));
+        }
+
+        TrimMessages();
+        RaiseSummary();
+        return Task.CompletedTask;
+    }
+
     public Task SetDraftAsync(string text)
     {
         lock (_gate) _draft = text;

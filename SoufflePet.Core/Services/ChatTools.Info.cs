@@ -401,21 +401,25 @@ public sealed partial class ChatTools
     private static string WorkspaceText(string? workspacePath) =>
         string.IsNullOrWhiteSpace(workspacePath) ? "（默认）" : workspacePath;
 
-    /// <summary>读取指定会话的最近消息；会话 id 取自平台消息前缀（如 group:12345、private:777）。</summary>
+    /// <summary>
+    /// 读取指定会话的最近消息。会话 id 取自平台消息的
+    /// <c>&lt;platform_message conversation="…"&gt;</c> 属性（正文本身不带会话前缀），
+    /// 不确定时先用 <c>list_platform_conversations</c> 查询。
+    /// </summary>
     private Task<string> GetPlatformMessages(
         [Description("消息平台 id，例如 napcat")]
         string platform,
-        [Description("会话 id，形如 group:12345 或 private:777")]
+        [Description(PlatformPromptHints.ConversationParameter)]
         string conversation,
         [Description("最多读取多少条最近消息，默认 20")]
         int limit = 20)
         => _platforms.GetMessagesAsync(platform, conversation, limit);
 
-    /// <summary>向指定会话发送消息。</summary>
+    /// <summary>向指定会话发送消息；会话 id 取自 <c>&lt;platform_message conversation="…"&gt;</c> 属性。</summary>
     private Task<string> SendPlatformMessage(
         [Description("消息平台 id，例如 napcat")]
         string platform,
-        [Description("会话 id，形如 group:12345 或 private:777")]
+        [Description(PlatformPromptHints.ConversationParameter)]
         string conversation,
         [Description("要发送的消息内容")]
         string message)
@@ -425,7 +429,7 @@ public sealed partial class ChatTools
     private async Task<string> SendPlatformAttachment(
         [Description("消息平台 id，例如 napcat")]
         string platform,
-        [Description("会话 id，形如 group:12345 或 private:777")]
+        [Description(PlatformPromptHints.ConversationParameter)]
         string conversation,
         [Description("本地文件的绝对路径")]
         string path,

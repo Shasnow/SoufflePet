@@ -333,6 +333,29 @@ export interface WindowStateDto {
   maximized: boolean
 }
 
+/** 命令的参数类型：none 无参数，model / approval 由界面给出候选。 */
+export type SlashCommandArgumentKind = 'none' | 'model' | 'approval'
+
+/** 一条命令的定义（由宿主 chat.command.list 提供，界面据此渲染菜单与预览）。 */
+export interface SlashCommandDto {
+  name: string
+  /** 完整用法，含参数占位，例如「/model [模型名称/模型ID]」。 */
+  usage: string
+  summary: string
+  description: string
+  argumentKind: SlashCommandArgumentKind
+  argumentLabel?: string
+  aliases: string[]
+}
+
+/** 命令的执行结果；ok 为 false 时 message 是可直接展示的原因。 */
+export interface SlashCommandResultDto {
+  ok: boolean
+  command: string
+  message: string
+  modelKey?: string
+}
+
 export interface HostLogDto {
   level: 'debug' | 'info' | 'warn' | 'error'
   msg: string

@@ -814,7 +814,7 @@ public sealed class LlmChatService(
             {
                 // 平台提示词可能是多行：首行跟在列表项后面，其余行续行缩进，避免与全局说明混在一起
                 var lines = entry.Prompt!.Trim().Split('\n');
-                builder.Append("- ").Append(entry.Id).Append(':').AppendLine(lines[0].TrimEnd('\r'));
+                builder.Append($"- {entry.Id}: ").AppendLine(lines[0].TrimEnd('\r'));
                 for (var index = 1; index < lines.Length; index++)
                 {
                     var line = lines[index].TrimEnd('\r').Trim();
@@ -823,7 +823,7 @@ public sealed class LlmChatService(
             }
         }
         builder.AppendLine();
-        builder.AppendLine("当消息被 `<platform_message>` 标记包裹时：`<context>` 是此前的会话记录，`<content>` 是本次需要回应的消息；信息不足时再用 `get_platform_messages` 查看该会话更早的消息，回复用 `send_platform_message` 工具发送");
+        builder.AppendLine(PlatformPromptHints.PlatformMessageGuide);
     }
 
     /// <summary>

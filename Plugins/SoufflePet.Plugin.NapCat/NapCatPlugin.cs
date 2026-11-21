@@ -59,6 +59,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// <summary>收到需要桌宠处理的消息时触发，由宿主订阅后唤醒桌宠。</summary>
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;
 
+    /// <summary>只有插件设置里「命令管理员」列出的 QQ 号才能在平台消息里执行 /model 等命令。</summary>
+    public bool AllowsPlatformCommands(string? senderId) =>
+        long.TryParse(senderId?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId)
+        && _config.CommandAdmins.Contains(userId);
+
     protected override Task OnInitializedAsync(CancellationToken cancellationToken)
     {
         _config = NapCatConfig.Load(Context.Configuration, Context.PluginDirectory);
@@ -270,11 +275,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     selfId,
                     collectForwards: true);
                 var text = parsed.Text;
-                if (string.IsNullOrWhiteSpace(text)) continue;
-
-                // 反查过的引用直接用缓存里的摘要替换占位，没缓存过就保留「引用消息」
-                if (parsed.QuotedId is { } quotedHistoryId && _quotes!.TryGetQuoteLabel(quotedHistoryId) is { } quotedLabel)
-                    text = text.Replace(NapCatMessageParser.QuotePlaceholder, quotedLabel, StringComparison.Ordinal);
+                // 只有 @ / 引用、没有正文的消息也是历史的一部分（展示行会写「无正文」）
+                if (string.IsNullOrWhiteSpace(text) && !parsed.MentionsSelf && parsed.QuotedId is null) continue;
 
                 if (parsed.Forwards is { Count: > 0 } historyForwards)
                 {
@@ -291,7 +293,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                 var sender = NapCatMessageParser.GetSenderName(
                     message,
                     NapCatMessageParser.GetInt64(message, "user_id"));
-                lines.Add($"[{id}] {sender}：{text}");
+                // @ 与引用同样是字段：引用摘要优先取反查缓存，没缓存过就只显示「引用」
+                var quote = parsed.QuotedId is { } quotedHistoryId ? _quotes!.TryGetQuote(quotedHistoryId) : null;
+                lines.Add(NapCatStoredMessage.Format(
+                    sender, text, parsed.MentionsSelf, quote, parsed.QuotedId is not null));
             }
 
             Context.Logger.LogInformation("从 NapCat 读取会话 {Conversation} 的历史消息 {Count} 条", id, lines.Count);
@@ -370,7 +375,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             _config.DownloadAttachments,
             collectForwards: true);
         var text = parsed.Text;
-        if (string.IsNullOrWhiteSpace(text)) return;
+        // 只有 @ 或引用、没有正文的消息（群里只 @ 一下）同样要唤醒：正文可以为空，
+        // 装饰由 MentionsSelf / Quote 表达，宿主据此拼展示行与提示词。
+        var decorated = parsed.MentionsSelf || parsed.QuotedId is not null;
+        if (string.IsNullOrWhiteSpace(text) && !decorated) return;
 
         var sender = NapCatMessageParser.GetSenderName(root, userId);
         var messageId = NapCatMessageParser.GetString(root, "message_id");
@@ -383,11 +391,13 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             if (groupId <= 0 || (_config.AllowedGroups.Count > 0 && !_config.AllowedGroups.Contains(groupId))) return;
 
             var conversationId = $"group:{groupId.ToString(CultureInfo.InvariantCulture)}";
-            var line = $"[{conversationId}] {sender}：{text}";
-            // 历史记录里同时留下消息 id、正文与发送者，回复里的 [quote:...] 与 [at:昵称] 靠它反查
+            // 历史记录里留下消息 id、纯正文与发送者，回复里的 [quote:...] 与 [at:昵称] 靠它反查；
+            // 「@ 了你 / 引用了谁」也是字段（mentionsSelf / quotedId），展示用的
+            // 「[会话 id] 发送者（标记）：」只在读取历史时拼
             _store!.RecordMessage(
-                conversationId, messageId, line, userId, sender,
-                $"群 {groupId.ToString(CultureInfo.InvariantCulture)}");
+                conversationId, messageId, text, userId, sender,
+                $"群 {groupId.ToString(CultureInfo.InvariantCulture)}",
+                parsed.MentionsSelf, parsed.QuotedId);
 
             // 引用反查、合并转发反查与附件下载都在接收循环之外执行，补完再唤醒桌宠
             // 禁止主动回复的群只是不再按概率随机搭话，@、引用与唤醒词仍然生效
@@ -397,14 +407,15 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
                 _ = FinalizeMessageAsync(
                     conversationId,
-                    line,
+                    text,
                     sender,
+                    userId,
                     messageId,
                     parsed,
                     wake);
             // 命中唤醒词或概率回复后，群里不 @ 也会唤醒桌宠
             else if (wake)
-                RaiseMentioned(conversationId, line, sender, messageId);
+                RaiseMentioned(conversationId, text, sender, userId, messageId, parsed.MentionsSelf, null);
             return;
         }
 
@@ -414,15 +425,15 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             if (_config.AllowedUsers.Count > 0 && !_config.AllowedUsers.Contains(userId)) return;
 
             var conversationId = $"private:{userId.ToString(CultureInfo.InvariantCulture)}";
-            var line = $"[{conversationId}] {sender}：{text}";
-            _store!.RecordMessage(conversationId, messageId, line, userId, sender, sender);
+            _store!.RecordMessage(
+                conversationId, messageId, text, userId, sender, sender, parsed.MentionsSelf, parsed.QuotedId);
 
             // 唤醒词与概率回复只对群聊生效；私聊是否唤醒只取决于 wakeOnPrivateMessage
             var wake = _config.WakeOnPrivateMessage;
             if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
-                _ = FinalizeMessageAsync(conversationId, line, sender, messageId, parsed, wake);
+                _ = FinalizeMessageAsync(conversationId, text, sender, userId, messageId, parsed, wake);
             else if (wake)
-                RaiseMentioned(conversationId, line, sender, messageId);
+                RaiseMentioned(conversationId, text, sender, userId, messageId, parsed.MentionsSelf, null);
         }
     }
 
@@ -432,8 +443,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// </summary>
     private async Task FinalizeMessageAsync(
         string conversationId,
-        string line,
+        string body,
         string sender,
+        long senderId,
         string? messageId,
         NapCatParsedMessage parsed,
         bool wake)
@@ -442,21 +454,21 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         {
             if (parsed.Attachments is { Count: > 0 } attachments)
             {
-                var hydrated = await _downloader!.HydrateAsync(line, attachments).ConfigureAwait(false);
-                if (!string.Equals(hydrated, line, StringComparison.Ordinal))
+                var hydrated = await _downloader!.HydrateAsync(body, attachments).ConfigureAwait(false);
+                if (!string.Equals(hydrated, body, StringComparison.Ordinal))
                 {
-                    _store!.PatchMessage(conversationId, messageId, line, hydrated);
-                    line = hydrated;
+                    _store!.PatchMessage(conversationId, messageId, body, hydrated);
+                    body = hydrated;
                 }
             }
 
             if (parsed.Forwards is { Count: > 0 } forwards)
             {
-                var hydrated = await _forwardResolver!.HydrateAsync(line, forwards).ConfigureAwait(false);
-                if (!string.Equals(hydrated, line, StringComparison.Ordinal))
+                var hydrated = await _forwardResolver!.HydrateAsync(body, forwards).ConfigureAwait(false);
+                if (!string.Equals(hydrated, body, StringComparison.Ordinal))
                 {
-                    _store!.PatchMessage(conversationId, messageId, line, hydrated);
-                    line = hydrated;
+                    _store!.PatchMessage(conversationId, messageId, body, hydrated);
+                    body = hydrated;
                 }
             }
         }
@@ -467,24 +479,29 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
         if (parsed.QuotedId is { } quotedId)
         {
-            await EnrichQuoteAsync(quotedId, conversationId, line, sender, messageId, wake).ConfigureAwait(false);
+            await EnrichQuoteAsync(quotedId, conversationId, body, sender, senderId, messageId, parsed, wake)
+                .ConfigureAwait(false);
             return;
         }
 
-        if (wake) RaiseMentioned(conversationId, line, sender, messageId);
+        if (wake)
+            RaiseMentioned(conversationId, body, sender, senderId, messageId, parsed.MentionsSelf, null);
     }
 
     /// <summary>
-    /// 反查被引用的消息，把它的正文补进这一行：成功时统一写成「[引用消息(发送者：摘要)]」，
-    /// 失败时只保留「引用消息」。补完再按需要唤醒桌宠，保证唤醒文本里带得上引用内容。
+    /// 反查被引用的消息：引用摘要作为结构化字段（<see cref="PlatformIncomingMessage.Quote" />）上报给宿主，
+    /// 同时写回本地历史记录（<see cref="NapCatConversationStore.PatchQuote" />）并缓存，
+    /// 供之后读历史 / 远端历史时拼成「（引用 发送者：摘要）」。补完再按需要唤醒桌宠。
     /// 反查在接收循环之外执行，避免等待自身响应造成死锁。
     /// </summary>
     private async Task EnrichQuoteAsync(
         string quotedId,
         string conversationId,
-        string line,
+        string body,
         string sender,
+        long senderId,
         string? messageId,
+        NapCatParsedMessage parsed,
         bool wake)
     {
         try
@@ -492,19 +509,25 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             var quoted = await _quotes!
                 .FetchAsync(quotedId, Volatile.Read(ref _selfId))
                 .ConfigureAwait(false);
-            // 引用统一显示成「[引用消息(发送者：摘要)]」，反查失败时只保留「引用消息」
-            var quotedIsSelf = quoted?.IsSelf ?? false;
-            var enriched = _quotes.BuildEnrichedLine(quotedId, line, quoted);
-            if (!string.Equals(enriched, line, StringComparison.Ordinal))
-                _store!.PatchMessage(conversationId, messageId, line, enriched);
 
-            // 引用了桌宠自己说的话，等同于在叫桌宠
-            if (wake || quotedIsSelf) RaiseMentioned(conversationId, enriched, sender, messageId);
+            // 摘要只进字段与历史渲染，正文始终是对方写的内容
+            var quote = NapCatQuoteTracker.FormatQuote(quoted);
+            if (quote is not null)
+            {
+                _store!.PatchQuote(conversationId, messageId, quote);
+                _quotes.RememberQuote(quotedId, quote);
+            }
+
+            // 引用了桌宠自己说的话，等同于在叫桌宠：也算「消息直接指向你」
+            var mentionsSelf = parsed.MentionsSelf || quoted?.IsSelf == true;
+            if (wake || mentionsSelf)
+                RaiseMentioned(conversationId, body, sender, senderId, messageId, mentionsSelf, quote);
         }
         catch (Exception ex)
         {
             Context.Logger.LogDebug(ex, "处理被引用消息 {QuotedId} 失败", quotedId);
-            if (wake) RaiseMentioned(conversationId, line, sender, messageId);
+            if (wake)
+                RaiseMentioned(conversationId, body, sender, senderId, messageId, parsed.MentionsSelf, null);
         }
     }
 
@@ -523,7 +546,19 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     private bool RollReplyChance()
         => _config.ReplyProbability > 0 && Random.Shared.NextDouble() < _config.ReplyProbability;
 
-    private void RaiseMentioned(string conversationId, string content, string sender, string? messageId)
+    /// <summary>
+    /// 唤醒桌宠：上报给宿主的是纯正文，会话 id、发送者昵称与稳定 id 各自单独传，
+    /// 「@ 了你」「引用」这类装饰也走字段（<c>MentionsSelf</c> / <c>Quote</c>），不拼进正文：
+    /// 宿主据此识别平台命令、做管理员判定，并自己组装展示行与提示词。
+    /// </summary>
+    private void RaiseMentioned(
+        string conversationId,
+        string body,
+        string sender,
+        long senderId,
+        string? messageId,
+        bool mentionsSelf,
+        string? quote)
     {
         var handler = OnMentioned;
         if (handler is null) return;
@@ -532,10 +567,14 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         {
             handler(this, new PlatformIncomingMessage(
                 Id,
-                content,
+                body,
                 sender,
                 messageId,
-                BuildWakeContext(conversationId, content, messageId)));
+                BuildWakeContext(conversationId, body, messageId),
+                senderId > 0 ? senderId.ToString(CultureInfo.InvariantCulture) : null,
+                conversationId,
+                mentionsSelf,
+                quote));
         }
         catch (Exception ex)
         {
@@ -544,25 +583,27 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     }
 
     /// <summary>按配置的条数把最近消息作为上下文交给宿主，模型不必再调 get_platform_messages 也能看懂上下文。</summary>
-    private string? BuildWakeContext(string conversationId, string content, string? messageId)
+    private string? BuildWakeContext(string conversationId, string body, string? messageId)
     {
         var count = _config.WakeContextMessages;
         if (count <= 0) return null;
 
         var messages = _store?.GetRecentMessages(conversationId, count + 1) ?? [];
         var lines = new List<string>();
+        string? lastText = null;
         foreach (var item in messages)
         {
             // 按消息 id 排除当前消息：异步补全期间可能已有新消息入队，不能只看末行
             if (messageId is { Length: > 0 } && string.Equals(item.MessageId, messageId, StringComparison.Ordinal))
                 continue;
 
-            lines.Add(item.Line);
+            lines.Add(item.FormatLine());
+            lastText = item.Text;
         }
 
-        // 没有消息 id 时退回按展示行去掉当前消息
+        // 没有消息 id 时退回按正文去掉当前消息
         if (messageId is not { Length: > 0 } && lines.Count > 0
-            && string.Equals(lines[^1], content, StringComparison.Ordinal))
+            && string.Equals(lastText, body, StringComparison.Ordinal))
             lines.RemoveAt(lines.Count - 1);
 
         if (lines.Count > count) lines = [.. lines.TakeLast(count)];
@@ -570,12 +611,13 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     }
 
     /// <summary>戳一戳命中响应：记入会话历史并唤醒桌宠；自动回戳由响应器自己发送。</summary>
-    private void HandlePokeResponse(string conversationId, string line, string sender, long groupId)
+    private void HandlePokeResponse(string conversationId, string body, string sender, long groupId)
     {
         var display = groupId > 0
             ? $"群 {groupId.ToString(CultureInfo.InvariantCulture)}"
             : sender;
-        _store?.RecordMessage(conversationId, null, line, 0, sender, display);
-        RaiseMentioned(conversationId, line, sender, null);
+        _store?.RecordMessage(conversationId, null, body, 0, sender, display, mentionsSelf: true);
+        // 戳一戳本身就是直接冲着桌宠来的
+        RaiseMentioned(conversationId, body, sender, 0, null, mentionsSelf: true, quote: null);
     }
 }

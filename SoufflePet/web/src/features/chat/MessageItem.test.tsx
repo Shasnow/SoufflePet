@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
 import type { ChatMessageDto } from '@/bridge/contracts'
+import { useSlashPaletteStore } from '@/stores/slashPaletteStore'
 import { MessageItem } from './MessageItem'
 
 vi.mock('@/bridge/client', () => ({ invoke: vi.fn(async () => null) }))
@@ -101,5 +102,32 @@ describe('MessageItem', () => {
 
     const { container } = render(<MessageItem sessionId="s1" message={message} streaming={false} />)
     expect(container.querySelector('.notice-toggle')).toBeNull()
+  })
+
+  it('消息操作菜单可直接唤起命令，无需输入框', () => {
+    useSlashPaletteStore.setState({ request: null })
+    const { container } = render(<MessageItem sessionId="s7" message={userMessage} streaming={false} />)
+
+    const button = container.querySelector('[aria-label="命令"]') as HTMLButtonElement
+    expect(button).not.toBeNull()
+    fireEvent.click(button)
+    expect(useSlashPaletteStore.getState().request?.sessionId).toBe('s7')
+  })
+
+  it('平台消息等通知气泡也带命令入口', () => {
+    useSlashPaletteStore.setState({ request: null })
+    const message: ChatMessageDto = {
+      id: 'm-platform',
+      kind: 'notice',
+      text: '[平台消息] qq · 小明：在吗',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+    }
+
+    const { container } = render(<MessageItem sessionId="s8" message={message} streaming={false} />)
+    const button = container.querySelector('.bubble-notice [aria-label="命令"]') as HTMLButtonElement
+
+    expect(button).not.toBeNull()
+    fireEvent.click(button)
+    expect(useSlashPaletteStore.getState().request?.sessionId).toBe('s8')
   })
 })

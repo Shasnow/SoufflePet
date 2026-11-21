@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 消息解析器的单测（SoufflePet.Plugins.Tests）：装饰不能混进正文，用测试锁住 -->
+    <InternalsVisibleTo Include="SoufflePet.Plugins.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="plugin.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

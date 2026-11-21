@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Shasnow
+
+namespace SoufflePet.Services;
+
+/// <summary>
+/// 平台消息相关的模型文案：系统提示词与工具参数描述共用同一份措辞。
+/// 正文已改为「纯正文 + 结构化字段」（<c>&lt;platform_message conversation="…"&gt;</c>），
+/// 会话 id 不再写在正文里，所以「从哪儿拿会话 id」这唯一事实源只能有一处，
+/// 否则提示词与工具描述会各自漂移，模型要么回错会话、要么不敢回复。
+/// </summary>
+internal static class PlatformPromptHints
+{
+    /// <summary>工具参数 <c>conversation</c> 的说明（AIFunctionFactory 会把 Description 交给模型）。</summary>
+    internal const string ConversationParameter = "会话 id，形如 group:12345 或 private:777";
+
+    /// <summary>
+    /// 系统提示词里「消息平台接入」一节的收尾说明：解释 <c>&lt;platform_message&gt;</c> 的各部分，
+    /// 尤其是 conversation 属性的来源与回复方式。静态文本，不随轮次变化，不影响前缀缓存。
+    /// </summary>
+    internal const string PlatformMessageGuide = """
+        平台消息标记 `<platform_message>`:
+        - `conversation`: 该消息所属会话 id
+        - `sender`: 发送者昵称
+        - `mentions_self="true"` 表示这条消息提及了你
+        - `quote`: 被引用消息的摘要，形如「发送者：正文」
+        - `<context>`: 同一会话此前的记录，每行「发送者：正文」，不再重复会话 id；`<content>` 是本次需要回应的消息
+
+        信息不足时用 `get_platform_messages` 查看该会话更早的消息；
+        决定回复时，用 `send_platform_message` 回复该会话。
+        """;
+}

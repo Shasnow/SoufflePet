@@ -20,6 +20,9 @@ internal sealed class NapCatConfig
 
     public HashSet<long> AllowedGroups { get; init; } = [];
 
+    /// <summary>允许在平台消息里执行命令（/model、/stop、/help）的 QQ 号；为空表示禁止本平台执行命令。</summary>
+    public HashSet<long> CommandAdmins { get; init; } = [];
+
     public bool WakeOnPrivateMessage { get; init; } = true;
 
     /// <summary>唤醒词（仅群聊生效）：消息正文只要含有其中任意一个（不区分大小写）就唤醒桌宠（无需 @）；为空表示不启用。</summary>
@@ -45,8 +48,6 @@ internal sealed class NapCatConfig
 
     /// <summary>跟戳概率（0-1）：别人戳的是其他用户时，桌宠按此概率跟着戳被戳的人；0 表示关闭。</summary>
     public double FollowPokeProbability { get; init; }
-
-    public int MaxReplyChars { get; init; } = 1500;
 
     /// <summary>分段正则：命中的内容作为分段点被移除，把回复切成多段；留空表示不分段。</summary>
     public string SegmentRegex { get; init; } = string.Empty;
@@ -117,6 +118,7 @@ internal sealed class NapCatConfig
             AccessToken = GetConfigString(config, "accessToken", string.Empty),
             AllowedUsers = ReadConfigIds(config, "allowedUsers"),
             AllowedGroups = ReadConfigIds(config, "allowedGroups"),
+            CommandAdmins = ReadConfigIds(config, "commandAdmins"),
             WakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true),
             WakeWords = ReadConfigWords(config, "wakeWords"),
             WakeContextMessages = Math.Clamp(GetConfigInt(config, "wakeContextMessages", 50), 0, 200),
@@ -126,7 +128,6 @@ internal sealed class NapCatConfig
             PokeBackProbability = Math.Clamp(GetConfigDouble(config, "pokeBackProbability", 0), 0, 1),
             PokeCooldownSeconds = Math.Clamp(GetConfigInt(config, "pokeCooldownSeconds", 60), 0, 86400),
             FollowPokeProbability = Math.Clamp(GetConfigDouble(config, "followPokeProbability", 0), 0, 1),
-            MaxReplyChars = Math.Clamp(GetConfigInt(config, "maxReplyChars", 1500), 200, 4000),
             SegmentRegex = GetConfigString(config, "segmentRegex", string.Empty).Trim(),
             SegmentFilterRegex = GetConfigString(config, "segmentFilterRegex", string.Empty).Trim(),
             SegmentMaxMessageChars = Math.Clamp(GetConfigInt(config, "segmentMaxMessageChars", 150), 1, 4000),

@@ -27,7 +27,7 @@ internal sealed class NapCatPokeResponder
     private readonly NapCatConnection _connection;
     private readonly NapCatConfig _config;
 
-    /// <summary>把戳一戳转成唤醒内容：参数为会话 id、文本行、发送者昵称与群号。</summary>
+    /// <summary>把戳一戳转成唤醒内容：参数为会话 id、正文、发送者昵称与群号。</summary>
     private readonly Action<string, string, string, long> _onResponse;
 
     private readonly Lock _sync = new();
@@ -85,7 +85,7 @@ internal sealed class NapCatPokeResponder
             ? $"group:{groupId.ToString(CultureInfo.InvariantCulture)}"
             : $"private:{userId.ToString(CultureInfo.InvariantCulture)}";
 
-        if (wantLlm) _onResponse(conversationId, $"[{conversationId}] {sender} 戳了戳你", sender, groupId);
+        if (wantLlm) _onResponse(conversationId, "戳了戳你", sender, groupId);
 
         if (wantPoke)
         {

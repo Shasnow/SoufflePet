@@ -79,7 +79,7 @@ internal sealed class NapCatSender
     }
 
     /// <summary>
-    /// 向指定会话发送文本：先解析开头的引用标记，再按分段正则切分并过滤内容，然后按字数上限拆分，
+    /// 向指定会话发送文本：先解析开头的引用标记，再按分段正则切分并过滤内容，
     /// 每条之间按下一句的长度计算间隔（模拟打字速度），避免长回复瞬间刷屏。
     /// 带引用标记时，第一段会带上 reply 段引用对应消息。
     /// </summary>
@@ -97,10 +97,10 @@ internal sealed class NapCatSender
         var replyTo = ExtractQuoteMarker(ref text, conversationId);
         if (text.Length == 0) return;
 
-        // [at:...] 先解析成占位符，避免后面的分段与字数拆分把标记切成两半
+        // [at:...] 先解析成占位符，避免分段时把标记切成两半
         text = PrepareAtMarkers(text, conversation, conversationId);
 
-        // 超过长度上限时不分段（也不加分段延迟），只做内容过滤与字数上限拆分
+        // 超过长度上限时不分段（也不加分段延迟），只做内容过滤后整条发送
         var enableSegmentation = text.Length <= _config.SegmentMaxMessageChars;
         var chunks = BuildChunks(text, enableSegmentation);
         if (chunks.Count == 0) return;
@@ -201,7 +201,7 @@ internal sealed class NapCatSender
         return found > 0 ? found.ToString(CultureInfo.InvariantCulture) : null;
     }
 
-    /// <summary>按分段正则切分，移除过滤正则命中的内容，再对每段按字数上限二次拆分。</summary>
+    /// <summary>按分段正则切分，并移除过滤正则命中的内容。</summary>
     private List<string> BuildChunks(string text, bool enableSegmentation)
     {
         var segments = enableSegmentation && _segmentRegex is not null
@@ -211,11 +211,8 @@ internal sealed class NapCatSender
         var chunks = new List<string>();
         foreach (var raw in segments)
         {
-            var segment = FilterText(raw);
-            segment = segment.Trim();
-            if (segment.Length == 0) continue;
-
-            chunks.AddRange(SplitMessage(segment, _config.MaxReplyChars));
+            var segment = FilterText(raw).Trim();
+            if (segment.Length > 0) chunks.Add(segment);
         }
 
         return chunks;
@@ -595,43 +592,4 @@ internal sealed class NapCatSender
         response.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
             ? NapCatMessageParser.GetString(data, "message_id")
             : null;
-
-    /// <summary>按字数拆分超长回复，避免拆开代理对（emoji）。</summary>
-    private static IEnumerable<string> SplitMessage(string text, int maxChars)
-    {
-        text = text.Trim();
-        var index = 0;
-        while (index < text.Length)
-        {
-            var length = Math.Min(maxChars, text.Length - index);
-            if (index + length < text.Length && char.IsHighSurrogate(text[index + length - 1])) length--;
-            if (index + length < text.Length) length = MoveOutOfPlaceholder(text, index, length);
-            if (length <= 0) break;
-
-            yield return text.Substring(index, length);
-            index += length;
-        }
-    }
-
-    /// <summary>切点落在 at 占位符内部时退到占位符开头，避免把占位符切成两半。</summary>
-    private static int MoveOutOfPlaceholder(string text, int start, int length)
-    {
-        var cut = start + length;
-        for (var position = start; position < cut; position++)
-        {
-            if (text[position] != AtOpen) continue;
-
-            var close = text.IndexOf(AtClose, position + 1);
-            if (close < 0) return length;
-            if (close < cut)
-            {
-                position = close;
-                continue;
-            }
-
-            return position - start;
-        }
-
-        return length;
-    }
 }

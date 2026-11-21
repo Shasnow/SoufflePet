@@ -142,6 +142,19 @@ public sealed record AppSnapshotDto(
 
 public sealed record WindowStateDto(bool Visible, bool Maximized);
 
+/// <summary>一条命令的定义。<c>ArgumentKind</c> 为 none / model / approval，界面据此决定参数补全来源。</summary>
+public sealed record SlashCommandDto(
+    string Name,
+    string Usage,
+    string Summary,
+    string Description,
+    string ArgumentKind,
+    string? ArgumentLabel,
+    IReadOnlyList<string> Aliases);
+
+/// <summary>命令的执行结果；<c>Ok</c> 为 false 时 <c>Message</c> 是可直接展示的原因。</summary>
+public sealed record SlashCommandResultDto(bool Ok, string Command, string Message, string? ModelKey = null);
+
 /// <summary>响应 / 事件的统一序列化选项。</summary>
 public static class WebJson
 {

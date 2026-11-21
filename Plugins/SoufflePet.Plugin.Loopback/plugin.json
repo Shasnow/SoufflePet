@@ -8,7 +8,8 @@
   "entryType": "SoufflePet.Plugins.Loopback.LoopbackPlugin",
   "timeoutSeconds": 30,
   "config": {
-    "port": 18765
+    "port": 18765,
+    "commandAdmins": []
   },
   "configSchema": [
     {
@@ -16,6 +17,12 @@
       "label": "监听端口",
       "type": "number",
       "description": "仅监听 127.0.0.1，默认 18765；端口被占用时插件会在日志里报错，不影响其它插件。"
+    },
+    {
+      "key": "commandAdmins",
+      "label": "命令管理员 sender",
+      "type": "list",
+      "description": "每行一个 sender（发送 /send 时的 sender 参数）；只有列出的 sender 发 /model 等命令时才生效。留空表示禁止本平台执行任何命令。"
     }
   ]
 }

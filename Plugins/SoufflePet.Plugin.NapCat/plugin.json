@@ -12,6 +12,7 @@
     "accessToken": "",
     "allowedUsers": [],
     "allowedGroups": [],
+    "commandAdmins": [],
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
     "wakeContextMessages": 50,
@@ -21,7 +22,6 @@
     "pokeBackProbability": 0,
     "pokeCooldownSeconds": 60,
     "followPokeProbability": 0,
-    "maxReplyChars": 1500,
     "segmentRegex": "",
     "segmentFilterRegex": "",
     "segmentMaxMessageChars": 150,
@@ -61,6 +61,12 @@
       "label": "允许的群号",
       "type": "list",
       "description": "每行一个群号；留空表示不启用白名单，所有群聊都放行。"
+    },
+    {
+      "key": "commandAdmins",
+      "label": "命令管理员 QQ 号",
+      "type": "list",
+      "description": "每行一个 QQ 号；只有这些人在 QQ 里发 /model、/stop、/help 时才生效，命令结果会回执到原会话。留空表示禁止本平台执行任何命令。"
     },
     {
       "key": "wakeOnPrivateMessage",
@@ -115,12 +121,6 @@
       "label": "跟戳概率（0-1）",
       "type": "number",
       "description": "群里有人戳其他用户时，桌宠按此概率跟着戳被戳的人；0 表示关闭。"
-    },
-    {
-      "key": "maxReplyChars",
-      "label": "单条消息字数上限",
-      "type": "number",
-      "description": "超长回复会拆成多条发送，范围 200-4000。"
     },
     {
       "key": "segmentRegex",

@@ -14,6 +14,7 @@
     "wsUrl": "wss://api.bot.qq.com/websocket/",
     "allowedUsers": [],
     "allowedGroups": [],
+    "commandAdmins": [],
     "openIdNames": [],
     "wakeOnPrivateMessage": true,
     "wakeWords": [],
@@ -60,6 +61,12 @@
       "label": "允许的群 openid",
       "type": "list",
       "description": "每行一个 group_openid；留空表示不启用白名单，所有群聊都放行。"
+    },
+    {
+      "key": "commandAdmins",
+      "label": "命令管理员 openid",
+      "type": "list",
+      "description": "每行一个 openid（单聊是 user_openid，群聊是 member_openid）；只有这些人在 QQ 里发 /model、/stop、/help 时才生效，命令结果会回执到原会话。留空表示禁止本平台执行任何命令。"
     },
     {
       "key": "openIdNames",

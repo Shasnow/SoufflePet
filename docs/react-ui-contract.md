@@ -261,6 +261,8 @@ interface AppSnapshotDto {
 | `chat.attach.finish` | `{sessionId?,uploads:string[]}` | `{attachments:AttachmentDto[],added:number}`；宿主落盘到 `~/.souffle/attachments/<sessionId>` 后按普通附件登记 |
 | `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
 | `chat.model.select` | `{sessionId?,key}` | `null` |
+| `chat.command.list` | `{}` | `{commands:SlashCommandDto[]}`；命令目录（`{name,usage,summary,description,argumentKind:'none'\|'model'\|'approval',argumentLabel?,aliases:string[]}`），命令定义由 Core 的 `SlashCommandCatalog` 提供 |
+| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?}`；`ok` 为 false 时 `message` 是可展示的原因。命令结果会写进会话的通知气泡。`clearDraft` 默认 true：执行成功时宿主**无条件**清空该会话的 `draft`（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
 | `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |
 | `chat.approval.decide` | `{sessionId?,messageId,approve:boolean}` | `null` |
 | `chat.workspace.switch` | `{sessionId?,path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
@@ -272,6 +274,15 @@ interface AppSnapshotDto {
 | `chat.link.open` | `{url}` | `null`（仅 http/https） |
 | `chat.workspace.open` | `{path}` | `null`（仅已登记工作区；资源管理器打开） |
 | `chat.msg.expand` | `{sessionId?,messageId,expanded:boolean}` | `null` |
+
+#### 命令
+
+- 触发：输入框内容以 `/` 开头即弹出命令面板（`/` 本身列出全部命令，`/model ` 列出该会话可用的模型）；输入框工具栏的「命令」按钮与消息气泡上的命令按钮（含平台消息通知气泡）可以**不经过输入框**直接唤起面板，执行时默认作用于该消息所属会话。
+- 匹配：命令名按「精确 > 前缀 > 包含 > 子序列」评分（`SlashCommandFuzzy`），参数按同样规则过滤，`↑↓` 移动、`Tab`/`Enter` 确认、`Esc` 关闭；面板顶部固定显示当前命令的用法与说明预览。命令名与参数的分界按 **Unicode 空白**（`char.IsWhiteSpace` 的字符集，含全角空格 U+3000 与 NBSP U+00A0）判定，宿主 `SlashCommandParser` 与界面 `parseSlashInput` 逐字同规则；参数阶段的初始高亮落在「当前值」（当前模型 / 当前审批模式）上，直接回车只会重新确认它。
+- 执行：已知命令走 `chat.command.execute`（不进模型上下文，结果以通知气泡 + toast 呈现）。通知气泡只进会话内存、**不落盘**：页面刷新后仍在，会话关闭 / 空闲卸载或应用重启后不再出现。未知的 `/xxx` 仍然作为普通文本经 `chat.send` 发给模型。
+- 副作用：`/model` 在切换当前会话模型的同时把 `ChatModelKey` 记为默认模型（新会话沿用）；`/approval` 写入全局 `ToolApproval`（不是会话局部状态），切换后当前及之后新开的会话都生效。
+- 平台入口：插件上报的 `PlatformIncomingMessage.Content` 是**纯正文**（不含「[会话 id] 发送者：」这类前缀，也不含「@你」「引用消息」这类装饰——「@ 了你」与「引用」分别用 `MentionsSelf` / `Quote` 表达，宿主拼进 `<platform_message>` 的属性与通知气泡的展示行），所以正文以 `/` 开头的已知命令会走平台命令分支，不再转给模型。是否允许该发送者执行由平台插件决定（`IMessagePlatform.AllowsPlatformCommands(senderId)`，接口默认返回 false），管理员名单属于**插件自己的配置**，不在 `SoufflePet.json` 里；`/approval` 属于整机安全策略，平台侧一律拒绝；执行结果通过 `send_platform_message` 同款通道回执到原会话，被拒绝时也会在「平台消息」会话里留下通知气泡。
+- 现有命令：`/model [模型名称/模型ID]`（支持模型名称、模型标识、`提供商/标识`、列表序号与模糊匹配，执行后立即作用于该会话后续对话）、`/approval [manual|full]`（仅桌面端）、`/stop`、`/help`。新增命令只需在 `SoufflePet.Core/Chat/SlashCommands.cs` 的目录里追加一条定义与执行分支，界面与平台入口自动跟上；平台可用性由定义的 `AllowFromPlatform` 控制。
 
 #### 窗口
 

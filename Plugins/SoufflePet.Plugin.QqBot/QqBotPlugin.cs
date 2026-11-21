@@ -56,7 +56,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     private readonly HttpClient _http = Ipv4HttpClient.Create();
     private readonly Lock _sync = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
-    private readonly Dictionary<string, List<string>> _history = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<QqStoredMessage>> _history = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _conversationNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _lastActive = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PassiveReplyContext> _passive = new(StringComparer.Ordinal);
@@ -92,6 +92,8 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
     private string _wsUrl = string.Empty;
     private HashSet<string> _allowedUsers = [];
     private HashSet<string> _allowedGroups = [];
+    /// <summary>允许在平台消息里执行命令的 openid 列表；为空表示禁止本平台执行命令。</summary>
+    private HashSet<string> _commandAdmins = [];
     private Dictionary<string, string> _openIdNames = new(StringComparer.Ordinal);
     private bool _wakeOnPrivateMessage = true;
 
@@ -108,6 +110,10 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
     /// <summary>平台 id，供工具的 platform 参数使用。</summary>
     public string Id => "qqbot";
+
+    /// <summary>只有插件设置里「命令管理员」列出的 openid 才能在平台消息里执行 /model 等命令。</summary>
+    public bool AllowsPlatformCommands(string? senderId)
+        => senderId is { Length: > 0 } && _commandAdmins.Contains(senderId.Trim());
 
     /// <summary>平台提示词，交给宿主注入系统提示词；未配置时返回 null（不注入）。</summary>
     public string? PlatformPrompt => _rolePrompt.Length == 0 ? null : _rolePrompt;
@@ -198,10 +204,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
                 if (passive is not null) MarkPassiveSent(target, passive);
 
                 // 出站消息不会作为网关事件回传，主动写入历史，否则读取历史时只能看到用户消息
-                RecordMessage(
-                    ConversationKey(target),
-                    $"[{ConversationKey(target)}] {AssistantLabel}：{chunk}",
-                    null);
+                RecordMessage(ConversationKey(target), AssistantLabel, chunk, null);
 
                 Context.Logger.LogInformation(
                     "已向 {Conversation} 发送消息（{Mode}）{MessageId}",
@@ -270,8 +273,8 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
             var attachmentName = attachment.DisplayName ?? Path.GetFileName(path);
             RecordMessage(
                 ConversationKey(target),
-                $"[{ConversationKey(target)}] {AssistantLabel}："
-                + $"[{(attachment.Kind == PlatformAttachmentKind.Image ? "图片" : "文件")}] {attachmentName}",
+                AssistantLabel,
+                $"[{(attachment.Kind == PlatformAttachmentKind.Image ? "图片" : "文件")}] {attachmentName}",
                 null);
 
             Context.Logger.LogInformation(
@@ -316,7 +319,9 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
                 return Task.FromResult(string.Empty);
 
             return Task.FromResult(
-                string.Join('\n', history.Skip(Math.Max(0, history.Count - count))));
+                string.Join('\n', history
+                    .Skip(Math.Max(0, history.Count - count))
+                    .Select(message => message.FormatLine())));
         }
     }
 
@@ -408,11 +413,11 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         var messageId = RememberPassive(conversationId, rawMessageId);
         var content = ParseContent(QqJson.GetString(data, "content"));
         var sender = ResolveSender(openId, EventUsername(data));
-        var line = await BuildLineAsync(conversationId, sender, content, data).ConfigureAwait(false);
+        var body = await BuildBodyAsync(content, data).ConfigureAwait(false);
 
-        RecordMessage(conversationId, line, null);
-        
-        if (_wakeOnPrivateMessage) RaiseMentioned(line, sender, messageId);
+        RecordMessage(conversationId, sender, body, null);
+
+        if (_wakeOnPrivateMessage) RaiseMentioned(conversationId, body, sender, openId, messageId);
     }
 
     private async Task HandleGroupAsync(JsonElement data, bool atBot)
@@ -432,19 +437,21 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         var content = ParseContent(QqJson.GetString(data, "content"));
 
         // @ 机器人与唤醒词优先；概率只对未命中的非重复消息掷一次，避免重复推送反复触发
-        var wake = atBot || IsBotMentioned(data) || ContainsWakeWord(content);
+        var mentioned = atBot || IsBotMentioned(data);
+        var wake = mentioned || ContainsWakeWord(content);
         if (!wake && !duplicate) wake = RollReplyChance();
 
         // 同一条消息可能同时以全量事件和 @ 事件推送：只记录一次，但 @ 事件仍可补唤醒
         if (duplicate && !wake) return;
 
         var messageId = RememberPassive(conversationId, rawMessageId);
-        var line = await BuildLineAsync(conversationId, senderLabel, content, data).ConfigureAwait(false);
+        var body = await BuildBodyAsync(content, data).ConfigureAwait(false);
 
-        if (!duplicate) RecordMessage(conversationId, line, null);
+        if (!duplicate) RecordMessage(conversationId, senderLabel, body, null);
 
         // 全量模式下非 @ 消息只记录不唤醒，避免群里每句话都惊动桌宠
-        if (wake && TryMarkWoken(rawMessageId)) RaiseMentioned(line, senderLabel, messageId);
+        if (wake && TryMarkWoken(rawMessageId))
+            RaiseMentioned(conversationId, body, senderLabel, sender, messageId, mentioned);
     }
 
     /// <summary>全量模式下判断消息是否 @ 了机器人：mentions 里带 bot=true 的用户。</summary>
@@ -568,19 +575,18 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         }
     }
 
-    private async Task<string> BuildLineAsync(
-        string conversationId,
-        string sender,
-        string content,
-        JsonElement data)
+    /// <summary>
+    /// 拼出这条消息的正文：正文 + 已下载附件的本地路径。
+    /// 只返回正文（不带「[会话 id] 发送者：」前缀），展示用的整行在读取历史时拼。
+    /// </summary>
+    private async Task<string> BuildBodyAsync(string content, JsonElement data)
     {
-        var line = $"[{conversationId}] {sender}：{content}";
-        if (!_downloadAttachments) return line;
+        if (!_downloadAttachments) return content;
 
         if (!data.TryGetProperty("attachments", out var attachments)
             || attachments.ValueKind != JsonValueKind.Array)
         {
-            return line;
+            return content;
         }
 
         var additions = new List<string>();
@@ -605,8 +611,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
             additions.Add(path is null ? $"[{label}]" : $"[{label} {path}]");
         }
 
-        if (additions.Count > 0) line = line + "\n" + string.Join('\n', additions);
-        return line;
+        return additions.Count == 0 ? content : content + "\n" + string.Join('\n', additions);
     }
 
     /// <summary>发送者显示名：手动映射优先，其次事件里的 username，最后回退 openid。</summary>
@@ -642,14 +647,33 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         return messageId;
     }
 
-    private void RaiseMentioned(string content, string sender, string? messageId)
+    /// <summary>
+    /// 唤醒桌宠：上报给宿主的是纯正文，会话 id、发送者昵称与稳定 id 各自单独传，
+    /// 「@ 了你」用 <paramref name="mentionsSelf" /> 表达而不是拼进正文：
+    /// 宿主据此识别平台命令、做管理员判定，并自己组装展示行与提示词。
+    /// </summary>
+    private void RaiseMentioned(
+        string conversationId,
+        string body,
+        string sender,
+        string? senderId,
+        string? messageId,
+        bool mentionsSelf = false)
     {
         var handler = OnMentioned;
         if (handler is null) return;
 
         try
         {
-            handler(this, new PlatformIncomingMessage(Id, content, sender, messageId));
+            handler(this, new PlatformIncomingMessage(
+                Id,
+                body,
+                sender,
+                messageId,
+                null,
+                string.IsNullOrWhiteSpace(senderId) ? null : senderId,
+                conversationId,
+                mentionsSelf));
         }
         catch (Exception ex)
         {
@@ -819,8 +843,8 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         return $"qq-{hash}{extension.ToLowerInvariant()}";
     }
 
-    /// <summary>把一条消息写入所属会话的历史记录。</summary>
-    private void RecordMessage(string conversationId, string line, string? displayName)
+    /// <summary>把一条消息（正文 + 发送者昵称）写入所属会话的历史记录。</summary>
+    private void RecordMessage(string conversationId, string sender, string text, string? displayName)
     {
         lock (_sync)
         {
@@ -830,7 +854,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
                 _history[conversationId] = history;
             }
 
-            history.Add(line);
+            history.Add(new QqStoredMessage(sender, text));
             while (history.Count > MaxHistoryMessages) history.RemoveAt(0);
 
             if (!string.IsNullOrWhiteSpace(displayName)) _conversationNames[conversationId] = displayName;
@@ -888,7 +912,14 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
                 {
                     if (string.IsNullOrWhiteSpace(entry.Id)) continue;
 
-                    _history[entry.Id] = [.. (entry.Messages ?? [])];
+                    // 旧缓存存的是拼好前缀的整行（没有正文），这类记录读出来是空正文：直接丢弃，
+                    // 避免把空行喂给模型；下一次落盘时它们就不会再出现
+                    var messages = (entry.Messages ?? [])
+                        .Where(message => !string.IsNullOrWhiteSpace(message.Text))
+                        .ToList();
+                    if (messages.Count == 0) continue;
+
+                    _history[entry.Id] = messages;
                     if (!string.IsNullOrWhiteSpace(entry.Name)) _conversationNames[entry.Id] = entry.Name;
                     _lastActive[entry.Id] = entry.LastActive;
                     restored++;
@@ -1018,6 +1049,7 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
         _wsUrl = GetConfigString(config, "wsUrl", "wss://api.bot.qq.com/websocket/").Trim();
         _allowedUsers = ReadConfigList(config, "allowedUsers");
         _allowedGroups = ReadConfigList(config, "allowedGroups");
+        _commandAdmins = ReadConfigList(config, "commandAdmins");
         _openIdNames = ReadOpenIdNames(config);
         _wakeOnPrivateMessage = GetConfigBool(config, "wakeOnPrivateMessage", true);
         _wakeWords = ReadConfigWords(config, "wakeWords");
@@ -1231,6 +1263,17 @@ public sealed class QqBotPlugin : PluginBase, IMessagePlatform
 
         public DateTimeOffset LastActive { get; set; }
 
-        public List<string> Messages { get; set; } = [];
+        public List<QqStoredMessage> Messages { get; set; } = [];
     }
+}
+
+/// <summary>
+/// 会话里的一条消息：只存正文与发送者昵称，「发送者：正文」这类展示行在读取时拼，
+/// 这样上报给宿主的正文天然不带前缀（宿主据此识别命令）。
+/// 行内不重复会话 id：读历史与唤醒上下文本来就在该会话的上下文里。
+/// </summary>
+internal sealed record QqStoredMessage(string Sender, string Text)
+{
+    /// <summary>渲染成给人 / 模型看的整行；只在读取侧拼接，正文本身不带前缀。</summary>
+    public string FormatLine() => $"{Sender}：{Text}";
 }

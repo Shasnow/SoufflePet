@@ -18,8 +18,11 @@ dotnet build SoufflePet.sln
 # 只验证 .NET、跳过前端构建（需已有 wwwroot/app 产物）
 dotnet build SoufflePet.sln -p:SkipWebBuild=true
 
-# 后端单测（会话状态机 / 会话管理 / 记忆 / 调度 / token 格式）
+# 后端单测（会话状态机 / 会话管理 / 记忆 / 调度 / token 格式 / 命令 / 平台消息）
 dotnet test SoufflePet.Core.Tests\SoufflePet.Core.Tests.csproj
+
+# 插件单测（消息解析：@ 了你 / 引用只置字段，不拼进正文）
+dotnet test SoufflePet.Plugins.Tests\SoufflePet.Plugins.Tests.csproj
 
 # 原生桌宠（Live2DCSharpSDK + OpenGL ES2）
 dotnet run --project SoufflePet
@@ -39,7 +42,7 @@ pnpm --dir SoufflePet/web screenshots
 
 - 运行依赖 Windows 10+、.NET 10 SDK。React 主窗口需 WebView2 Runtime，桌宠需支持 OpenGL ES2 的显卡驱动。
 - React UI 构建依赖 **Node.js 22.12+ 与 pnpm 10+**；`dotnet build` 默认调用 `pnpm build`，缺依赖时会给出可操作错误。
-- 测试：Web 前端用 Vitest（`pnpm --dir SoufflePet/web test`）；领域层用 `dotnet test SoufflePet.Core.Tests`。改动后至少跑 `dotnet build SoufflePet.sln`（`-warnaserror` 未启用，但请勿引入新警告）。
+- 测试：Web 前端用 Vitest（`pnpm --dir SoufflePet/web test`）；领域层用 `dotnet test SoufflePet.Core.Tests`；插件内部的解析 / 上报逻辑用 `dotnet test SoufflePet.Plugins.Tests`（消息装饰不能进正文这类约束就靠它锁住）。改动后至少跑 `dotnet build SoufflePet.sln`（`-warnaserror` 未启用，但请勿引入新警告）。
 - `SoufflePet.Core` **不得引用 Avalonia**；平台能力（桌宠表情、UI 线程）通过 `IPetController` / `IUiDispatcher` 抽象注入。
 - 插件工程已包含在 `SoufflePet.sln` 中，会被整体构建；调试时仍可单独构建以部署到宿主插件目录（见下）。
 - **输出文件被占用**：构建时若报 MSB3026 错误（通常是运行中的 `.NET Host` 进程锁定了 dll），**改用 `.verifybuild` 作为输出目录重试**，不要终止用户进程：
@@ -67,7 +70,8 @@ SoufflePet.sln
 │  └─ Assets/                      # 图标、Live2DCubismCore.dll
 ├─ SoufflePet.Core/                # 无 Avalonia 的领域层（模型/LLM/工具/MCP/记忆/调度）
 │  └─ Chat/                        #   ChatSession / ChatSessionManager / 会话存储 / 触发路由
-├─ SoufflePet.Core.Tests/          # xUnit（会话状态机、会话管理、记忆、调度、token 格式）
+├─ SoufflePet.Core.Tests/          # xUnit（会话状态机、会话管理、记忆、调度、token 格式、命令、平台消息路由）
+├─ SoufflePet.Plugins.Tests/       # xUnit（插件消息解析：装饰只置字段、不拼正文）
 ├─ SoufflePet.Plugin.Sdk/          # 插件契约（PluginBase、清单、配置表单、IMessagePlatform）
 ├─ Plugins/                        # 内置插件（在 sln 中，随解决方案一起构建）
 │  ├─ SoufflePet.Plugin.ComputerUse/
@@ -140,6 +144,9 @@ SoufflePet.sln
 | 会话状态机 / 会话管理 | [ChatSession.cs](SoufflePet.Core/Chat/ChatSession.cs)、[ChatSessionManager.cs](SoufflePet.Core/Chat/ChatSessionManager.cs)、[ChatSessionStore.cs](SoufflePet.Core/Chat/ChatSessionStore.cs) |
 | Core 测试 | [CoreTests.cs](SoufflePet.Core.Tests/CoreTests.cs)、[ChatSessionTests.cs](SoufflePet.Core.Tests/ChatSessionTests.cs) |
 | 对话与工具调用 | [LlmChatService.cs](SoufflePet.Core/Services/LlmChatService.cs)、[ChatTools.cs](SoufflePet.Core/Services/ChatTools.cs) |
+| 命令（/model 等） | [SlashCommands.cs](SoufflePet.Core/Chat/SlashCommands.cs)、[Composer.tsx](SoufflePet/web/src/features/chat/Composer.tsx)、[SlashCommandMenu.tsx](SoufflePet/web/src/features/chat/SlashCommandMenu.tsx) |
+| 平台消息路由 / 平台命令管理员 | [ChatTriggerRouter.cs](SoufflePet.Core/Chat/ChatTriggerRouter.cs)、[PlatformService.cs](SoufflePet.Core/Services/PlatformService.cs)、[NapCatConfig.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatConfig.cs) |
+| 平台消息解析（@ 了你 / 引用） | [NapCatMessageParser.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatMessageParser.cs)、[NapCatQuoteTracker.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatQuoteTracker.cs)、[IMessagePlatform.cs](SoufflePet.Plugin.Sdk/IMessagePlatform.cs) |
 | 主窗口呼出 / 热键 / 戳一戳 | [AppWindowService.cs](SoufflePet/Services/AppWindowService.cs) |
 | 对话模型配置 / 设置页 | [ChatProviderConfig.cs](SoufflePet.Core/Models/ChatProviderConfig.cs)、[LlmSettings.tsx](SoufflePet/web/src/features/settings/LlmSettings.tsx)、[LlmModelCatalog.cs](SoufflePet.Core/Services/LlmModelCatalog.cs) |
 | 消息气泡 / Markdown 渲染 | [MessageList.tsx](SoufflePet/web/src/features/chat/MessageList.tsx)、[Markdown.tsx](SoufflePet/web/src/ui/Markdown.tsx) |

@@ -18,13 +18,13 @@ internal sealed class NapCatQuoteTracker
     private const int QuotedSummaryLength = 60;
 
     /// <summary>缓存的反查引用摘要条数上限。</summary>
-    private const int MaxQuoteLabels = 200;
+    private const int MaxQuotes = 200;
 
     private readonly ILogger _logger;
     private readonly NapCatConnection _connection;
     private readonly Lock _sync = new();
-    private readonly Dictionary<string, string> _quoteLabels = new(StringComparer.Ordinal);
-    private readonly Queue<string> _quoteLabelOrder = new();
+    private readonly Dictionary<string, string> _quotes = new(StringComparer.Ordinal);
+    private readonly Queue<string> _quoteOrder = new();
 
     public NapCatQuoteTracker(ILogger logger, NapCatConnection connection)
     {
@@ -58,50 +58,28 @@ internal sealed class NapCatQuoteTracker
             summary);
     }
 
-    /// <summary>
-    /// 把被引用消息的正文补进这一行：成功时统一写成「[引用消息(发送者：摘要)]」，
-    /// 反查失败时只保留「引用消息」；反查成功时缓存摘要，供后续渲染远端历史使用。
-    /// </summary>
-    public string BuildEnrichedLine(string quotedId, string line, NapCatQuotedMessage? quoted)
-    {
-        var label = quoted is { } value
-            ? $"[引用消息({value.Sender}：{value.Summary})]"
-            : NapCatMessageParser.QuotePlaceholder;
+    /// <summary>上报给宿主的引用摘要，同时也是历史里展示的摘要：「发送者：正文摘要」；没反查到内容时返回 null。</summary>
+    public static string? FormatQuote(NapCatQuotedMessage? quoted) =>
+        quoted is { } value ? $"{value.Sender}：{value.Summary}" : null;
 
-        // 反查成功就把摘要缓存下来，之后读远端历史也能显示引用内容
-        if (quoted is not null) RememberQuoteLabel(quotedId, label);
-
-        // 解析阶段留的占位直接替换，避免留下两个引用标记
-        return line.Contains(NapCatMessageParser.QuotePlaceholder, StringComparison.Ordinal)
-            ? line.Replace(NapCatMessageParser.QuotePlaceholder, label, StringComparison.Ordinal)
-            : PrefixQuote(line, label + " ");
-    }
-
-    /// <summary>记住已反查到的引用摘要，供后续渲染远端历史时直接使用。</summary>
-    public void RememberQuoteLabel(string quotedId, string label)
+    /// <summary>记住已反查到的引用摘要，供远端历史渲染时直接使用。</summary>
+    public void RememberQuote(string quotedId, string quote)
     {
         lock (_sync)
         {
-            if (_quoteLabels.ContainsKey(quotedId)) return;
+            if (_quotes.ContainsKey(quotedId)) return;
 
-            _quoteLabels[quotedId] = label;
-            _quoteLabelOrder.Enqueue(quotedId);
-            while (_quoteLabelOrder.Count > MaxQuoteLabels)
-                _quoteLabels.Remove(_quoteLabelOrder.Dequeue());
+            _quotes[quotedId] = quote;
+            _quoteOrder.Enqueue(quotedId);
+            while (_quoteOrder.Count > MaxQuotes)
+                _quotes.Remove(_quoteOrder.Dequeue());
         }
     }
 
     /// <summary>取缓存的引用摘要，未反查过时返回 null。</summary>
-    public string? TryGetQuoteLabel(string quotedId)
+    public string? TryGetQuote(string quotedId)
     {
-        lock (_sync) return _quoteLabels.GetValueOrDefault(quotedId);
-    }
-
-    /// <summary>在「[会话] 发送者：」之后插入引用标记。</summary>
-    private static string PrefixQuote(string line, string prefix)
-    {
-        var index = line.IndexOf('：', StringComparison.Ordinal);
-        return index >= 0 ? line[..(index + 1)] + prefix + line[(index + 1)..] : prefix + line;
+        lock (_sync) return _quotes.GetValueOrDefault(quotedId);
     }
 
     /// <summary>把被引用的正文压成一行短摘要，避免长文把历史记录撑爆。</summary>

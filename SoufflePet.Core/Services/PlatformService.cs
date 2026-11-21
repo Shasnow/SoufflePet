@@ -5,6 +5,12 @@ using SoufflePet.Plugin.Sdk;
 namespace SoufflePet.Services;
 
 /// <summary>
+/// 一次平台发送的结果。<see cref="Message" /> 可直接展示或回传给模型；
+/// <see cref="Ok" /> 让调用方不必靠匹配文本判断成败（例如「平台没接入」「会话 id 为空」）。
+/// </summary>
+public readonly record struct PlatformSendResult(bool Ok, string Message);
+
+/// <summary>
 /// 消息平台服务：收集插件提供的消息平台，统一收发消息，
 /// 并转发平台通过 <see cref="IMessagePlatform.OnMentioned" /> 主动上报的消息。
 /// </summary>
@@ -38,6 +44,30 @@ public class PlatformService : IDisposable
     public IReadOnlyList<IMessagePlatform> Platforms
     {
         get { lock (_sync) return [.. _platforms]; }
+    }
+
+    /// <summary>
+    /// 某个平台是否允许该发送者执行命令：由平台插件按自己的配置判定。
+    /// 平台不在线、插件没有实现该方法或判定时抛异常，一律返回 false（失败即关闭）。
+    /// </summary>
+    public bool AllowsPlatformCommands(string? platformId, string? senderId)
+    {
+        if (string.IsNullOrWhiteSpace(platformId) || string.IsNullOrWhiteSpace(senderId)) return false;
+
+        var id = platformId.Trim();
+        var target = Platforms.FirstOrDefault(platform =>
+            string.Equals(platform.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+        if (target is null) return false;
+
+        try
+        {
+            return target.AllowsPlatformCommands(senderId.Trim());
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "check platform command admin failed platform={Platform}", id);
+            return false;
+        }
     }
 
     /// <summary>注册插件实现的消息平台；重复注册同一实例时忽略，同时开始监听它的推送。</summary>
@@ -120,20 +150,37 @@ public class PlatformService : IDisposable
     /// <summary>向指定平台某个会话发送消息；返回可直接回传给模型的文本。</summary>
     public async Task<string> SendMessageAsync(string platform, string conversationId, string message)
     {
+        var result = await TrySendMessageAsync(platform, conversationId, message).ConfigureAwait(false);
+        return result.Message;
+    }
+
+    /// <summary>
+    /// 向指定平台某个会话发送文本，并用结果对象区分成功与失败。
+    /// 失败原因（平台没接入、会话 id 为空、内容为空）是可预期情况，用返回值表达而不是异常；
+    /// 需要写日志或判断回执是否送达的调用方（如平台命令的回执）应当用这个方法，
+    /// 免得靠匹配返回文本猜成败。插件自身抛出的异常仍然向上抛。
+    /// </summary>
+    public async Task<PlatformSendResult> TrySendMessageAsync(
+        string platform,
+        string conversationId,
+        string message)
+    {
         var available = Platforms;
-        if (available.Count == 0) return "当前没有可用的消息平台（没有插件提供消息平台）。";
+        if (available.Count == 0)
+            return new PlatformSendResult(false, "当前没有可用的消息平台（没有插件提供消息平台）。");
 
         var id = platform.Trim();
         var target = available.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
         if (target is null)
-            return $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。";
+            return new PlatformSendResult(false,
+                $"没有找到消息平台「{id}」，可用平台：{string.Join("、", available.Select(p => p.Id))}。");
 
         var conversation = conversationId.Trim();
-        if (conversation.Length == 0) return "会话 id 不能为空。";
-        if (string.IsNullOrWhiteSpace(message)) return "消息内容不能为空。";
+        if (conversation.Length == 0) return new PlatformSendResult(false, "会话 id 不能为空。");
+        if (string.IsNullOrWhiteSpace(message)) return new PlatformSendResult(false, "消息内容不能为空。");
 
         await target.SendMessageAsync(conversation, message).ConfigureAwait(false);
-        return $"已向平台「{target.Id}」的会话「{conversation}」发送消息。";
+        return new PlatformSendResult(true, $"已向平台「{target.Id}」的会话「{conversation}」发送消息。");
     }
 
     /// <summary>向指定会话发送图片或文件。</summary>
@@ -261,19 +308,34 @@ public class PlatformService : IDisposable
     {
         try
         {
-            if (_disposed || string.IsNullOrWhiteSpace(message.Content)) return;
+            if (_disposed) return;
 
             var platformId = string.IsNullOrWhiteSpace(message.PlatformId) ? platform.Id : message.PlatformId.Trim();
             if (!Remember(platformId, message.MessageId)) return;
 
             var sender = string.IsNullOrWhiteSpace(message.Sender) ? null : message.Sender.Trim();
             var context = string.IsNullOrWhiteSpace(message.Context) ? null : message.Context.Trim();
+            // 发送者稳定 id 与会话 id 必须原样透传：前者用于命令的管理员判定，后者用于回执与提示词
+            var senderId = string.IsNullOrWhiteSpace(message.SenderId) ? null : message.SenderId.Trim();
+            var conversationId = string.IsNullOrWhiteSpace(message.ConversationId)
+                ? null
+                : message.ConversationId.Trim();
+            // 引用摘要同样原样透传：它是结构化字段，不能退化成正文里的文本
+            var quote = string.IsNullOrWhiteSpace(message.Quote) ? null : message.Quote.Trim();
+            var content = message.Content.Trim();
+            // 正文可以为空：群里只 @ 一下、或只引用一条消息而不写字，都是值得回应的消息
+            //（装饰在 MentionsSelf / Quote 里，不在正文里）。三个字段全空才是真的没内容。
+            if (content.Length == 0 && !message.MentionsSelf && quote is null) return;
             var notification = new PlatformIncomingMessage(
                 platformId,
-                message.Content.Trim(),
+                content,
                 sender,
                 message.MessageId?.Trim(),
-                context);
+                context,
+                senderId,
+                conversationId,
+                message.MentionsSelf,
+                quote);
 
             Logger.Information("platform {Platform} pushed a message from {Sender}", platformId, sender ?? "未知");
             Notified?.Invoke(this, notification);

@@ -14,8 +14,11 @@ using SoufflePet.Plugin.Sdk;
 namespace SoufflePet.Plugins.NapCat;
 
 /// <summary>
-/// 会话历史：忠实记录收到的消息（展示行、消息 id 与发送者），
+/// 会话历史：忠实记录收到的消息（正文、消息 id、发送者，以及「@ 了你 / 引用了谁」这些<strong>结构化字段</strong>），
 /// 既供按会话读取历史，也供回复时反查 [quote:...]、[at:...]，并在磁盘上持久化。
+/// 记录只存正文、发送者与标记字段，「发送者（标记）：正文」这类展示行在读取时由
+/// <see cref="NapCatStoredMessage.FormatLine" /> 拼出——拼与剥只存在一处，不会再漂移。
+/// 行内不再重复会话 id：调用方本来就知道自己在读哪个会话。
 /// </summary>
 internal sealed class NapCatConversationStore
 {
@@ -77,7 +80,7 @@ internal sealed class NapCatConversationStore
         lock (_sync)
         {
             if (!_history.TryGetValue(conversationId, out var history) || history.Count == 0) return [];
-            return [.. history.TakeLast(count).Select(message => message.Line)];
+            return [.. history.TakeLast(count).Select(message => message.FormatLine())];
         }
     }
 
@@ -91,25 +94,29 @@ internal sealed class NapCatConversationStore
         }
     }
 
-    /// <summary>把一条收到的消息写入所属会话的历史记录。</summary>
+    /// <summary>把一条收到的消息写入所属会话的历史记录；<paramref name="text" /> 是纯正文，装饰走字段。</summary>
     public void RecordMessage(
         string conversationId,
         string? messageId,
-        string line,
+        string text,
         long userId,
         string sender,
-        string? displayName)
+        string? displayName,
+        bool mentionsSelf = false,
+        string? quotedId = null)
         => Record(
             conversationId,
             new NapCatStoredMessage(
                 messageId?.Trim() ?? string.Empty,
-                line,
+                text,
                 userId,
                 sender,
-                DateTimeOffset.UtcNow),
+                DateTimeOffset.UtcNow,
+                mentionsSelf,
+                quotedId),
             displayName);
 
-    /// <summary>把一条自己发出的消息也记进历史：发送者用自身昵称（拿不到时退回 QQ 号），格式与收到的消息一致。</summary>
+    /// <summary>把一条自己发出的消息也记进历史：发送者用自身昵称（拿不到时退回 QQ 号），正文与收到的消息一致按纯正文存。</summary>
     public void RecordSentMessage(string conversationId, string? messageId, string text, string? senderName)
     {
         var body = text.Trim();
@@ -121,7 +128,7 @@ internal sealed class NapCatConversationStore
             new NapCatStoredMessage(
                 // 保留消息 id：模型引用自己说过的话时，要靠它生成 reply 段
                 messageId?.Trim() ?? string.Empty,
-                $"[{conversationId}] {sender}：{body}",
+                body,
                 0,
                 sender,
                 DateTimeOffset.UtcNow),
@@ -150,10 +157,10 @@ internal sealed class NapCatConversationStore
     }
 
     /// <summary>
-    /// 把已记录消息的展示行换成补全后的版本（补上附件路径、合并转发或引用内容）。
-    /// 优先按消息 id 定位；没有消息 id 时退回按旧展示行匹配。
+    /// 把已记录消息的正文换成补全后的版本（补上附件路径或合并转发内容）。
+    /// 优先按消息 id 定位；没有消息 id 时退回按旧正文匹配。
     /// </summary>
-    public void PatchMessage(string conversationId, string? messageId, string oldLine, string newLine)
+    public void PatchMessage(string conversationId, string? messageId, string oldText, string newText)
     {
         var id = messageId?.Trim();
 
@@ -166,10 +173,37 @@ internal sealed class NapCatConversationStore
                 var item = history[index];
                 var matched = id is { Length: > 0 }
                     ? string.Equals(item.MessageId, id, StringComparison.Ordinal)
-                    : string.Equals(item.Line, oldLine, StringComparison.Ordinal);
+                    : string.Equals(item.Text, oldText, StringComparison.Ordinal);
                 if (!matched) continue;
 
-                history[index] = item with { Line = newLine };
+                history[index] = item with { Text = newText };
+                break;
+            }
+        }
+
+        _cacheDirty = true;
+    }
+
+    /// <summary>
+    /// 反查到被引用消息后，把摘要（「发送者：正文」）写回这条记录。
+    /// 摘要与正文分开存：读历史时才拼成「（引用 …）」，正文本身始终是对方写的内容。
+    /// 只按消息 id 定位：平台没给消息 id 时历史里不会记下摘要（上报给宿主的 <c>Quote</c> 不受影响）。
+    /// </summary>
+    public void PatchQuote(string conversationId, string? messageId, string quote)
+    {
+        var id = messageId?.Trim();
+        if (id is not { Length: > 0 } || string.IsNullOrWhiteSpace(quote)) return;
+
+        lock (_sync)
+        {
+            if (!_history.TryGetValue(conversationId, out var history)) return;
+
+            for (var index = history.Count - 1; index >= 0; index--)
+            {
+                var item = history[index];
+                if (!string.Equals(item.MessageId, id, StringComparison.Ordinal)) continue;
+
+                history[index] = item with { Quote = quote.Trim() };
                 break;
             }
         }
@@ -196,8 +230,8 @@ internal sealed class NapCatConversationStore
             {
                 var item = history[index];
                 if (item.MessageId.Length == 0) continue;
-                // 只比对正文：展示行还带着「[会话] 发送者：」前缀，用整行匹配会误命中
-                if (!NormalizeForMatch(StripPrefix(key, item.Line)).Contains(quote, StringComparison.OrdinalIgnoreCase))
+                // 只比对正文
+                if (!NormalizeForMatch(item.Text).Contains(quote, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 if (found is not null) return null; // 多条命中：无法判断引用哪条
@@ -245,16 +279,6 @@ internal sealed class NapCatConversationStore
         return found;
     }
 
-    /// <summary>从展示行里去掉「[会话 id] 发送者：」前缀，只留正文。</summary>
-    private static string StripPrefix(string conversationId, string line)
-    {
-        var prefix = $"[{conversationId}] ";
-        if (!line.StartsWith(prefix, StringComparison.Ordinal)) return line;
-
-        var index = line.IndexOf('：', prefix.Length);
-        return index >= 0 ? line[(index + 1)..] : line[prefix.Length..];
-    }
-
     /// <summary>匹配引用内容与昵称时去掉所有空白，避免换行、空格差异导致匹配失败。</summary>
     private static string NormalizeForMatch(string text)
         => new(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
@@ -277,7 +301,17 @@ internal sealed class NapCatConversationStore
                 {
                     if (string.IsNullOrWhiteSpace(entry.Id)) continue;
 
-                    _history[entry.Id] = [.. (entry.Messages ?? [])];
+                    // 旧缓存存的是拼好前缀的展示行（没有正文），这类记录读出来是空正文：直接丢弃，
+                    // 避免把空行喂给模型；下一次落盘时它们就不会再出现。
+                    // 只有 @ / 引用、没有正文的消息保留（正文为空但装饰字段有值）。
+                    var messages = (entry.Messages ?? [])
+                        .Where(message => !string.IsNullOrWhiteSpace(message.Text)
+                                          || message.MentionsSelf
+                                          || message.QuotedId is not null)
+                        .ToList();
+                    if (messages.Count == 0) continue;
+
+                    _history[entry.Id] = messages;
                     if (!string.IsNullOrWhiteSpace(entry.Name)) _conversationNames[entry.Id] = entry.Name;
                     _lastActive[entry.Id] = entry.LastActive;
                     restored++;

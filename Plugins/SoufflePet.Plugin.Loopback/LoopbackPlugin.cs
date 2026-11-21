@@ -42,11 +42,17 @@ public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _acceptLoop;
+    /// <summary>允许在平台消息里执行命令的 sender；为空表示禁止本平台执行命令。</summary>
+    private HashSet<string> _commandAdmins = new(StringComparer.OrdinalIgnoreCase);
 
     public string Id => "loopback";
 
     /// <summary>测试平台不注入平台提示词，保持系统提示词干净（也便于对照缓存命中）。</summary>
     public string? PlatformPrompt => null;
+
+    /// <summary>只有配置里列出的 sender 才能在平台消息里执行 /model 等命令。</summary>
+    public bool AllowsPlatformCommands(string? senderId) =>
+        senderId is { Length: > 0 } && _commandAdmins.Contains(senderId.Trim());
 
     public event EventHandler<PlatformIncomingMessage>? OnMentioned;
 
@@ -56,6 +62,7 @@ public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
                    && value.TryGetInt32(out var configured)
             ? configured
             : DefaultPort;
+        _commandAdmins = ReadConfigList(Context.Configuration, "commandAdmins");
 
         _cts = new CancellationTokenSource();
         _listener = new TcpListener(IPAddress.Loopback, port);
@@ -263,13 +270,26 @@ public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
             : "test:probe";
         var sender = query.TryGetValue("sender", out var name) && name.Length > 0 ? name : "tester";
 
-        // 正文以 [会话 id] 开头：系统提示词里约定模型据此知道往哪个会话回复
-        var content = $"[{conversationId}] {text}";
+        // 上报给宿主的是纯正文：会话 id 与发送者 id 单独传，宿主才能识别命令并做管理员判定。
+        // sender 同时充当该平台的稳定用户 id，配置管理员时填同一个值即可。
+        // mention=1 / quote=… 可选：模拟「@ 了你」「引用了一条消息」，走结构化字段而不是拼进正文。
         var messageId = Guid.NewGuid().ToString("N");
-        RecordIncoming(conversationId, sender, content);
+        var mentionsSelf = query.TryGetValue("mention", out var mention)
+                           && (mention == "1" || string.Equals(mention, "true", StringComparison.OrdinalIgnoreCase));
+        var quote = query.TryGetValue("quote", out var quoted) && quoted.Length > 0 ? quoted : null;
+        RecordIncoming(conversationId, sender, text);
 
         Context.Logger.LogInformation("loopback 收到测试消息 conversation={Conversation} text={Text}", conversationId, text);
-        OnMentioned?.Invoke(this, new PlatformIncomingMessage(Id, content, sender, messageId));
+        OnMentioned?.Invoke(this, new PlatformIncomingMessage(
+            Id,
+            text,
+            sender,
+            messageId,
+            null,
+            sender,
+            conversationId,
+            mentionsSelf,
+            quote));
         return Json(new { ok = true, messageId });
     }
 
@@ -340,6 +360,40 @@ public sealed class LoopbackPlugin : PluginBase, IMessagePlatform
     private Conversation? FindConversation(string conversationId) =>
         _conversations.FirstOrDefault(conversation =>
             string.Equals(conversation.Id, conversationId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>读取字符串列表配置：支持数组，也兼容逗号 / 空白分隔的字符串。</summary>
+    private static HashSet<string> ReadConfigList(JsonElement? config, string key)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (config is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(key, out var value))
+            return result;
+
+        void Add(string? raw)
+        {
+            var text = raw?.Trim();
+            if (!string.IsNullOrEmpty(text)) result.Add(text);
+        }
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                    Add(item.ValueKind == JsonValueKind.String ? item.GetString() : item.GetRawText());
+                break;
+
+            case JsonValueKind.String:
+                foreach (var part in (value.GetString() ?? string.Empty).Split(
+                             [',', '，', ';', '；', ' ', '\n', '\r', '\t'],
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    Add(part);
+                }
+
+                break;
+        }
+
+        return result;
+    }
 
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 

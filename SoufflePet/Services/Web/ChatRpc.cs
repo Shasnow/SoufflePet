@@ -313,6 +313,23 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                     await session.SelectModelAsync(RequireString(parameters, "key")).ConfigureAwait(false);
                     return null;
                 }
+                case "chat.command.list":
+                    return new { commands = MapSlashCommands() };
+                case "chat.command.execute":
+                {
+                    var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
+                    var text = RequireString(parameters, "text");
+
+                    // 命令来自输入框（默认）时，成功后由 Core 无条件清掉会话草稿：面板选中的候选文本
+                    // 和草稿并不相等（草稿 /hel → 执行 /help），不清的话重新打开会话会从快照带回旧命令、
+                    // 输入面板还会自动弹回。命令来自消息操作菜单 / 工具栏按钮时前端传 false，草稿是别的文字，保持不动。
+                    var clearDraft = GetBool(parameters, "clearDraft", fallback: true);
+                    var result = await SlashCommands.ExecuteAsync(session, text, fromPlatform: false, clearDraft)
+                        .ConfigureAwait(false);
+
+                    return new SlashCommandResultDto(result.Success, result.CommandName, result.Message,
+                        result.ModelKey);
+                }
                 case "chat.approval.mode":
                 {
                     var mode = GetString(parameters, "mode");
@@ -600,6 +617,17 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
 
     private static IReadOnlyList<WorkspaceDto> MapWorkspaces(IReadOnlyList<ChatWorkspaceState> workspaces) =>
         [.. workspaces.Select(workspace => new WorkspaceDto(workspace.Path, workspace.Name))];
+
+    /// <summary>命令目录：定义是 Core 里的静态表，界面只用来渲染菜单与预览。</summary>
+    private static IReadOnlyList<SlashCommandDto> MapSlashCommands() =>
+        [.. SlashCommandCatalog.All.Select(command => new SlashCommandDto(
+            command.Name,
+            command.Usage,
+            command.Summary,
+            command.Description,
+            command.Argument.WireName(),
+            command.ArgumentLabel,
+            command.AliasList))];
 
     private SessionSummaryDto MapSession(SessionRecord record) =>
         MapSession(record,
@@ -988,6 +1016,21 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         parameters.ValueKind == JsonValueKind.Object
         && parameters.TryGetProperty(name, out var value)
         && value.ValueKind == JsonValueKind.True;
+
+    /// <summary>读取布尔参数；缺省或不是布尔值时返回 <paramref name="fallback" />。</summary>
+    private static bool GetBool(JsonElement parameters, string name, bool fallback)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty(name, out var value))
+            return fallback;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => fallback,
+        };
+    }
 
     private static IReadOnlyList<string>? GetStringArray(JsonElement parameters, string name)
     {

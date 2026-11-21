@@ -8,12 +8,14 @@ import {
   FileText,
   Info,
   ShieldAlert,
+  Terminal,
   Wrench,
 } from 'lucide-react'
 import { memo, useState } from 'react'
 import { invoke } from '@/bridge/client'
 import type { ChatMessageDto } from '@/bridge/contracts'
 import { DiffCard } from '@/features/chat/DiffCard'
+import { useSlashPaletteStore } from '@/stores/slashPaletteStore'
 import { RenderMarkdown } from '@/ui/Markdown'
 import { UsageCapsule } from '@/ui/Usage'
 import { firstLine, formatClock, latestLine } from '@/ui/format'
@@ -22,6 +24,25 @@ interface MessageItemProps {
   sessionId: string
   message: ChatMessageDto
   streaming: boolean
+}
+
+/**
+ * 从消息上下文直接唤起命令面板：不占用输入框，也不改动当前草稿，
+ * 平台消息、工具结果这些气泡同样能用（例如看完平台消息后立刻 /model 换模型）。
+ */
+function CommandAction({ sessionId }: { sessionId: string }) {
+  const requestPalette = useSlashPaletteStore((state) => state.requestPalette)
+  return (
+    <button
+      type="button"
+      className="icon-btn"
+      aria-label="命令"
+      title="命令"
+      onClick={() => requestPalette(sessionId)}
+    >
+      <Terminal size={12} />
+    </button>
+  )
 }
 
 function reasoningHeader(message: ChatMessageDto): string {
@@ -76,6 +97,7 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
         <button type="button" className="icon-btn" aria-label="复制消息" title="复制" onClick={() => void copy()}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
+        <CommandAction sessionId={sessionId} />
       </div>
     </div>
   ) : null
@@ -199,6 +221,10 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
                   </button>
                 ) : null}
               </div>
+            </div>
+            {/* 平台消息 / 系统提醒没有正文元信息行，这里单独给出命令入口 */}
+            <div className="bubble-actions is-always">
+              <CommandAction sessionId={sessionId} />
             </div>
           </div>
           {meta}

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -9,16 +9,37 @@ namespace SoufflePet.Plugin.Sdk;
 /// 只有插件认为需要唤醒宿主时，才通过 <see cref="IMessagePlatform.OnMentioned" /> 抛出。
 /// </summary>
 /// <param name="PlatformId">消息平台 id，通常与 <see cref="IMessagePlatform.Id" /> 一致。</param>
-/// <param name="Content">消息正文。</param>
-/// <param name="Sender">发送者昵称，未知时为 null。</param>
+/// <param name="Content">
+/// 消息正文，**不要**再拼「[会话 id] 发送者：」这类前缀，也**不要**拼「@你」「引用消息」这类装饰：
+/// 会话 id 与发送者分别由 <paramref name="ConversationId" /> / <paramref name="Sender" /> 表达，
+/// 「@ 了桌宠」与「引用」由 <paramref name="MentionsSelf" /> / <paramref name="Quote" /> 表达，
+/// 宿主自己组装展示行与系统提示词。正文保持干净还有一个硬性原因：宿主据此判断消息是否是一条
+/// 命令（正文以 <c>/</c> 开头），前缀会把 <c>/model</c> 顶到第二位，命令分支就永远不命中。
+/// </param>
+/// <param name="Sender">发送者昵称（给人看的显示名），未知时为 null。</param>
 /// <param name="MessageId">平台侧的消息 id，用于宿主去重；平台没有 id 时可为 null。</param>
 /// <param name="Context">触发消息前的最近对话，供模型理解上下文；没有上下文时为 null。</param>
+/// <param name="SenderId">
+/// 发送者在平台内的稳定 id（如 QQ 号、openid），用于命令的管理员判定；
+/// 平台拿不到稳定 id 时为 null，此时该发送者一律不被视为管理员。
+/// </param>
+/// <param name="ConversationId">消息所属会话 id，与 <see cref="PlatformConversation.ConversationId" /> 同一套写法；未知时为 null。</param>
+/// <param name="MentionsSelf">
+/// 这条消息是否直接指向桌宠：@ 了桌宠，或引用了桌宠自己说过的话。只放标记，不要往正文里拼「@你」。
+/// </param>
+/// <param name="Quote">
+/// 被引用消息的摘要，形如「发送者：正文摘要」；没有引用或反查失败时为 null。同样不要拼进正文。
+/// </param>
 public sealed record PlatformIncomingMessage(
     string PlatformId,
     string Content,
     string? Sender = null,
     string? MessageId = null,
-    string? Context = null);
+    string? Context = null,
+    string? SenderId = null,
+    string? ConversationId = null,
+    bool MentionsSelf = false,
+    string? Quote = null);
 
 /// <summary>
 /// 消息平台里的一个会话（私聊或群聊）。
@@ -73,21 +94,30 @@ public interface IMessagePlatform
     Task<IReadOnlyList<PlatformConversation>> GetConversationsAsync();
 
     /// <summary>
-    /// 读取指定会话最近的消息。返回的文本由插件决定格式，但应带上会话 id 与发送者，便于模型理解上下文。
+    /// 读取指定会话最近的消息。返回的文本由插件决定格式，但应带上发送者（形如「发送者：正文」）；
+    /// 会话 id 由调用方给出，**不要**在每一行里重复——读历史 / 唤醒上下文本来就在该会话的上下文里。
     /// </summary>
-    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或消息前缀。</param>
+    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或 <see cref="PlatformIncomingMessage.ConversationId" />。</param>
     /// <param name="limit">最多返回的消息条数。</param>
     Task<string> GetMessagesAsync(string conversationId, int limit = 20);
 
     /// <summary>向指定会话发送消息。</summary>
-    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或消息前缀。</param>
+    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或 <see cref="PlatformIncomingMessage.ConversationId" />。</param>
     /// <param name="message">要发送的消息内容。</param>
     Task SendMessageAsync(string conversationId, string message);
 
     /// <summary>向指定会话发送图片或文件。</summary>
-    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或消息前缀。</param>
+    /// <param name="conversationId">会话 id，取自 <see cref="GetConversationsAsync" /> 或 <see cref="PlatformIncomingMessage.ConversationId" />。</param>
     /// <param name="attachment">要发送的附件。</param>
     Task SendAttachmentAsync(string conversationId, PlatformAttachment attachment);
+
+    /// <summary>
+    /// 某个发送者能否在平台消息里执行命令（<c>/model</c>、<c>/stop</c>、<c>/help</c>）。
+    /// 宿主只在返回 true 时执行，并把命令结果回执到原会话；<paramref name="senderId" /> 即
+    /// <see cref="PlatformIncomingMessage.SenderId" />，由插件拿自己的配置（例如管理员 QQ 号列表）比对。
+    /// 默认实现一律拒绝：没有实现该方法的平台不能用命令触发任何操作。
+    /// </summary>
+    bool AllowsPlatformCommands(string? senderId) => false;
 
     /// <summary>
     /// 插件判定需要唤醒宿主时触发（如消息 @ 了桌宠）；可能在任意后台线程触发。

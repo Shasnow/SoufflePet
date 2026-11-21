@@ -1,0 +1,28 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Shasnow -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DeployToHost=false：测试构建不要往宿主 bin 写插件（宿主在跑时那里会被占用） -->
+    <ProjectReference Include="..\Plugins\SoufflePet.Plugin.NapCat\SoufflePet.Plugin.NapCat.csproj"
+                      AdditionalProperties="DeployToHost=false" />
+  </ItemGroup>
+
+</Project>

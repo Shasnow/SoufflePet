@@ -3864,3 +3864,153 @@ body.is-resizing-sidebar .sidebar {
   font-size: 12px;
   color: var(--text-3);
 }
+
+/* ===== 命令面板 ===== */
+
+/* 与 @ 面板同样浮在输入卡上方：顶部固定一段命令预览，下面是候选列表 */
+.slash-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 31;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+
+.slash-popover:focus {
+  outline: none;
+}
+
+.slash-preview {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+}
+
+.slash-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-2);
+}
+
+.slash-usage {
+  overflow: hidden;
+  color: var(--text-1);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slash-preview-arg {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.slash-description {
+  margin: 5px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.slash-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 候选为空时列表里没有 option（空态提示在 listbox 外面），收掉它的内边距避免多余空隙 */
+.slash-list:empty {
+  display: none;
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-item.is-active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+.slash-item-label {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slash-item-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slash-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.slash-empty-hint {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.slash-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.slash-foot .spacer {
+  flex: 1;
+}
+
+/* 平台消息等辅助气泡没有元信息行：命令入口常显，不靠 hover 才出现 */
+.bubble-actions.is-always {
+  opacity: 1;
+  margin-top: 4px;
+}
+

@@ -235,9 +235,10 @@ public interface IMessagePlatform
 | `Id` | 平台标识，模型工具里的 `platform` 参数用它；与 `plugin.json` 的 `id` 无关 |
 | `PlatformPrompt` | 平台提示词，注入系统提示词（如「这是你自己的 QQ」「你正在托管主人的 QQ」，或引用/@ 等平台消息写法）；null 或空白时不注入 |
 | `GetConversationsAsync` | 返回已知会话，按最近活跃排序；只返回本次运行期间收到过消息的会话也可以 |
-| `GetMessagesAsync` | 返回该会话最近消息的文本，格式自定，但应带上会话 id 与发送者 |
+| `GetMessagesAsync` | 返回该会话最近消息的文本，格式自定，但应带上发送者（如「发送者：正文」）；会话 id 由调用方给出，不必每行重复 |
 | `SendMessageAsync` | 向指定会话发送文本 |
 | `SendAttachmentAsync` | 向指定会话发送本地图片或文件 |
+| `AllowsPlatformCommands` | 该发送者能否在平台消息里执行命令（`/model`、`/stop`、`/help`）；按插件自己的配置判断，接口默认返回 false（全部拒绝） |
 | `OnMentioned` | 插件认为需要唤醒桌宠时触发，可能在任意后台线程 |
 
 ### 数据类型
@@ -245,20 +246,28 @@ public interface IMessagePlatform
 | 类型 | 字段 | 用途 |
 | --- | --- | --- |
 | `PlatformConversation` | `ConversationId`、`DisplayName` | 会话；id 建议用 `kind:id` 形式，如 `group:12345`、`private:777` |
-| `PlatformIncomingMessage` | `PlatformId`、`Content`、`Sender`、`MessageId` | 唤醒通知；宿主按 `MessageId` 去重，没有 id 时传 null |
+| `PlatformIncomingMessage` | `PlatformId`、`Content`、`Sender`、`MessageId`、`Context`、`SenderId`、`ConversationId`、`MentionsSelf`、`Quote` | 唤醒通知；宿主按 `MessageId` 去重，没有 id 时传 null。`Content` 是纯消息正文，**不要**再拼「[会话 id] 发送者：」前缀，也**不要**拼「@你」「引用消息」这类装饰——会话 / 发送者 / 「@ 了你」 / 「引用了某条消息」分别由 `ConversationId` / `Sender` / `MentionsSelf` / `Quote` 表达；`SenderId` 是平台内稳定用户 id（QQ 号、openid），宿主用它判定谁能执行平台命令 |
 | `PlatformAttachment` | `FilePath`、`Kind`、`DisplayName` | 要发送的附件，只传本地绝对路径 |
 | `PlatformAttachmentKind` | `Image`、`File` | 附件类型 |
 
 ### 约定
 
 - 「是否新消息、是否值得提醒、是否是自己发的」都由插件判定，宿主不关心平台细节；只有确实需要桌宠处理时才抛 `OnMentioned`（例如被 @、被引用）。
+- `Content` 只放正文：平台自己的展示前缀（会话 id、发送者昵称）由宿主按 `PlatformId` / `ConversationId` / `Sender` 组装。宿主凭「正文以 `/` 开头」识别平台命令，带前缀会让命令永远识别不到。
+- 装饰同理走字段，不要拼进正文：@ 了桌宠用 `MentionsSelf = true`，引用了某条消息用 `Quote = "发送者：正文摘要"`（正文为空也可以上报，宿主照样会回应）。**把这些拼进正文是踩过的坑**：NapCat 群聊曾在正文前加「@你」，于是群里 @桌宠 发 `/model` 得到「@你 /model」，命令分支永远不命中、管理员判定也不触发，而私聊与唤醒词触发的消息却正常——这种「只有某个平台的某个场景坏掉」的问题很难靠肉眼看出来。
+- 平台命令默认全部拒绝：需要在自己的插件设置里提供管理员名单（内置插件是 `commandAdmins` 配置项），并实现 `IMessagePlatform.AllowsPlatformCommands(senderId)` 按名单判定。接口默认返回 false，没实现的平台不能用命令触发任何操作；`/approval` 属于整机安全策略，平台侧一律拒绝。名单写进插件自己的配置（`plugin-configs/<id>.json`），不改 `SoufflePet.json`。
 - 会话缓存要设上限，否则长时间挂机会持续增长（NapCat 插件按最近活跃淘汰，最多保留 200 个会话）。
 - 附件只传路径，不要自己读成 base64 塞进模型上下文。宿主会先校验文件存在、不是目录、图片不超过 5 MB、其他文件不超过 50 MB，并按扩展名决定 `Kind`。
 - `OnMentioned` 可能在后台线程触发，处理函数里不要长时间同步阻塞；耗时工作放到后台任务。
 
 ### 唤醒之后
 
-宿主收到 `OnMentioned` 后，会把消息以「平台消息」气泡插入对话并生成一轮回复（不会自动弹出窗口）。模型可用下列工具按会话操作：
+宿主收到 `OnMentioned` 后，会把消息以「平台消息」气泡插入对话并生成一轮回复（不会自动弹出窗口）。模型看到的是
+`<platform_message platform="…" conversation="…" sender="…" mentions_self="true" quote="…">` 提示块：会话 id 来自插件上报的 `ConversationId`，
+正文（`<content>`）里不带任何前缀或装饰，`mentions_self` / `quote` 分别来自 `MentionsSelf` / `Quote`，
+工具参数 `conversation` 也取自这个属性——所以插件务必把 `ConversationId` 传对，
+否则模型只能自己 `list_platform_conversations` 猜会话。桌宠界面上的气泡会把标记拼在发送者后面
+（如 `小明（@你 · 引用 小红：明天呢）：正文`），这部分由宿主负责，插件不需要关心。模型可用下列工具按会话操作：
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |

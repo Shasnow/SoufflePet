@@ -10,16 +10,21 @@ using System.Text.RegularExpressions;
 
 namespace SoufflePet.Plugins.NapCat;
 
-/// <summary>把 OneBot 消息事件解析成可读正文：支持数组段格式，也兼容 string + CQ 码格式。</summary>
+/// <summary>
+/// 把 OneBot 消息事件解析成可读正文：支持数组段格式，也兼容 string + CQ 码格式。
+/// </summary>
+/// <remarks>
+/// 正文只放对方真正写的内容（文字、图片/文件占位、合并转发占位）。「@ 了桌宠」与「引用」
+/// 属于装饰，分别落到 <see cref="NapCatParsedMessage.MentionsSelf" /> / <see cref="NapCatParsedMessage.QuotedId" />，
+/// **不**拼进正文：宿主靠「正文是否以 / 开头」识别命令，一旦拼上「@你」，
+/// 群聊里 @桌宠 发 /model 就永远进不了命令分支。
+/// </remarks>
 internal static class NapCatMessageParser
 {
-    /// <summary>解析阶段给引用段留的占位；反查拿到正文后原地替换，反查失败时就显示它。</summary>
-    public const string QuotePlaceholder = "引用消息";
-
     /// <summary>消息字符串里 OneBot 的 CQ 码，用于解析 message_format=string 的平台。</summary>
     private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);
 
-    /// <summary>解析消息正文；引用内容稍后统一用 get_msg 反查补上，解析阶段只留占位。</summary>
+    /// <summary>解析消息正文；引用内容稍后统一用 get_msg 反查，只用来给历史记录加引用标记。</summary>
     public static NapCatParsedMessage ParseMessage(
         JsonElement root,
         long selfId,
@@ -61,12 +66,10 @@ internal static class NapCatMessageParser
             switch (GetString(segment, "type"))
             {
                 case "reply":
-                    // 正文内容稍后用 get_msg 反查补上；是否需要唤醒由反查结果决定
+                    // 引用只记 id：反查后由宿主侧展示行与历史记录体现，正文不拼「引用消息」
                     var id = GetString(data, "id") ?? GetString(data, "message_id");
                     if (string.IsNullOrWhiteSpace(id)) break;
 
-                    // 先用占位表示这是一条引用，读历史时也能看出回复关系
-                    builder.Append(QuotePlaceholder);
                     quotedId ??= id;
 
                     break;
@@ -83,8 +86,8 @@ internal static class NapCatMessageParser
                     }
                     else if (qq == selfId.ToString(CultureInfo.InvariantCulture))
                     {
+                        // @ 桌宠只置标记，正文保持干净（否则群里的 /model 会被顶到第二位）
                         mentionsSelf = true;
-                        builder.Append("@你");
                     }
                     else if (!string.IsNullOrEmpty(qq))
                     {
@@ -159,7 +162,7 @@ internal static class NapCatMessageParser
                     var id = FindCqArgument(arguments, "id");
                     if (string.IsNullOrWhiteSpace(id)) break;
 
-                    builder.Append(QuotePlaceholder);
+                    // 引用只记 id，正文不拼「引用消息」
                     quotedId ??= id;
 
                     break;
@@ -172,8 +175,8 @@ internal static class NapCatMessageParser
                     }
                     else if (qq == selfId.ToString(CultureInfo.InvariantCulture))
                     {
+                        // @ 桌宠只置标记，正文保持干净
                         mentionsSelf = true;
-                        builder.Append("@你");
                     }
                     else if (!string.IsNullOrEmpty(qq))
                     {
