@@ -37,7 +37,8 @@ internal sealed record NapCatQuotedMessage(bool IsSelf, string Sender, string Su
 /// 会话里的一条消息。<see cref="Text" /> 是纯正文（可能已补上附件路径或合并转发占位），
 /// 「@ 了你」「引用了某条消息」是**字段**（<see cref="MentionsSelf" /> / <see cref="QuotedId" /> / <see cref="Quote" />），
 /// 不在正文里；「发送者（标记）：正文」这种展示行只在读取侧拼，
-/// 记录本身永远不带装饰。消息 id 用于把补全后的正文 / 引用摘要写回同一条记录。
+/// 记录本身永远不带装饰。消息 id 用于把补全后的正文 / 引用摘要写回同一条记录；
+/// <see cref="UserId" /> 一律是发起人的 QQ 号，桌宠自己的消息就用自己的 QQ 号。
 /// </summary>
 internal sealed record NapCatStoredMessage(
     string MessageId,

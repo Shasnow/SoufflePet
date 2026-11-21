@@ -24,7 +24,7 @@ internal static class PlatformPromptHints
         - `sender`: 发送者昵称
         - `mentions_self="true"` 表示这条消息提及了你
         - `quote`: 被引用消息的摘要，形如「发送者：正文」
-        - `<context>`: 同一会话此前的记录，每行「发送者：正文」，不再重复会话 id；`<content>` 是本次需要回应的消息
+        - `<context>`: 该会话的上下文；`<content>` 是本次需要回应的消息
 
         信息不足时用 `get_platform_messages` 查看该会话更早的消息；
         决定回复时，用 `send_platform_message` 回复该会话。

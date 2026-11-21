@@ -39,7 +39,7 @@ public sealed class NapCatHistoryTests : IDisposable
             mentionsSelf: true, quotedId: "41");
         store.PatchQuote("group:1", "42", "小红：明天呢");
 
-        var message = Assert.Single(store.GetRecentMessages("group:1", 5));
+        var message = Assert.Single(store.GetMessagesSinceLastReply("group:1", 5, selfId: 0));
         // 记录本身只有事实字段，正文不带任何装饰
         Assert.Equal("/model deepseek", message.Text);
         Assert.True(message.MentionsSelf);
@@ -68,7 +68,7 @@ public sealed class NapCatHistoryTests : IDisposable
         var reloaded = new NapCatConversationStore(NullLogger.Instance, _root);
         reloaded.Load();
 
-        var messages = reloaded.GetRecentMessages("group:1", 5);
+        var messages = reloaded.GetMessagesSinceLastReply("group:1", 5, selfId: 0);
         Assert.Equal(2, messages.Count);
         Assert.True(messages[0].MentionsSelf);
         Assert.Equal("41", messages[0].QuotedId);
@@ -113,5 +113,64 @@ public sealed class NapCatHistoryTests : IDisposable
         Assert.Contains("MentionsSelf", json);
         Assert.Contains("QuotedId", json);
         Assert.Contains("Quote", json);
+    }
+
+    [Fact]
+    public void WakeContextStartsAfterLastSelfReply()
+    {
+        const long selfId = 90001;
+        var store = new NapCatConversationStore(NullLogger.Instance, _root);
+        store.RecordMessage("group:1", "1", "早", 10001, "小明", "群 1");
+        store.RecordSentMessage("group:1", "2", "早上好", "桌宠", selfId);
+        store.RecordMessage("group:1", "3", "在吗", 10001, "小明", "群 1");
+        store.RecordMessage("group:1", "4", "在吗？", 10002, "小红", "群 1");
+
+        var messages = store.GetMessagesSinceLastReply("group:1", 10, selfId);
+
+        // 上次回复之前的消息（包括桌宠自己的回复）不再作为上下文
+        Assert.Equal(new[] { "3", "4" }, messages.Select(item => item.MessageId));
+    }
+
+    [Fact]
+    public void WakeContextStopsBeforeCurrentMessage()
+    {
+        const long selfId = 90001;
+        var store = new NapCatConversationStore(NullLogger.Instance, _root);
+        store.RecordMessage("group:1", "1", "早", 10001, "小明", "群 1");
+        store.RecordSentMessage("group:1", "2", "早上好", "桌宠", selfId);
+        store.RecordMessage("group:1", "3", "在吗", 10001, "小明", "群 1");
+        store.RecordMessage("group:1", "4", "补充一句", 10001, "小明", "群 1");
+        // 异步补全期间才入队的更新消息：不属于当前这条的上下文
+        store.RecordMessage("group:1", "5", "更晚的消息", 10002, "小红", "群 1");
+
+        var messages = store.GetMessagesSinceLastReply("group:1", 10, selfId, currentMessageId: "4");
+
+        Assert.Equal(new[] { "3" }, messages.Select(item => item.MessageId));
+    }
+
+    [Fact]
+    public void WakeContextFallsBackToRecentMessagesBeforeFirstReply()
+    {
+        var store = new NapCatConversationStore(NullLogger.Instance, _root);
+        store.RecordMessage("group:1", "1", "一", 10001, "小明", "群 1");
+        store.RecordMessage("group:1", "2", "二", 10001, "小明", "群 1");
+        store.RecordMessage("group:1", "3", "三", 10001, "小明", "群 1");
+
+        // 还没回复过（selfId 未知也同理）：退回最近 maxCount 条，并按上限截断
+        var messages = store.GetMessagesSinceLastReply("group:1", 2, selfId: 0);
+
+        Assert.Equal(new[] { "2", "3" }, messages.Select(item => item.MessageId));
+    }
+
+    [Fact]
+    public void AtTargetResolutionSkipsSelfMessages()
+    {
+        var store = new NapCatConversationStore(NullLogger.Instance, _root);
+        store.RecordSentMessage("group:1", "1", "我是桌宠", "桌宠", 90001);
+        store.RecordMessage("group:1", "2", "大家好", 10001, "小明", "群 1");
+
+        // [at:桌宠] 不能解析成机器人自己，否则会 @ 到自己
+        Assert.Equal(0, store.FindUserIdBySender("group:1", "桌宠", excludeUserId: 90001));
+        Assert.Equal(10001, store.FindUserIdBySender("group:1", "小明", excludeUserId: 90001));
     }
 }

@@ -134,7 +134,8 @@ internal sealed class NapCatSender
                 // 自己说过的话也记进历史：模型读上下文、按内容引用自己的发言都靠它（需要 message_id）
                 var sentId = GetSentMessageId(response);
                 if (sentId is null) _logger.LogDebug("NapCat 发送响应缺少 message_id，本条自身消息无法被引用");
-                _store.RecordSentMessage(conversationId, sentId, DisplayText(chunks[index]), selfSender);
+                _store.RecordSentMessage(
+                    conversationId, sentId, DisplayText(chunks[index]), selfSender, _selfId());
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -197,7 +198,8 @@ internal sealed class NapCatSender
             && userId > 0)
             return userId.ToString(CultureInfo.InvariantCulture);
 
-        var found = _store.FindUserIdBySender(conversationId, value);
+        // 排除桌宠自己：自消息现在也带自己的 QQ 号，否则 [at:自己的昵称] 会 @ 到自己
+        var found = _store.FindUserIdBySender(conversationId, value, _selfId());
         return found > 0 ? found.ToString(CultureInfo.InvariantCulture) : null;
     }
 
@@ -364,7 +366,8 @@ internal sealed class NapCatSender
             ConversationId(conversation),
             GetSentMessageId(response),
             $"[图片] {name}",
-            await ResolveSelfSenderAsync(socket).ConfigureAwait(false));
+            await ResolveSelfSenderAsync(socket).ConfigureAwait(false),
+            _selfId());
     }
 
     /// <summary>文件走平台上传接口；小文件用 base64，大文件传绝对路径。</summary>
@@ -397,7 +400,8 @@ internal sealed class NapCatSender
             ConversationId(conversation),
             null, // 上传接口不返回 message_id，文件消息无法被后续引用
             $"[文件] {name}",
-            await ResolveSelfSenderAsync(socket).ConfigureAwait(false));
+            await ResolveSelfSenderAsync(socket).ConfigureAwait(false),
+            _selfId());
     }
 
     /// <summary>把会话元组格式化成 group:群号 / private:QQ号 的会话 id。</summary>
@@ -458,6 +462,7 @@ internal sealed class NapCatSender
                     return next < text.Length && !char.IsWhiteSpace(text[next]) ? $"@{target} " : $"@{target}";
                 }
 
+                _logger.LogDebug("已解析 @ 目标：{Target} → {Qq}", target, qq);
                 return $"{AtOpen}{qq}{AtClose}";
             });
         }

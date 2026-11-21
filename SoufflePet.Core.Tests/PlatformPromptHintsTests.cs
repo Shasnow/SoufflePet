@@ -27,8 +27,6 @@ public sealed class PlatformPromptHintsTests
         Assert.Contains("sender", guide);
         Assert.Contains("send_platform_message", guide);
         Assert.Contains("get_platform_messages", guide);
-        // 会话 id 只在属性 / 头部出现一次：context 行内不再重复（否则正文里会再抄一遍）
-        Assert.Contains("不再重复会话 id", guide);
         // 装饰（@ 了你 / 引用）也必须是属性，模型才知道怎么解读
         Assert.Contains("mentions_self", guide);
         Assert.Contains("quote", guide);

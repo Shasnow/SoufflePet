@@ -84,13 +84,52 @@ internal sealed class NapCatConversationStore
         }
     }
 
-    /// <summary>取指定会话最近 <paramref name="count" /> 条消息（带消息 id），供唤醒上下文精确排除当前消息。</summary>
-    public IReadOnlyList<NapCatStoredMessage> GetRecentMessages(string conversationId, int count)
+    /// <summary>
+    /// 取桌宠上次回复之后、且在 <paramref name="currentMessageId" /> 之前的消息
+    /// （按时间正序，最多保留最近 <paramref name="maxCount" /> 条），用作唤醒时附带的上下文；
+    /// 还没回复过时退回最近的消息。自己的消息按发起人 QQ 号（<paramref name="selfId" />）识别。
+    /// 以当前消息为截止点是必要的：异步补全期间可能已有更新的消息入队，
+    /// 那些消息不属于当前这条的上下文，也不能把「比当前消息更晚的回复」当成上次回复。
+    /// </summary>
+    public IReadOnlyList<NapCatStoredMessage> GetMessagesSinceLastReply(
+        string conversationId,
+        int maxCount,
+        long selfId,
+        string? currentMessageId = null)
     {
+        if (maxCount <= 0) return [];
+
         lock (_sync)
         {
             if (!_history.TryGetValue(conversationId, out var history) || history.Count == 0) return [];
-            return [.. history.TakeLast(count)];
+
+            // 当前消息的位置（不含它本身）；找不到（已被淘汰）时取到历史末尾
+            var end = history.Count;
+            if (currentMessageId is { Length: > 0 })
+            {
+                for (var index = history.Count - 1; index >= 0; index--)
+                {
+                    if (!string.Equals(history[index].MessageId, currentMessageId, StringComparison.Ordinal))
+                        continue;
+                    end = index;
+                    break;
+                }
+            }
+
+            // 在范围内从后往前找自己最后一条回复，它之后的才是「这次要回的内容」
+            var start = 0;
+            if (selfId > 0)
+            {
+                for (var index = end - 1; index >= 0; index--)
+                {
+                    if (history[index].UserId != selfId) continue;
+                    start = index + 1;
+                    break;
+                }
+            }
+
+            if (start >= end) return [];
+            return [.. history.Skip(start).Take(end - start).TakeLast(maxCount)];
         }
     }
 
@@ -116,8 +155,16 @@ internal sealed class NapCatConversationStore
                 quotedId),
             displayName);
 
-    /// <summary>把一条自己发出的消息也记进历史：发送者用自身昵称（拿不到时退回 QQ 号），正文与收到的消息一致按纯正文存。</summary>
-    public void RecordSentMessage(string conversationId, string? messageId, string text, string? senderName)
+    /// <summary>
+    /// 把一条自己发出的消息也记进历史：发送者用自身昵称（拿不到时退回 QQ 号），
+    /// 发起人 QQ 号用自己的 id，读取时据此区分「谁在说」。
+    /// </summary>
+    public void RecordSentMessage(
+        string conversationId,
+        string? messageId,
+        string text,
+        string? senderName,
+        long selfId)
     {
         var body = text.Trim();
         if (body.Length == 0) return;
@@ -129,7 +176,7 @@ internal sealed class NapCatConversationStore
                 // 保留消息 id：模型引用自己说过的话时，要靠它生成 reply 段
                 messageId?.Trim() ?? string.Empty,
                 body,
-                0,
+                selfId,
                 sender,
                 DateTimeOffset.UtcNow),
             displayName: null);
@@ -245,8 +292,10 @@ internal sealed class NapCatConversationStore
     /// <summary>
     /// 按昵称反查 QQ 号：先精确匹配、再按包含匹配；只有唯一命中才返回，
     /// 多个相似昵称时返回 0，避免 @ 到错误的人。
+    /// <paramref name="excludeUserId" /> 用来排除桌宠自己：自己的消息也带 QQ 号，
+    /// 否则模型写 <c>[at:自己的昵称]</c> 时会解析成机器人自己。
     /// </summary>
-    public long FindUserIdBySender(string conversationId, string senderName)
+    public long FindUserIdBySender(string conversationId, string senderName, long excludeUserId = 0)
     {
         var name = senderName.Trim();
         if (name.Length == 0) return 0;
@@ -255,25 +304,43 @@ internal sealed class NapCatConversationStore
         {
             if (!_history.TryGetValue(conversationId.Trim(), out var history)) return 0;
 
-            var exact = FindUserId(history, item => string.Equals(item.Sender, name, StringComparison.OrdinalIgnoreCase));
+            var exact = FindUserId(
+                history,
+                item => string.Equals(item.Sender, name, StringComparison.OrdinalIgnoreCase),
+                excludeUserId);
             if (exact is not null) return exact.Value;
 
-            var fuzzy = FindUserId(history, item => item.Sender.Contains(name, StringComparison.OrdinalIgnoreCase));
+            var fuzzy = FindUserId(
+                history,
+                item => item.Sender.Contains(name, StringComparison.OrdinalIgnoreCase),
+                excludeUserId);
             return fuzzy ?? 0;
         }
     }
 
-    /// <summary>在历史里找唯一满足条件的发送者 QQ 号；没有命中或多条命中都返回 null。</summary>
-    private static long? FindUserId(List<NapCatStoredMessage> history, Func<NapCatStoredMessage, bool> predicate)
+    /// <summary>
+    /// 在历史里找唯一满足条件的发送者 QQ 号：同一人多条消息只算一次命中，
+    /// 出现两个不同用户时返回 null，避免 @ 到错误的人。
+    /// </summary>
+    private static long? FindUserId(
+        List<NapCatStoredMessage> history,
+        Func<NapCatStoredMessage, bool> predicate,
+        long excludeUserId = 0)
     {
         long? found = null;
         for (var index = history.Count - 1; index >= 0; index--)
         {
             var item = history[index];
-            if (item.UserId <= 0 || !predicate(item)) continue;
+            if (item.UserId <= 0 || item.UserId == excludeUserId || !predicate(item)) continue;
 
-            if (found is not null) return null;
-            found = item.UserId;
+            if (found is null)
+            {
+                found = item.UserId;
+                continue;
+            }
+
+            // 不同用户都命中：昵称区分不出来，宁可退回纯文本
+            if (found != item.UserId) return null;
         }
 
         return found;

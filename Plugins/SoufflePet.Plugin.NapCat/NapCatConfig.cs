@@ -28,7 +28,10 @@ internal sealed class NapCatConfig
     /// <summary>唤醒词（仅群聊生效）：消息正文只要含有其中任意一个（不区分大小写）就唤醒桌宠（无需 @）；为空表示不启用。</summary>
     public string[] WakeWords { get; init; } = [];
 
-    /// <summary>唤醒时附带的最近消息条数，让模型不必主动调用 get_platform_messages；0 表示不附带上下文。</summary>
+    /// <summary>
+    /// 唤醒时附带上一次回复之后的消息（最多这么多条），让模型不必主动调用 get_platform_messages；
+    /// 0 表示不附带上下文。
+    /// </summary>
     public int WakeContextMessages { get; init; } = 50;
 
     /// <summary>概率回复（仅群聊生效）：非 @、非引用桌宠、也未命中唤醒词的消息，按此概率（0-1）随机唤醒桌宠；0 表示关闭。</summary>

@@ -327,6 +327,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
             case "notice":
                 Context.Logger.LogDebug("收到 NapCat 通知：{Event}", root.ToString());
+                // 戳一戳等通知同样带 self_id：不写回的话，重启后首个事件是戳一戳时
+                // _selfId 仍为 0，回复会被记成 UserId=0，下次就找不到「上次回复」。
+                var noticeSelfId = NapCatMessageParser.GetInt64(root, "self_id");
+                if (noticeSelfId > 0) Volatile.Write(ref _selfId, noticeSelfId);
                 _pokeResponder?.Handle(root, Volatile.Read(ref _selfId));
                 break;
 
@@ -582,31 +586,25 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         }
     }
 
-    /// <summary>按配置的条数把最近消息作为上下文交给宿主，模型不必再调 get_platform_messages 也能看懂上下文。</summary>
+    /// <summary>
+    /// 把「桌宠上次回复之后、当前消息之前」的消息作为上下文交给宿主，模型不必再调
+    /// get_platform_messages；条数仍受配置上限约束，超出时保留最近的部分。
+    /// </summary>
     private string? BuildWakeContext(string conversationId, string body, string? messageId)
     {
         var count = _config.WakeContextMessages;
         if (count <= 0) return null;
 
-        var messages = _store?.GetRecentMessages(conversationId, count + 1) ?? [];
-        var lines = new List<string>();
-        string? lastText = null;
-        foreach (var item in messages)
-        {
-            // 按消息 id 排除当前消息：异步补全期间可能已有新消息入队，不能只看末行
-            if (messageId is { Length: > 0 } && string.Equals(item.MessageId, messageId, StringComparison.Ordinal))
-                continue;
+        // currentMessageId 由历史存储统一排除：异步补全期间入队的新消息不会混进这条的上下文
+        var messages = _store?.GetMessagesSinceLastReply(
+            conversationId, count, Volatile.Read(ref _selfId), messageId) ?? [];
+        var lines = messages.Select(item => item.FormatLine()).ToList();
 
-            lines.Add(item.FormatLine());
-            lastText = item.Text;
-        }
-
-        // 没有消息 id 时退回按正文去掉当前消息
+        // 没有消息 id 时（戳一戳等）退回按正文去掉当前消息
         if (messageId is not { Length: > 0 } && lines.Count > 0
-            && string.Equals(lastText, body, StringComparison.Ordinal))
+            && string.Equals(messages[^1].Text, body, StringComparison.Ordinal))
             lines.RemoveAt(lines.Count - 1);
 
-        if (lines.Count > count) lines = [.. lines.TakeLast(count)];
         return lines.Count == 0 ? null : string.Join('\n', lines);
     }
 

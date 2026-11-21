@@ -82,9 +82,9 @@
     },
     {
       "key": "wakeContextMessages",
-      "label": "唤醒附带的上下文条数",
+      "label": "唤醒上下文条数上限",
       "type": "number",
-      "description": "唤醒桌宠时附带该会话最近多少条消息，让模型不必主动调用 get_platform_messages 也能看懂上下文；0 表示不附带。"
+      "description": "唤醒桌宠时附带上一次回复之后的消息（超出此条数时保留最近的），让模型不必主动调用 get_platform_messages；0 表示不附带。"
     },
     {
       "key": "replyProbability",
