@@ -182,6 +182,49 @@ internal sealed class NapCatConversationStore
             displayName: null);
     }
 
+    /// <summary>
+    /// 把远端拉到的历史合并进来：按消息 id 去重（已有记录保持原样，避免覆盖已经补全的正文），
+    /// 再按时间排序并裁剪到上限。
+    /// </summary>
+    public void MergeHistory(string conversationId, IReadOnlyList<NapCatStoredMessage> messages)
+    {
+        if (messages.Count == 0) return;
+
+        lock (_sync)
+        {
+            if (!_history.TryGetValue(conversationId, out var history))
+            {
+                history = [];
+                _history[conversationId] = history;
+            }
+
+            var known = history
+                .Where(item => item.MessageId.Length > 0)
+                .Select(item => item.MessageId)
+                .ToHashSet(StringComparer.Ordinal);
+
+            var added = 0;
+            foreach (var message in messages)
+            {
+                if (message.MessageId.Length > 0 && !known.Add(message.MessageId)) continue;
+
+                history.Add(message);
+                added++;
+            }
+
+            if (added == 0) return;
+
+            // 合并后按时间重排：断线期间的消息插到原有记录之间也不会乱序
+            history.Sort((left, right) => left.ReceivedAt.CompareTo(right.ReceivedAt));
+            while (history.Count > MaxHistoryMessages) history.RemoveAt(0);
+
+            _lastActive[conversationId] = DateTimeOffset.Now;
+            TrimConversations();
+        }
+
+        _cacheDirty = true;
+    }
+
     private void Record(string conversationId, NapCatStoredMessage message, string? displayName)
     {
         lock (_sync)

@@ -46,6 +46,9 @@ internal sealed class NapCatConnection
     /// <summary>连接关闭时取消后台下载、action 等待等操作。</summary>
     public CancellationToken ShutdownToken => _cts.Token;
 
+    /// <summary>WebSocket 连上（含重连）后触发；处理方应自行放到后台任务里，别阻塞接收循环。</summary>
+    public event Action? Connected;
+
     /// <summary>当前 WebSocket；未连接或已断开时为 null。</summary>
     public ClientWebSocket? Socket
     {
@@ -134,6 +137,16 @@ internal sealed class NapCatConnection
                 await socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
                 lock (_sync) _socket = socket;
                 _logger.LogInformation("NapCat WebSocket 已连接：{Url}", uri);
+
+                // 通知插件补拉断线期间的消息；处理方内部再起后台任务，避免阻塞接收
+                try
+                {
+                    Connected?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "处理 NapCat 连接建立事件失败");
+                }
 
                 await PumpAsync(socket, cancellationToken).ConfigureAwait(false);
                 _logger.LogWarning("NapCat WebSocket 已断开");

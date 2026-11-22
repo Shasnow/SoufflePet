@@ -43,6 +43,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     /// <summary>机器人自己的 QQ 号，来自事件里的 self_id；用于识别 @ 与过滤自己的消息。</summary>
     private long _selfId;
 
+    /// <summary>历史补拉是否正在执行，避免重连抖动时并发拉取。</summary>
+    private int _historyBackfillRunning;
+
     /// <summary>告诉模型如何主动引用消息与 @ 别人；插件会把标记替换成真实消息段。</summary>
     private const string InteractionHint =
         "需要引用某条消息时，在回复开头写 [quote:被引用的原句片段]；需要 @ 某人时写 [at:QQ号或昵称]，"
@@ -73,6 +76,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         _store.StartAutoSave();
 
         _connection = new NapCatConnection(Context.Logger, _config.AccessToken, HandleEvent);
+        // 每次连上（含重连）都补拉一次历史，把桌宠离线期间的消息补进本地会话缓存
+        _connection.Connected += () => _ = BackfillHistoryAsync();
         _quotes = new NapCatQuoteTracker(Context.Logger, _connection);
         _sender = new NapCatSender(Context.Logger, _connection, _store, _config, () => Volatile.Read(ref _selfId));
         _groupAdmin = new NapCatGroupAdmin(Context.Logger, _connection, _config);
@@ -313,6 +318,153 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
     {
         if (_connection is not null) await _connection.ShutdownAsync().ConfigureAwait(false);
         _store?.StopAutoSave();
+    }
+
+    /// <summary>
+    /// 连上 NapCat 后补拉已知会话的历史，把桌宠离线（或断线）期间的消息合并进本地缓存，
+    /// 这样唤醒上下文、[quote:...] 与 [at:...] 都能看到这段时间的消息。
+    /// </summary>
+    private async Task BackfillHistoryAsync()
+    {
+        if (Interlocked.CompareExchange(ref _historyBackfillRunning, 1, 0) != 0) return;
+
+        try
+        {
+            var socket = _connection?.Socket;
+            if (socket is not { State: WebSocketState.Open }) return;
+
+            await EnsureSelfIdAsync(socket).ConfigureAwait(false);
+
+            var conversations = _store!.GetConversations();
+            if (conversations.Count == 0) return;
+
+            var total = 0;
+            foreach (var conversation in conversations)
+            {
+                if (!NapCatConversationId.TryParse(conversation.ConversationId, out var target)) continue;
+                // 白名单外的会话不补拉：这些消息本来也不会唤醒桌宠
+                if (target.Kind == "group"
+                    && _config.AllowedGroups.Count > 0
+                    && !_config.AllowedGroups.Contains(target.Id)) continue;
+                if (target.Kind == "private"
+                    && _config.AllowedUsers.Count > 0
+                    && !_config.AllowedUsers.Contains(target.Id)) continue;
+
+                var messages = await FetchRemoteMessagesAsync(socket, target).ConfigureAwait(false);
+                if (messages.Count == 0) continue;
+
+                _store.MergeHistory(conversation.ConversationId, messages);
+                total += messages.Count;
+            }
+
+            Context.Logger.LogInformation(
+                "已从 NapCat 补拉 {Conversations} 个会话的历史，共 {Count} 条",
+                conversations.Count,
+                total);
+        }
+        catch (OperationCanceledException)
+        {
+            // 插件正在卸载，忽略
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogDebug(ex, "补拉 NapCat 历史消息失败");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _historyBackfillRunning, 0);
+        }
+    }
+
+    /// <summary>首次连上时先取一次自身 QQ 号，补拉的历史才能正确区分「自己发的」与「@ 了你」。</summary>
+    private async Task EnsureSelfIdAsync(ClientWebSocket socket)
+    {
+        if (Volatile.Read(ref _selfId) > 0) return;
+
+        try
+        {
+            var response = await _connection!
+                .SendActionAsync(socket, "get_login_info", new Dictionary<string, object?>())
+                .ConfigureAwait(false);
+            if (response.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                var id = NapCatMessageParser.GetInt64(data, "user_id");
+                if (id > 0) Volatile.Write(ref _selfId, id);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 正在卸载，忽略
+        }
+        catch (Exception ex)
+        {
+            Context.Logger.LogDebug(ex, "补拉历史前获取自身 QQ 号失败");
+        }
+    }
+
+    /// <summary>
+    /// 拉取会话最近的远端历史，转成可直接合并进本地缓存的记录。
+    /// 不下载附件、不逐条反查合并转发与引用，避免启动时堆积大量 action。
+    /// </summary>
+    private async Task<IReadOnlyList<NapCatStoredMessage>> FetchRemoteMessagesAsync(
+        ClientWebSocket socket,
+        (string Kind, long Id) conversation)
+    {
+        var isGroup = conversation.Kind == "group";
+        var parameters = isGroup
+            ? new Dictionary<string, object?>
+            {
+                ["group_id"] = conversation.Id,
+                ["count"] = NapCatConversationStore.MaxHistoryMessages,
+            }
+            : new Dictionary<string, object?>
+            {
+                ["user_id"] = conversation.Id,
+                ["count"] = NapCatConversationStore.MaxHistoryMessages,
+            };
+
+        var response = await _connection!
+            .SendActionAsync(
+                socket,
+                isGroup ? "get_group_msg_history" : "get_friend_msg_history",
+                parameters)
+            .ConfigureAwait(false);
+
+        if (!response.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+            return [];
+        if (!data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var selfId = Volatile.Read(ref _selfId);
+        var results = new List<NapCatStoredMessage>(messages.GetArrayLength());
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.ValueKind != JsonValueKind.Object) continue;
+
+            var messageId = NapCatMessageParser.GetString(message, "message_id");
+            if (string.IsNullOrWhiteSpace(messageId)) continue;
+
+            var parsed = NapCatMessageParser.ParseMessage(message, selfId, collectForwards: true);
+            var text = parsed.Text;
+            // 只有 @ / 引用、没有正文的消息也保留，展示行会写「无正文」
+            if (string.IsNullOrWhiteSpace(text) && !parsed.MentionsSelf && parsed.QuotedId is null) continue;
+
+            if (parsed.Forwards is { Count: > 0 } forwards)
+                text = NapCatForwardResolver.Fallback(text, forwards);
+
+            var userId = NapCatMessageParser.GetInt64(message, "user_id");
+            var seconds = NapCatMessageParser.GetInt64(message, "time");
+            results.Add(new NapCatStoredMessage(
+                messageId.Trim(),
+                text,
+                userId,
+                NapCatMessageParser.GetSenderName(message, userId),
+                seconds > 0 ? DateTimeOffset.FromUnixTimeSeconds(seconds) : DateTimeOffset.UtcNow,
+                parsed.MentionsSelf,
+                parsed.QuotedId));
+        }
+
+        return results;
     }
 
     /// <summary>NapCat 事件分派：消息交给平台逻辑，加群申请交给自动审批，戳一戳交给响应器。</summary>
