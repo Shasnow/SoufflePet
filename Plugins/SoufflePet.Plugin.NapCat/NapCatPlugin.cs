@@ -87,6 +87,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             Context.Logger,
             _config.AttachmentCacheDir,
             _connection.ShutdownToken);
+        // 启动时后台清理超过保留期的附件，避免缓存目录无限增长
+        _ = Task.Run(_downloader.CleanupExpired, CancellationToken.None);
         _forwardResolver = new NapCatForwardResolver(
             Context.Logger,
             _connection,

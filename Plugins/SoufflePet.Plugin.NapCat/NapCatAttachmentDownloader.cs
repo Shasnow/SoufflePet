@@ -23,6 +23,9 @@ internal sealed class NapCatAttachmentDownloader
     /// <summary>单个附件的下载超时。</summary>
     private static readonly TimeSpan AttachmentDownloadTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>附件缓存保留天数；启动时清理超过这个天数的文件。</summary>
+    private const int RetentionDays = 7;
+
     /// <summary>下载附件用的 HTTP 客户端（插件内共享）；IPv4 优先建连的实现收敛在 Sdk。</summary>
     private static readonly HttpClient Http = Ipv4HttpClient.Create();
 
@@ -38,6 +41,49 @@ internal sealed class NapCatAttachmentDownloader
         _logger = logger;
         _attachmentCacheDir = attachmentCacheDir;
         _shutdownToken = shutdownToken;
+    }
+
+    /// <summary>清理缓存目录里超过保留期的附件；启动时调用，由插件放到后台执行。</summary>
+    public void CleanupExpired()
+    {
+        try
+        {
+            if (!Directory.Exists(_attachmentCacheDir))
+            {
+                _logger.LogInformation("NapCat 附件缓存目录不存在，跳过清理：{Dir}", _attachmentCacheDir);
+                return;
+            }
+
+            var cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+            var scanned = 0;
+            var removed = 0;
+            foreach (var path in Directory.EnumerateFiles(_attachmentCacheDir))
+            {
+                scanned++;
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(path) >= cutoff) continue;
+
+                    File.Delete(path);
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(ex, "清理过期附件失败：{Path}", path);
+                }
+            }
+
+            _logger.LogInformation(
+                "NapCat 附件缓存清理完成：扫描 {Scanned} 个文件，删除 {Removed} 个超过 {Days} 天的附件（目录 {Dir}）",
+                scanned,
+                removed,
+                RetentionDays,
+                _attachmentCacheDir);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "清理 NapCat 附件缓存失败");
+        }
     }
 
     /// <summary>把正文里的附件占位符替换成「[图片 本地路径]」；下载失败时退回「[图片]」。</summary>
