@@ -802,7 +802,9 @@ public sealed class LlmChatService(
         if (entries.Count == 0) return;
 
         builder.AppendLine();
-        builder.AppendLine("## 消息平台接入");
+        builder.AppendLine("## 消息平台");
+        builder.AppendLine();
+        builder.AppendLine(PlatformPromptHints.PlatformMessageGuide);
         builder.AppendLine();
         builder.Append("已接入消息平台：").AppendLine(string.Join("、", entries.Select(entry => entry.Id)));
 
@@ -822,8 +824,6 @@ public sealed class LlmChatService(
                 }
             }
         }
-        builder.AppendLine();
-        builder.AppendLine(PlatformPromptHints.PlatformMessageGuide);
     }
 
     /// <summary>

@@ -15,10 +15,13 @@ internal static class PlatformPromptHints
     internal const string ConversationParameter = "会话 id，形如 group:12345 或 private:777";
 
     /// <summary>
-    /// 系统提示词里「消息平台接入」一节的收尾说明：解释 <c>&lt;platform_message&gt;</c> 的各部分，
-    /// 尤其是 conversation 属性的来源与回复方式。静态文本，不随轮次变化，不影响前缀缓存。
+    /// 系统提示词里「消息平台接入」一节的收尾说明：先点明消息平台是什么，再解释
+    /// <c>&lt;platform_message&gt;</c> 的各部分，尤其是 conversation 属性的来源与回复方式。
+    /// 静态文本，不随轮次变化，不影响前缀缓存。
     /// </summary>
     internal const string PlatformMessageGuide = """
+        消息平台是外部聊天软件（如 QQ、微信）：你能收到其中的消息，也能回复到对应会话。
+
         平台消息标记 `<platform_message>`:
         - `conversation`: 该消息所属会话 id
         - `sender`: 发送者昵称
@@ -27,6 +30,6 @@ internal static class PlatformPromptHints
         - `<context>`: 该会话的上下文；`<content>` 是本次需要回应的消息
 
         信息不足时用 `get_platform_messages` 查看该会话更早的消息；
-        决定回复时，用 `send_platform_message` 回复该会话。
+        决定回复时，**必须**用 `send_platform_message` 回复该会话。
         """;
 }
