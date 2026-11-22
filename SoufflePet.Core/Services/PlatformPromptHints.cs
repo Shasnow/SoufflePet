@@ -29,7 +29,7 @@ internal static class PlatformPromptHints
         - `quote`: 被引用消息的摘要，形如「发送者：正文」
         - `<context>`: 该会话的上下文；`<content>` 是本次需要回应的消息
 
-        信息不足时用 `get_platform_messages` 查看该会话更早的消息；
-        决定回复时，**必须**用 `send_platform_message` 回复该会话。
+        信息不足时用 `get_platform_messages` 工具查看该会话更早的消息；
+        决定回复时，**必须**用 `send_platform_message` 工具回复该会话。
         """;
 }
