@@ -20,16 +20,16 @@ internal static class PlatformPromptHints
     /// 静态文本，不随轮次变化，不影响前缀缓存。
     /// </summary>
     internal const string PlatformMessageGuide = """
-        消息平台是外部聊天软件（如 QQ、微信）：你能收到其中的消息，也能回复到对应会话。
+        消息平台是外部会话渠道（如 QQ、微信），来自消息平台的消息将包含在 `<platform_message>` 标记中。
 
         平台消息标记 `<platform_message>`:
         - `conversation`: 该消息所属会话 id
         - `sender`: 发送者昵称
-        - `mentions_self="true"` 表示这条消息提及了你
-        - `quote`: 被引用消息的摘要，形如「发送者：正文」
+        - `mentions_self="true"`: 这条消息提及了你
+        - `quote`: 被引用消息的摘要
         - `<context>`: 该会话的上下文；`<content>` 是本次需要回应的消息
 
         信息不足时用 `get_platform_messages` 工具查看该会话更早的消息；
-        决定回复时，**必须**用 `send_platform_message` 工具回复该会话。
+        决定回复时，你**必须**用 `send_platform_message` 工具回复该会话。
         """;
 }
