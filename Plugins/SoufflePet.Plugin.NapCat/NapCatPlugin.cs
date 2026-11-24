@@ -48,8 +48,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
     /// <summary>告诉模型如何主动引用消息与 @ 别人；插件会把标记替换成真实消息段。</summary>
     private const string InteractionHint =
-        "需要引用某条消息时，在回复开头写 [quote:被引用的原句片段]；需要 @ 某人时写 [at:QQ号或昵称]，"
-        + "[at:all] 表示 @全体成员。插件会把这些标记替换成真实引用和 @；不需要时就不要写。";
+        "需要引用某条消息时，在回复开头写 [quote:消息 id]，"
+        + "也可以写 [quote:被引用的原句片段] 让插件按内容反查。"
+        + "需要 @ 某人时写 [at:QQ号或昵称]，[at:all] 表示 @全体成员。"
+        + "插件会把这些标记替换成真实引用和 @；不需要时就不要写。";
 
     /// <summary>平台 id，供工具的 platform 参数使用。</summary>
     public string Id => "napcat";

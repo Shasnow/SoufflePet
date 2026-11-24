@@ -333,6 +333,31 @@ internal sealed class NapCatConversationStore
     }
 
     /// <summary>
+    /// 解析回复里 [quote:…] 的目标：先当作消息 id 在历史里找，找不到再按内容片段反查。
+    /// </summary>
+    public string? ResolveQuoteTarget(string conversationId, string target)
+    {
+        var key = conversationId.Trim();
+        var value = target.Trim();
+        if (key.Length == 0 || value.Length == 0) return null;
+
+        lock (_sync)
+        {
+            if (!_history.TryGetValue(key, out var history)) return null;
+
+            for (var index = history.Count - 1; index >= 0; index--)
+            {
+                var item = history[index];
+                if (item.MessageId.Length > 0
+                    && string.Equals(item.MessageId, value, StringComparison.Ordinal))
+                    return item.MessageId;
+            }
+        }
+
+        return FindMessageIdByText(conversationId, value);
+    }
+
+    /// <summary>
     /// 按昵称反查 QQ 号：先精确匹配、再按包含匹配；只有唯一命中才返回，
     /// 多个相似昵称时返回 0，避免 @ 到错误的人。
     /// <paramref name="excludeUserId" /> 用来排除桌宠自己：自己的消息也带 QQ 号，

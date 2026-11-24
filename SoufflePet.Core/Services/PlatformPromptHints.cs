@@ -25,6 +25,7 @@ internal static class PlatformPromptHints
         平台消息标记 `<platform_message>`:
         - `conversation`: 该消息所属会话 id
         - `sender`: 发送者昵称
+        - `message_id`: 这条消息在平台内的 id
         - `mentions_self="true"`: 这条消息提及了你
         - `quote`: 被引用消息的摘要
         - `<context>`: 该会话的上下文；`<content>` 是本次需要回应的消息

@@ -153,7 +153,7 @@ internal sealed class NapCatSender
     }
 
     /// <summary>
-    /// 解析回复开头的引用标记 [quote:被引用的原句]，返回对应消息 id，并把标记从文本里移除。
+    /// 解析回复开头的引用标记 [quote:消息 id 或原句片段]，返回对应消息 id，并把标记从文本里移除。
     /// 找不到匹配消息时只移除标记，按普通回复发送。
     /// </summary>
     private string? ExtractQuoteMarker(ref string text, string conversationId)
@@ -174,9 +174,9 @@ internal sealed class NapCatSender
         var quote = match.Groups["quote"].Value.Trim();
         text = text[match.Length..].Trim();
 
-        var messageId = _store.FindMessageIdByText(conversationId, quote);
+        var messageId = _store.ResolveQuoteTarget(conversationId, quote);
         if (messageId is null)
-            _logger.LogDebug("引用内容未匹配到最近的消息，按普通回复发送：{Quote}", quote);
+            _logger.LogDebug("引用目标未匹配到消息，按普通回复发送：{Quote}", quote);
         return messageId;
     }
 

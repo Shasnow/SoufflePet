@@ -185,6 +185,9 @@ public sealed class ChatTriggerRouter : IDisposable
             builder.Append(" conversation=\"").Append(EscapeAttribute(conversation)).Append('"');
         if (notification.Sender is { Length: > 0 } sender)
             builder.Append(" sender=\"").Append(EscapeAttribute(sender)).Append('"');
+        // 消息 id 交给模型，用于按 id 引用这条消息（平台提示词里说明具体写法）
+        if (notification.MessageId is { Length: > 0 } messageId)
+            builder.Append(" message_id=\"").Append(EscapeAttribute(messageId)).Append('"');
         if (notification.MentionsSelf) builder.Append(" mentions_self=\"true\"");
         if (notification.Quote is { Length: > 0 } quote)
             builder.Append(" quote=\"").Append(EscapeAttribute(quote)).Append('"');
