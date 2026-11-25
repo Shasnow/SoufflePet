@@ -145,9 +145,45 @@ public sealed partial class ChatTools
         [Description("要删除的记忆键")] string key)
         => _memory.Forget(key);
 
+    /// <summary>
+    /// 按关键词检索当前会话的历史对话：数据源是当前会话目录下的 conversation.jsonl
+    /// （会话历史由 ChatSession 写入这里，DI 单例 ChatMemory 的默认文件没有写入方）。
+    /// </summary>
     private string Recall(
         [Description("检索关键词")] string query)
-        => _memory.Recall(query);
+    {
+        var store = ChatSessionStore.CreateDefault();
+        ChatSessionIndex index;
+        try
+        {
+            index = store.Load();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"读取会话索引失败：{ex.Message}";
+        }
+
+        var currentId = CurrentSessionId();
+        if (string.IsNullOrEmpty(currentId)) return "当前没有可检索的会话。";
+
+        var record = index.Sessions.FirstOrDefault(item =>
+            string.Equals(item.Id, currentId, StringComparison.OrdinalIgnoreCase));
+        if (record is null) return "当前会话还没有可检索的历史记录。";
+
+        var memory = new ChatMemory(
+            _settings,
+            store.SessionDirectory(record.Id, record.WorkspacePath),
+            "conversation.jsonl",
+            store.ProfilePath);
+
+        // 最近几轮已经随请求发给模型了，不再重复返回；TopK 只有 3 条，重复会挤掉真正需要的回忆
+        var exclude = memory
+            .RecentTurns(Math.Max(1, _settings.HistoryWindowTurns) * 2 + 2, includeTools: false)
+            .Select(turn => turn.Text)
+            .ToList();
+
+        return memory.Recall(query, exclude);
+    }
 
     private string ReadSkill(
         [Description("技能名称")] string name)

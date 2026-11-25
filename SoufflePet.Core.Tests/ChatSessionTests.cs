@@ -129,6 +129,41 @@ public sealed class ChatSessionTests : IAsyncLifetime
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UserRequestTextCarriesOnlyOptionalCurrentTime(bool timeAwareness)
+    {
+        _settings.TimeAwarenessEnabled = timeAwareness;
+        IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>? captured = null;
+        var llm = new FakeLlm((_, history, _) =>
+        {
+            captured = history;
+            return Streams(new LlmTextDelta("好"));
+        });
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync("在吗", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var user = Assert.Single(captured!, message => message.Role == Microsoft.Extensions.AI.ChatRole.User);
+        if (timeAwareness)
+        {
+            Assert.StartsWith("在吗", user.Text);
+            Assert.Contains("<system_reminder>", user.Text);
+            Assert.Contains("当前时间", user.Text);
+        }
+        else
+        {
+            Assert.Equal("在吗", user.Text);
+        }
+
+        // 旧对话不再自动注入：请求里只有可能的时间信息，没有「相关回忆」块
+        Assert.DoesNotContain("相关回忆", user.Text);
+        Assert.DoesNotContain("以下是与本轮提问相关的旧对话", user.Text);
+    }
+
     [Fact]
     public async Task SystemNoticeKeepsRawTextForExpansion()
     {

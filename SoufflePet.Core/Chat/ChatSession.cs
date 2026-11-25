@@ -38,7 +38,7 @@ public sealed class ChatSession : IAsyncDisposable
     private const int TitleLength = 30;
     private const int WorkspaceNameLength = 40;
 
-    /// <summary>系统信息用 XML 标记包裹：追加在用户消息末尾，重建请求历史时按它裁掉。</summary>
+    /// <summary>系统信息用 XML 标记包裹：当前时间等附加内容追加在用户消息末尾。</summary>
     private const string SystemInfoOpen = "<system_reminder>";
     private const string SystemInfoClose = "</system_reminder>";
 
@@ -1464,45 +1464,22 @@ public sealed class ChatSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 组装真正发给模型的用户消息：只有开启时间感知时附加当前时间。
+    /// 旧对话不再自动注入，需要回忆时由模型主动调用 `recall` 工具。
+    /// </summary>
     private string BuildUserRequestText(string messageText)
     {
-        var historyTexts = _history
-            .Select(message => StripTurnContext(message.Text).Trim())
-            .Where(text => text.Length > 0)
-            .ToHashSet(StringComparer.Ordinal);
-        var historyCallIds = _history
-            .SelectMany(message => message.Contents)
-            .OfType<FunctionCallContent>()
-            .Select(call => call.CallId)
-            .ToHashSet(StringComparer.Ordinal);
+        if (!_settings.TimeAwarenessEnabled) return messageText;
 
-        var recall = _memory.BuildRecallBlock(messageText, historyTexts, historyCallIds);
+        var now = DateTimeOffset.Now;
+        var context = new StringBuilder()
+            .Append("当前时间 ")
+            .Append(now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN")))
+            .Append(" UTC").Append(now.ToString("zzz"))
+            .Append(' ').Append(TimeZoneInfo.Local.Id);
 
-        var context = new StringBuilder();
-        if (recall.Length > 0)
-        {
-            context.AppendLine("以下是与本轮提问相关的旧对话（来自长期记忆，仅供参考，不属于用户输入）：");
-            context.AppendLine(recall);
-        }
-
-        if (_settings.TimeAwarenessEnabled)
-        {
-            var now = DateTimeOffset.Now;
-            context.Append("当前时间 ")
-                .Append(now.ToString("yyyy-MM-dd HH:mm:ss dddd", CultureInfo.GetCultureInfo("zh-CN")))
-                .Append(" UTC").Append(now.ToString("zzz"))
-                .Append(' ').Append(TimeZoneInfo.Local.Id);
-        }
-
-        return context.Length == 0
-            ? messageText
-            : $"{messageText}\n\n{SystemInfoOpen}\n{context.ToString().TrimEnd()}\n{SystemInfoClose}";
-    }
-
-    private static string StripTurnContext(string text)
-    {
-        var index = text.IndexOf("\n\n" + SystemInfoOpen, StringComparison.Ordinal);
-        return index < 0 ? text : text[..index];
+        return $"{messageText}\n\n{SystemInfoOpen}\n{context}\n{SystemInfoClose}";
     }
 
     private int CountHistoryUserTurns() =>

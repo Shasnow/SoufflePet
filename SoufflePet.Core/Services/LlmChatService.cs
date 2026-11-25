@@ -156,7 +156,7 @@ public sealed class LlmChatService(
         // 缓存友好：系统提示词处在整个请求的最前面，任何一处变化都会让服务端的前缀缓存
         // 从变化处起全部失效。因此各块按「变化频率从低到高」排列——
         // 人设 → 工作区（AGENTS.md）→ 技能清单 → 消息平台 → 用户档案；
-        // 随每轮提问变化的「相关回忆」与「当前时间」不写进系统提示词，改由 ChatViewModel
+        // 随每轮提问变化的「当前时间」不写进系统提示词，改由 ChatSession
         // 追加到本轮用户消息末尾并随消息进入历史，让「系统提示词 + 历史对话」这段前缀
         // 逐字节稳定，后续提问可以持续命中缓存。调整顺序前请先读这段注释。
         var messages = new List<ChatMessage>(history.Count + 3);
@@ -186,7 +186,7 @@ public sealed class LlmChatService(
             stringSystemPrompt, cancellationToken);
         messages.Add(new ChatMessage(ChatRole.System, stringSystemPrompt));
 
-        // 历史里已经包含本轮用户消息（以及附加的时间 / 相关回忆，由 ChatViewModel 组装并写入历史）：
+        // 历史里已经包含本轮用户消息（以及附加的当前时间，由 ChatSession 组装并写入历史）：
         // 附加内容随消息进入请求历史，下一轮请求的前缀才能与上一轮逐字节一致。
         messages.AddRange(history);
 

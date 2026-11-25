@@ -59,7 +59,7 @@ public sealed class ChatMemory
     /// <summary>档案条数上限，超出丢弃最久未更新的。</summary>
     private const int MaxProfileEntries = 30;
 
-    /// <summary>一次检索最多注入几条回忆。</summary>
+    /// <summary>一次检索最多返回几条。</summary>
     private const int SearchTopK = 3;
 
     private const double Bm25K1 = 1.2;
@@ -337,7 +337,7 @@ public sealed class ChatMemory
     /// <summary>
     /// 追加一条记录并落盘；role 为 user / assistant / tool。
     /// tool 记录额外保存调用信息（CallId、工具名、参数、完整结果），供启动时重建请求上下文。
-    /// requestText 是真正发给模型的正文（含时间 / 回忆等附加内容）；与展示用的 text 分开保存，
+    /// requestText 是真正发给模型的正文（含附加的当前时间等上下文）；与展示用的 text 分开保存，
     /// 重启后按它重建请求历史，第一次请求才能接上上一轮的前缀缓存。
     /// inputTokens / outputTokens / cachedInputTokens 是本轮 token 用量（只记在最后一条助手消息上），
     /// 重启后据此恢复气泡底部的用量文案。
@@ -603,11 +603,12 @@ public sealed class ChatMemory
     }
 
     /// <summary>按关键词检索历史对话，返回给模型看的文本。</summary>
-    public string Recall(string query)
+    /// <param name="exclude">已随当前请求发给模型的文本，不参与检索（通常是最近几轮）。</param>
+    public string Recall(string query, IReadOnlyCollection<string>? exclude = null)
     {
         if (!Enabled) return "长期记忆已在设置里关闭。";
 
-        var results = Search(query);
+        var results = Search(query, exclude);
         if (results.Count == 0) return $"没有找到与「{query}」相关的历史对话。";
 
         var builder = new StringBuilder();
@@ -649,49 +650,14 @@ public sealed class ChatMemory
         builder.AppendLine();
         builder.AppendLine("## 记忆系统");
         builder.AppendLine();
-        builder.AppendLine("使用 remember/forget 命令来 记住/遗忘 记忆，记忆跨会话共享。以下是之前对话里记忆的信息，回答时可以自然使用，不要生硬复述。");
+        builder.AppendLine("使用 remember/forget 命令来 记住/遗忘 记忆，记忆跨会话共享；需要回顾更早的对话时，调用 recall 工具按关键词检索本会话的历史记录。以下是之前对话里记忆的信息，回答时可以自然使用，不要生硬复述。");
         builder.AppendLine();
         builder.AppendLine("### 长期记忆：");
         builder.AppendLine();
         foreach (var line in profileLines) builder.AppendLine(line);
     }
 
-    /// <summary>
-    /// 检索与 <paramref name="query" /> 相关的旧对话，返回逐行文本（每行一条回忆，正文压成单行）。
-    /// 这部分内容随每轮提问变化，由调用方追加到请求末尾（而不是系统提示词），
-    /// 否则每轮请求的前缀都不同，服务端的前缀缓存会整体失效。
-    /// exclude 里的文本与 excludeCallIds 里的调用 id（通常是本次请求已带上的历史对话）不参与检索，
-    /// 避免与上下文重复——工具消息的文本为空，只能按 CallId 排除。
-    /// 关闭记忆、没有提问或没有命中时返回空串。
-    /// </summary>
-    public string BuildRecallBlock(
-        string? query,
-        IReadOnlyCollection<string>? exclude = null,
-        IReadOnlyCollection<string>? excludeCallIds = null)
-    {
-        if (!Enabled || string.IsNullOrWhiteSpace(query)) return string.Empty;
-
-        var snippets = Search(query, exclude, excludeCallIds);
-        if (snippets.Count == 0) return string.Empty;
-
-        var builder = new StringBuilder();
-        foreach (var turn in snippets)
-        {
-            builder.Append("- [")
-                .Append(turn.Time.ToString("yyyy-MM-dd HH:mm"))
-                .Append("] ")
-                .Append(RoleLabel(turn.Role))
-                .Append('：')
-                .AppendLine(turn.Text.ReplaceLineEndings(" "));
-        }
-
-        return builder.ToString().TrimEnd();
-    }
-
-    private List<MemoryTurn> Search(
-        string? query,
-        IReadOnlyCollection<string>? exclude = null,
-        IReadOnlyCollection<string>? excludeCallIds = null)
+    private List<MemoryTurn> Search(string? query, IReadOnlyCollection<string>? exclude = null)
     {
         var results = new List<MemoryTurn>();
         if (!Enabled || string.IsNullOrWhiteSpace(query)) return results;
@@ -699,9 +665,9 @@ public sealed class ChatMemory
         var queryTokens = Tokenize(query).Distinct(StringComparer.Ordinal).ToArray();
         if (queryTokens.Length == 0) return results;
 
-        // 已进入本次请求上下文的对话不参与检索，否则会与上下文内容重复
+        // 已在当前上下文里的内容不参与检索，避免模型调用 recall 时拿回刚看过的内容
         HashSet<string>? excluded = exclude is { Count: > 0 }
-            ? [.. exclude.Select(t => t.Trim())]
+            ? [.. exclude.Select(text => text.Trim())]
             : null;
 
         lock (_gate)
@@ -723,11 +689,9 @@ public sealed class ChatMemory
             var scored = new List<(Turn Turn, double Score)>(count);
             foreach (var turn in _turns)
             {
-                // 召回旧对话时不带工具调用与工具结果：它们只是过程的中间产物，不是「回忆」的内容
+                // 检索不带工具调用与工具结果：它们只是过程的中间产物，不是「回忆」的内容
                 if (IsToolRole(turn.Role)) continue;
                 if (excluded is not null && excluded.Contains(turn.Text)) continue;
-                if (excludeCallIds is not null && turn.CallId is { Length: > 0 } callId
-                    && excludeCallIds.Contains(callId)) continue;
 
                 var frequencies = new Dictionary<string, int>(StringComparer.Ordinal);
                 foreach (var term in turn.Tokens)
@@ -747,7 +711,7 @@ public sealed class ChatMemory
 
             if (scored.Count == 0) return results;
 
-            // 相对阈值：只保留接近最佳命中的几条，避免把弱相关的旧对话也塞进提示词
+            // 相对阈值：只保留接近最佳命中的几条，避免返回弱相关的结果
             var best = scored.Max(s => s.Score);
             foreach (var item in scored
                          .Where(s => s.Score >= best * 0.5)
@@ -973,7 +937,7 @@ public sealed class ChatMemory
 
         public string Text { get; set; } = string.Empty;
 
-        /// <summary>真正发给模型的正文（含时间 / 回忆等附加内容）；为空时回退到 <see cref="Text" />。</summary>
+        /// <summary>真正发给模型的正文（含附加的当前时间等上下文）；为空时回退到 <see cref="Text" />。</summary>
         public string? RequestText { get; set; }
 
         /// <summary>本轮 token 用量：输入（仅记录在本轮最后一条助手消息上，用于重启后恢复气泡底部的用量文案）。</summary>

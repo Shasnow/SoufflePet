@@ -66,11 +66,30 @@ public sealed class ChatMemoryTests : IDisposable
         var profile = new StringBuilder();
         memory.BuildProfileBlock(profile);
         Assert.Contains("舒芙蕾", profile.ToString());
+        // 自动回忆移除后，提示词必须告诉模型可以用 recall 检索更早的对话
+        Assert.Contains("recall", profile.ToString());
 
         Assert.Contains("已删除", memory.Forget("称呼"));
         var after = new StringBuilder();
         memory.BuildProfileBlock(after);
         Assert.DoesNotContain("舒芙蕾", after.ToString());
+    }
+
+    [Fact]
+    public void RecallExcludesTextsAlreadyInCurrentContext()
+    {
+        var settings = new SouffleSettings { ChatMemoryEnabled = true };
+        var memory = new ChatMemory(settings, _root);
+        memory.AddTurn(ChatMemory.UserRole, "苹果很甜");
+        memory.AddTurn(ChatMemory.AssistantRole, "苹果可以");
+        memory.AddTurn(ChatMemory.UserRole, "香蕉很甜");
+
+        Assert.Contains("苹果可以", memory.Recall("苹果"));
+
+        // 已经随当前请求发给模型的最近几轮不再重复返回
+        var filtered = memory.Recall("苹果", ["苹果很甜"]);
+        Assert.DoesNotContain("苹果很甜", filtered);
+        Assert.Contains("苹果可以", filtered);
     }
 
     [Fact]
