@@ -35,11 +35,15 @@ internal sealed class NapCatForwardResolver
     }
 
     /// <summary>把正文里的合并转发占位符替换成内容摘要；反查失败时退回「[合并转发]」。</summary>
-    public async Task<string> HydrateAsync(string line, IReadOnlyList<NapCatPendingForward> forwards)
+    /// <param name="resolveAtName">摘要里 @ 目标的昵称解析；为空时保留 QQ 号。</param>
+    public async Task<string> HydrateAsync(
+        string line,
+        IReadOnlyList<NapCatPendingForward> forwards,
+        Func<long, string?>? resolveAtName = null)
     {
         foreach (var forward in forwards)
         {
-            var rendered = await ResolveAsync(forward.ForwardId).ConfigureAwait(false);
+            var rendered = await ResolveAsync(forward.ForwardId, resolveAtName).ConfigureAwait(false);
             line = line.Replace(
                 forward.Placeholder,
                 rendered ?? forward.Fallback,
@@ -59,7 +63,7 @@ internal sealed class NapCatForwardResolver
     }
 
     /// <summary>反查一条合并转发，返回「[合并转发(N条)：发送者：内容；…]」；失败时返回 null。</summary>
-    private async Task<string?> ResolveAsync(string forwardId)
+    private async Task<string?> ResolveAsync(string forwardId, Func<long, string?>? resolveAtName)
     {
         var socket = _connection.Socket;
         if (socket is not { State: WebSocketState.Open }) return null;
@@ -89,7 +93,7 @@ internal sealed class NapCatForwardResolver
             {
                 if (node.ValueKind != JsonValueKind.Object) continue;
 
-                var text = Summarize(NapCatMessageParser.ParseMessage(node, selfId).Text);
+                var text = Summarize(NapCatMessageParser.ParseMessage(node, selfId, resolveAtName: resolveAtName).Text);
                 var sender = GetNodeSender(node);
                 var label = sender.Length == 0 ? text : $"{sender}：{text}";
 

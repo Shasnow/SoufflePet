@@ -103,6 +103,51 @@ public sealed class NapCatMessageParserTests
     }
 
     [Fact]
+    public void AtOthersUsesResolvedNickname()
+    {
+        using var document = JsonDocument.Parse("""
+            {"message":[{"type":"at","data":{"qq":"10002"}},{"type":"text","data":{"text":" 看一下"}}]}
+            """);
+
+        var parsed = NapCatMessageParser.ParseMessage(
+            document.RootElement,
+            SelfId,
+            resolveAtName: qq => qq == 10002 ? "张三" : null);
+
+        Assert.Equal("@张三 看一下", parsed.Text);
+    }
+
+    [Fact]
+    public void AtOthersFallsBackToQqWhenNicknameUnknown()
+    {
+        using var document = JsonDocument.Parse("""
+            {"message":[{"type":"at","data":{"qq":"10002"}},{"type":"text","data":{"text":" 看一下"}}]}
+            """);
+
+        var parsed = NapCatMessageParser.ParseMessage(
+            document.RootElement,
+            SelfId,
+            resolveAtName: _ => null);
+
+        Assert.Equal("@10002 看一下", parsed.Text);
+    }
+
+    [Fact]
+    public void CqCodeAtOthersUsesResolvedNickname()
+    {
+        using var document = JsonDocument.Parse("""
+            {"message_format":"string","message":"[CQ:at,qq=10002] 看一下"}
+            """);
+
+        var parsed = NapCatMessageParser.ParseMessage(
+            document.RootElement,
+            SelfId,
+            resolveAtName: qq => qq == 10002 ? "张三" : null);
+
+        Assert.Equal("@张三 看一下", parsed.Text);
+    }
+
+    [Fact]
     public void MentionOnlyMessageHasEmptyText()
     {
         using var document = JsonDocument.Parse("""

@@ -173,4 +173,23 @@ public sealed class NapCatHistoryTests : IDisposable
         Assert.Equal(0, store.FindUserIdBySender("group:1", "桌宠", excludeUserId: 90001));
         Assert.Equal(10001, store.FindUserIdBySender("group:1", "小明", excludeUserId: 90001));
     }
+
+    [Fact]
+    public void ResolveDisplayNamePrefersLatestNonQqName()
+    {
+        var store = new NapCatConversationStore(NullLogger.Instance, _root);
+        // 平台没给名片/昵称时发送者名退化成 QQ 号，这类名字视为没有昵称
+        store.RecordMessage("group:1", "1", "早", 10001, "10001", "群 1");
+        Assert.Null(store.ResolveDisplayName("group:1", 10001));
+
+        store.RecordMessage("group:1", "2", "在吗", 10001, "小明", "群 1");
+        Assert.Equal("小明", store.ResolveDisplayName("group:1", 10001));
+
+        // 取最近一条：群名片刚改时显示新名片
+        store.RecordMessage("group:1", "3", "嗯", 10001, "小明（新名片）", "群 1");
+        Assert.Equal("小明（新名片）", store.ResolveDisplayName("group:1", 10001));
+
+        Assert.Null(store.ResolveDisplayName("group:1", 10002));
+        Assert.Null(store.ResolveDisplayName("group:1", 0));
+    }
 }

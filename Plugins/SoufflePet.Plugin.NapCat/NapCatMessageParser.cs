@@ -25,32 +25,45 @@ internal static class NapCatMessageParser
     private static readonly Regex CqCodePattern = new(@"\[CQ:([A-Za-z_]+)((?:,[^\]]*)?)\]", RegexOptions.Compiled);
 
     /// <summary>解析消息正文；引用内容稍后统一用 get_msg 反查，只用来给历史记录加引用标记。</summary>
+    /// <param name="resolveAtName">
+    /// 把 @ 目标的 QQ 号解析成昵称；解析不到时退回 QQ 号。解析层不做网络调用，只查调用方给的本地缓存。
+    /// </param>
     public static NapCatParsedMessage ParseMessage(
         JsonElement root,
         long selfId,
         bool collectAttachments = false,
-        bool collectForwards = false)
+        bool collectForwards = false,
+        Func<long, string?>? resolveAtName = null)
     {
         // 合并转发节点等实现会把内容放在 content 里，与 message 等价
         if (root.TryGetProperty("message", out var message)
             || root.TryGetProperty("content", out message))
         {
             if (message.ValueKind == JsonValueKind.Array)
-                return ParseSegments(message, selfId, collectAttachments, collectForwards);
+                return ParseSegments(message, selfId, collectAttachments, collectForwards, resolveAtName);
             if (message.ValueKind == JsonValueKind.String)
                 return ParseCqCode(
-                    message.GetString() ?? string.Empty, selfId, collectAttachments, collectForwards);
+                    message.GetString() ?? string.Empty,
+                    selfId,
+                    collectAttachments,
+                    collectForwards,
+                    resolveAtName);
         }
 
         return ParseCqCode(
-            GetString(root, "raw_message") ?? string.Empty, selfId, collectAttachments, collectForwards);
+            GetString(root, "raw_message") ?? string.Empty,
+            selfId,
+            collectAttachments,
+            collectForwards,
+            resolveAtName);
     }
 
     private static NapCatParsedMessage ParseSegments(
         JsonElement segments,
         long selfId,
         bool collectAttachments,
-        bool collectForwards)
+        bool collectForwards,
+        Func<long, string?>? resolveAtName)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
@@ -91,7 +104,7 @@ internal static class NapCatMessageParser
                     }
                     else if (!string.IsNullOrEmpty(qq))
                     {
-                        builder.Append('@').Append(qq);
+                        builder.Append('@').Append(ResolveAtDisplayName(qq, resolveAtName));
                     }
 
                     break;
@@ -140,7 +153,8 @@ internal static class NapCatMessageParser
         string raw,
         long selfId,
         bool collectAttachments,
-        bool collectForwards)
+        bool collectForwards,
+        Func<long, string?>? resolveAtName)
     {
         var builder = new StringBuilder();
         var mentionsSelf = false;
@@ -180,7 +194,7 @@ internal static class NapCatMessageParser
                     }
                     else if (!string.IsNullOrEmpty(qq))
                     {
-                        builder.Append('@').Append(qq);
+                        builder.Append('@').Append(ResolveAtDisplayName(qq, resolveAtName));
                     }
 
                     break;
@@ -224,6 +238,17 @@ internal static class NapCatMessageParser
             quotedId,
             attachments is { Count: > 0 } ? attachments : null,
             forwards is { Count: > 0 } ? forwards : null);
+    }
+
+    /// <summary>把 @ 目标的 QQ 号解析成昵称；不是数字、没传解析器或解析不到时保留 QQ 号。</summary>
+    private static string ResolveAtDisplayName(string qq, Func<long, string?>? resolveAtName)
+    {
+        if (resolveAtName is null
+            || !long.TryParse(qq, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId))
+            return qq;
+
+        var name = resolveAtName(userId)?.Trim();
+        return string.IsNullOrEmpty(name) ? qq : name;
     }
 
     /// <summary>追加一个图片/文件段：可下载时写入占位符并登记下载任务，否则直接写可读占位。</summary>

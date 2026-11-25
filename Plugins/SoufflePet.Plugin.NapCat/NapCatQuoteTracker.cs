@@ -33,7 +33,11 @@ internal sealed class NapCatQuoteTracker
     }
 
     /// <summary>用 get_msg 取回被引用消息的发送者与正文摘要；取不到时返回 null。</summary>
-    public async Task<NapCatQuotedMessage?> FetchAsync(string quotedId, long selfId)
+    /// <param name="resolveAtName">摘要里 @ 目标的昵称解析；为空时保留 QQ 号。</param>
+    public async Task<NapCatQuotedMessage?> FetchAsync(
+        string quotedId,
+        long selfId,
+        Func<long, string?>? resolveAtName = null)
     {
         var socket = _connection.Socket;
         if (socket is not { State: WebSocketState.Open }) return null;
@@ -50,7 +54,7 @@ internal sealed class NapCatQuoteTracker
         if (quotedUserId <= 0 && data.TryGetProperty("sender", out var quotedSender))
             quotedUserId = NapCatMessageParser.GetInt64(quotedSender, "user_id");
 
-        var summary = Summarize(NapCatMessageParser.ParseMessage(data, selfId).Text);
+        var summary = Summarize(NapCatMessageParser.ParseMessage(data, selfId, resolveAtName: resolveAtName).Text);
 
         return new NapCatQuotedMessage(
             quotedUserId > 0 && quotedUserId == selfId,

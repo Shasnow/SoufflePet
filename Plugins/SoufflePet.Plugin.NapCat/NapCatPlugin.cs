@@ -271,7 +271,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             if (!data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array)
                 return [];
 
+            // 远端历史同样先拿到自身 QQ 号：否则重启后 @ 机器人会被当成普通 at
+            await EnsureSelfIdAsync(socket).ConfigureAwait(false);
             var selfId = Volatile.Read(ref _selfId);
+            // 本轮消息自带发送者名：先建好 QQ→昵称，刚连接、本地还没补拉时也能显示昵称
+            var resolveAtName = AtNameResolver(id, CollectBatchNames(messages));
             var lines = new List<string>();
             // 合并转发要逐条调接口，一次读历史最多反查 5 条，其余退回「[合并转发]」
             var forwardBudget = 5;
@@ -282,7 +286,8 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                 var parsed = NapCatMessageParser.ParseMessage(
                     message,
                     selfId,
-                    collectForwards: true);
+                    collectForwards: true,
+                    resolveAtName: resolveAtName);
                 var text = parsed.Text;
                 // 只有 @ / 引用、没有正文的消息也是历史的一部分（展示行会写「无正文」）
                 if (string.IsNullOrWhiteSpace(text) && !parsed.MentionsSelf && parsed.QuotedId is null) continue;
@@ -293,7 +298,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     {
                         var batch = historyForwards.Take(forwardBudget).ToArray();
                         forwardBudget -= batch.Length;
-                        text = await _forwardResolver!.HydrateAsync(text, batch).ConfigureAwait(false);
+                        text = await _forwardResolver!.HydrateAsync(text, batch, resolveAtName).ConfigureAwait(false);
                     }
 
                     text = NapCatForwardResolver.Fallback(text, historyForwards);
@@ -317,6 +322,35 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             return [];
         }
     }
+
+    /// <summary>本轮拉到的消息里也带发送者名：先建好 QQ 号→昵称，供 @ 解析使用。</summary>
+    private static Dictionary<long, string> CollectBatchNames(JsonElement messages)
+    {
+        var names = new Dictionary<long, string>();
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.ValueKind != JsonValueKind.Object) continue;
+
+            var userId = NapCatMessageParser.GetInt64(message, "user_id");
+            if (userId <= 0) continue;
+
+            var name = NapCatMessageParser.GetSenderName(message, userId);
+            // 名片/昵称缺失时 GetSenderName 会退回 QQ 号，这类名字没有信息量
+            if (!string.Equals(name, userId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+                names[userId] = name;
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// @ 目标的昵称解析：优先本轮拉到的最新名字（名片可能刚改），再退回本地会话历史；
+    /// 都查不到时由解析层退回 QQ 号。
+    /// </summary>
+    private Func<long, string?> AtNameResolver(
+        string conversationId,
+        IReadOnlyDictionary<long, string>? batchNames = null) =>
+        qq => batchNames?.GetValueOrDefault(qq) ?? _store!.ResolveDisplayName(conversationId, qq);
 
     public override async Task ShutdownAsync(CancellationToken cancellationToken)
     {
@@ -440,6 +474,10 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             return [];
 
         var selfId = Volatile.Read(ref _selfId);
+        var conversationId = $"{conversation.Kind}:{conversation.Id.ToString(CultureInfo.InvariantCulture)}";
+        // 本轮消息里也带发送者名：即使对方这轮才第一次出现，正文里的 @ 也能显示昵称
+        var resolveAtName = AtNameResolver(conversationId, CollectBatchNames(messages));
+
         var results = new List<NapCatStoredMessage>(messages.GetArrayLength());
         foreach (var message in messages.EnumerateArray())
         {
@@ -448,7 +486,11 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
             var messageId = NapCatMessageParser.GetString(message, "message_id");
             if (string.IsNullOrWhiteSpace(messageId)) continue;
 
-            var parsed = NapCatMessageParser.ParseMessage(message, selfId, collectForwards: true);
+            var parsed = NapCatMessageParser.ParseMessage(
+                message,
+                selfId,
+                collectForwards: true,
+                resolveAtName: resolveAtName);
             var text = parsed.Text;
             // 只有 @ / 引用、没有正文的消息也保留，展示行会写「无正文」
             if (string.IsNullOrWhiteSpace(text) && !parsed.MentionsSelf && parsed.QuotedId is null) continue;
@@ -529,11 +571,22 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         // 始终忽略桌宠自己发出的消息，避免自己回复自己
         if (userId == selfId) return;
 
+        var messageType = NapCatMessageParser.GetString(root, "message_type");
+        var groupId = messageType == "group" ? NapCatMessageParser.GetInt64(root, "group_id") : 0;
+        // @ 他人的昵称从本地历史里查（不在这条消息里做网络调用）；查不到时正文仍显示 QQ 号
+        var conversationId = messageType switch
+        {
+            "group" when groupId > 0 => $"group:{groupId.ToString(CultureInfo.InvariantCulture)}",
+            "private" => $"private:{userId.ToString(CultureInfo.InvariantCulture)}",
+            _ => null,
+        };
+
         var parsed = NapCatMessageParser.ParseMessage(
             root,
             selfId,
             _config.DownloadAttachments,
-            collectForwards: true);
+            collectForwards: true,
+            resolveAtName: conversationId is null ? null : AtNameResolver(conversationId));
         var text = parsed.Text;
         // 只有 @ 或引用、没有正文的消息（群里只 @ 一下）同样要唤醒：正文可以为空，
         // 装饰由 MentionsSelf / Quote 表达，宿主据此拼展示行与提示词。
@@ -542,20 +595,18 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
         var sender = NapCatMessageParser.GetSenderName(root, userId);
         var messageId = NapCatMessageParser.GetString(root, "message_id");
-        var messageType = NapCatMessageParser.GetString(root, "message_type");
 
-        if (messageType == "group")
+        if (messageType == "group" && conversationId is { } groupConversation)
         {
-            var groupId = NapCatMessageParser.GetInt64(root, "group_id");
-            // 白名单为空表示不启用白名单，全部放行
-            if (groupId <= 0 || (_config.AllowedGroups.Count > 0 && !_config.AllowedGroups.Contains(groupId))) return;
+            // 白名单为空表示不启用白名单，全部放行（conversationId 非空已保证 groupId > 0）
+            if (_config.AllowedGroups.Count > 0 && !_config.AllowedGroups.Contains(groupId)) return;
 
-            var conversationId = $"group:{groupId.ToString(CultureInfo.InvariantCulture)}";
+            var id = groupConversation;
             // 历史记录里留下消息 id、纯正文与发送者，回复里的 [quote:...] 与 [at:昵称] 靠它反查；
             // 「@ 了你 / 引用了谁」也是字段（mentionsSelf / quotedId），展示用的
             // 「[会话 id] 发送者（标记）：」只在读取历史时拼
             _store!.RecordMessage(
-                conversationId, messageId, text, userId, sender,
+                id, messageId, text, userId, sender,
                 $"群 {groupId.ToString(CultureInfo.InvariantCulture)}",
                 parsed.MentionsSelf, parsed.QuotedId);
 
@@ -566,7 +617,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                        || (_config.AllowsProactiveReply(groupId) && RollReplyChance());
             if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
                 _ = FinalizeMessageAsync(
-                    conversationId,
+                    id,
                     text,
                     sender,
                     userId,
@@ -575,25 +626,25 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
                     wake);
             // 命中唤醒词或概率回复后，群里不 @ 也会唤醒桌宠
             else if (wake)
-                RaiseMentioned(conversationId, text, sender, userId, messageId, parsed.MentionsSelf, null);
+                RaiseMentioned(id, text, sender, userId, messageId, parsed.MentionsSelf, null);
             return;
         }
 
-        if (messageType == "private")
+        if (messageType == "private" && conversationId is { } privateConversation)
         {
             // 白名单为空表示不启用白名单，全部放行
             if (_config.AllowedUsers.Count > 0 && !_config.AllowedUsers.Contains(userId)) return;
 
-            var conversationId = $"private:{userId.ToString(CultureInfo.InvariantCulture)}";
+            var id = privateConversation;
             _store!.RecordMessage(
-                conversationId, messageId, text, userId, sender, sender, parsed.MentionsSelf, parsed.QuotedId);
+                id, messageId, text, userId, sender, sender, parsed.MentionsSelf, parsed.QuotedId);
 
             // 唤醒词与概率回复只对群聊生效；私聊是否唤醒只取决于 wakeOnPrivateMessage
             var wake = _config.WakeOnPrivateMessage;
             if (parsed.Attachments is not null || parsed.QuotedId is not null || parsed.Forwards is not null)
-                _ = FinalizeMessageAsync(conversationId, text, sender, userId, messageId, parsed, wake);
+                _ = FinalizeMessageAsync(id, text, sender, userId, messageId, parsed, wake);
             else if (wake)
-                RaiseMentioned(conversationId, text, sender, userId, messageId, parsed.MentionsSelf, null);
+                RaiseMentioned(id, text, sender, userId, messageId, parsed.MentionsSelf, null);
         }
     }
 
@@ -624,7 +675,9 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
 
             if (parsed.Forwards is { Count: > 0 } forwards)
             {
-                var hydrated = await _forwardResolver!.HydrateAsync(body, forwards).ConfigureAwait(false);
+                var hydrated = await _forwardResolver!
+                    .HydrateAsync(body, forwards, AtNameResolver(conversationId))
+                    .ConfigureAwait(false);
                 if (!string.Equals(hydrated, body, StringComparison.Ordinal))
                 {
                     _store!.PatchMessage(conversationId, messageId, body, hydrated);
@@ -667,7 +720,7 @@ public sealed class NapCatPlugin : PluginBase, IMessagePlatform
         try
         {
             var quoted = await _quotes!
-                .FetchAsync(quotedId, Volatile.Read(ref _selfId))
+                .FetchAsync(quotedId, Volatile.Read(ref _selfId), AtNameResolver(conversationId))
                 .ConfigureAwait(false);
 
             // 摘要只进字段与历史渲染，正文始终是对方写的内容

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Encodings.Web;
@@ -384,6 +385,34 @@ internal sealed class NapCatConversationStore
                 excludeUserId);
             return fuzzy ?? 0;
         }
+    }
+
+    /// <summary>
+    /// 按 QQ 号反查昵称：从最近的消息往前找该用户的发送者名（群名片优先于昵称）。
+    /// 发送者名退化成 QQ 号（平台没给名片/昵称）时视为没有昵称，返回 null，
+    /// 由调用方决定是显示 QQ 号还是纯文本。
+    /// </summary>
+    public string? ResolveDisplayName(string conversationId, long userId)
+    {
+        if (userId <= 0) return null;
+
+        var fallback = userId.ToString(CultureInfo.InvariantCulture);
+        lock (_sync)
+        {
+            if (!_history.TryGetValue(conversationId.Trim(), out var history)) return null;
+
+            for (var index = history.Count - 1; index >= 0; index--)
+            {
+                var item = history[index];
+                if (item.UserId != userId) continue;
+
+                var name = item.Sender?.Trim();
+                if (!string.IsNullOrEmpty(name) && !string.Equals(name, fallback, StringComparison.Ordinal))
+                    return name;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
