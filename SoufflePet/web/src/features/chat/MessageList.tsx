@@ -16,6 +16,11 @@ interface MessageListProps {
 
 export function MessageList({ sessionId, messages, generating }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  // 是否跟随最新消息。用 ref 而非 state，避免测量引起的滚动事件把跟随状态误判掉。
+  const followRef = useRef(true)
+  // 最近一次程序化贴底的时间，用于忽略由布局变化触发的瞬时滚动事件。
+  const lastPinRef = useRef(0)
   const [atBottom, setAtBottom] = useState(true)
   const lastMessage = messages[messages.length - 1]
   const lastLength = lastMessage?.text.length ?? 0
@@ -28,28 +33,70 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
     getItemKey: (index) => messages[index]?.id ?? index,
   })
 
+  const setFollow = (next: boolean) => {
+    followRef.current = next
+    setAtBottom(next)
+  }
+
+  const pinToBottom = () => {
+    const element = parentRef.current
+    if (!element) return
+    lastPinRef.current = performance.now()
+    element.scrollTop = element.scrollHeight
+  }
+
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
-    if (messages.length === 0) return
-    virtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior })
+    const element = parentRef.current
+    if (!element || messages.length === 0) return
+    setFollow(true)
+    if (behavior === 'smooth') {
+      element.scrollTo({ top: element.scrollHeight, behavior })
+      return
+    }
+    pinToBottom()
   }
 
   const jumpToMessage = (index: number) => {
+    setFollow(false)
     virtualizer.scrollToIndex(index, { align: 'start', behavior: 'smooth' })
   }
 
   useLayoutEffect(() => {
-    // 打开会话时贴底；会话切换由父组件 key 强制重新挂载。
-    const frame = window.requestAnimationFrame(() => scrollToBottom())
+    // 打开会话时先跳到末项（虚拟列表按需渲染），再统一交给 ResizeObserver 贴底。
+    // 会话切换由父组件 key 强制重新挂载。
+    if (messages.length > 0) {
+      virtualizer.scrollToIndex(messages.length - 1, { align: 'end' })
+    }
+    const frame = window.requestAnimationFrame(() => pinToBottom())
     return () => window.cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    if (!atBottom) return
-    const frame = window.requestAnimationFrame(() => scrollToBottom())
+  useLayoutEffect(() => {
+    // 消息增删或流式文本增长时贴底。虚拟列表的高度是异步测量出来的，
+    // 一次新增多个气泡时估算高度与实际不符，直接按内容高度贴底更可靠。
+    if (!followRef.current) return
+    pinToBottom()
+    const frame = window.requestAnimationFrame(() => {
+      if (followRef.current) pinToBottom()
+    })
     return () => window.cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, lastLength, atBottom])
+  }, [messages.length, lastLength])
+
+  useEffect(() => {
+    // 内容高度随测量/图片加载等变化时继续贴底，保证视口始终停在最新内容处。
+    const element = parentRef.current
+    const content = contentRef.current
+    if (!element) return
+    const observer = new ResizeObserver(() => {
+      if (followRef.current) pinToBottom()
+    })
+    observer.observe(element)
+    if (content) observer.observe(content)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="message-list-wrap">
@@ -59,10 +106,24 @@ export function MessageList({ sessionId, messages, generating }: MessageListProp
         onScroll={(event) => {
           const element = event.currentTarget
           const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-          setAtBottom(distance < 24)
+          if (distance < 24) {
+            if (!followRef.current) setFollow(true)
+            else setAtBottom(true)
+            return
+          }
+          // 刚贴过底时的滚动事件多由高度测量引起，不视为用户主动上滚。
+          if (performance.now() - lastPinRef.current < 200) return
+          if (followRef.current) setFollow(false)
+        }}
+        onWheel={(event) => {
+          // 用户主动上滚时立即停止跟随，避免流式输出时被反复拉回底部。
+          const element = event.currentTarget
+          if (event.deltaY < 0 && followRef.current && element.scrollHeight > element.clientHeight) {
+            setFollow(false)
+          }
         }}
       >
-        <div className="message-list-inner">
+        <div className="message-list-inner" ref={contentRef}>
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((item) => {
               const message = messages[item.index]
