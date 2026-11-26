@@ -79,7 +79,7 @@ public sealed partial class ChatTools
     private const long ShowFileMaxBytes = 50L * 1024 * 1024;
 
     /// <summary>可编辑文本文件的最大字节数：再大就不读入内存，避免一次编辑把进程内存吃满。</summary>
-    private const long MaxEditableBytes = 1024 * 1024;
+    private const long MaxEditableBytes = 10L * 1024 * 1024;
 
     /// <summary>写入内容的字符上限。</summary>
     private const int MaxEditChars = 512 * 1024;
