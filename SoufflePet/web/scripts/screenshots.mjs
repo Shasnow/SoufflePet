@@ -31,6 +31,12 @@ const scenarios = [
   { name: 'rich-top', query: '?mock=1&scenario=rich', hash: '#/chat/s-rich', scrollTop: true },
   { name: 'ask', query: '?mock=1&scenario=ask', hash: '#/chat/s-rich' },
   { name: 'settings', query: '?mock=1', hash: '#/settings/appearance' },
+  { name: 'light', query: '?mock=1&scenario=rich&mode=light&modePreference=light', hash: '#/chat/s-rich' },
+  {
+    name: 'light-settings',
+    query: '?mock=1&mode=light&modePreference=light',
+    hash: '#/settings/appearance',
+  },
 ]
 
 await mkdir(outDir, { recursive: true })

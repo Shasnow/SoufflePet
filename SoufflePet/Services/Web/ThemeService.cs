@@ -63,8 +63,16 @@ public static class ThemeColor
         channel <= 0.04045 ? channel / 12.92 : Math.Pow((channel + 0.055) / 1.055, 2.4);
 }
 
+/// <summary>React UI 的外观模式取值；与 web/src/bridge/contracts.ts 的 ThemeModePreference 对齐。</summary>
+public static class ThemeModes
+{
+    public const string Dark = "dark";
+    public const string Light = "light";
+    public const string System = "system";
+}
+
 /// <summary>
-/// React UI 的主题服务：唯一权威的强调色来源（设置 / 跟随系统），
+/// React UI 的主题服务：唯一权威的强调色 / 外观模式来源（设置 / 跟随系统），
 /// 变化时广播给 WebBridgeServer，由它推 host.theme 给页面。
 /// </summary>
 public sealed class ThemeService : IDisposable
@@ -74,19 +82,20 @@ public sealed class ThemeService : IDisposable
     private readonly SouffleSettings _settings;
     private readonly DispatcherTimer _systemTimer;
     private string _lastSystemAccent = string.Empty;
+    private string _lastSystemMode = ThemeModes.Dark;
     private bool _disposed;
 
     public ThemeService(SouffleSettings settings)
     {
         _settings = settings;
         _systemTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _systemTimer.Tick += (_, _) => PollSystemAccent();
+        _systemTimer.Tick += (_, _) => PollSystemPreference();
 
         _settings.PropertyChanged += OnSettingsChanged;
         SyncSystemTimer();
     }
 
-    /// <summary>主题变化（Accent/FollowSystem/系统强调色）。事件在 UI 线程触发。</summary>
+    /// <summary>主题变化（强调色 / 外观模式 / 系统配色）。事件在 UI 线程触发。</summary>
     public event EventHandler<ThemeDto>? Changed;
 
     public ThemeDto GetTheme()
@@ -138,6 +147,21 @@ public sealed class ThemeService : IDisposable
         return theme;
     }
 
+    /// <summary>设置外观模式（dark / light / system）。</summary>
+    public ThemeDto SetMode(string mode)
+    {
+        var normalized = ParseMode(mode)
+                         ?? throw new ArgumentException("外观模式必须是 dark / light / system", nameof(mode));
+
+        // 赋值触发的 PropertyChanged 已让 OnSettingsChanged 重同步轮询状态，这里不再重复调用
+        _settings.UiThemeMode = normalized;
+        _settings.Save();
+
+        var theme = GetTheme();
+        Raise(theme);
+        return theme;
+    }
+
     /// <summary>只预览，不落盘；外观面板拖动滑杆时使用。</summary>
     public ThemeDto Preview(string accent)
     {
@@ -148,9 +172,22 @@ public sealed class ThemeService : IDisposable
 
     private ThemeDto Build(string accent, bool followSystem)
     {
+        var preference = ParseMode(_settings.UiThemeMode) ?? ThemeModes.Dark;
+        var mode = preference == ThemeModes.System
+            ? (ReadSystemLightTheme() ? ThemeModes.Light : ThemeModes.Dark)
+            : preference;
         var oklch = ThemeColor.FromHex(accent);
-        return new ThemeDto("dark", accent, oklch.L, oklch.C, oklch.H, followSystem);
+        return new ThemeDto(mode, preference, accent, oklch.L, oklch.C, oklch.H, followSystem);
     }
+
+    /// <summary>把任意输入夹成三个合法值；不认识时返回 null（调用方决定回退还是报错）。</summary>
+    private static string? ParseMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
+    {
+        ThemeModes.Dark => ThemeModes.Dark,
+        ThemeModes.Light => ThemeModes.Light,
+        ThemeModes.System => ThemeModes.System,
+        _ => null,
+    };
 
     private string? NormalizeSettingsAccent() => ThemeColor.Normalize(_settings.UiAccentColor);
 
@@ -158,15 +195,21 @@ public sealed class ThemeService : IDisposable
 
     private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(SouffleSettings.UiAccentFollowSystem)) SyncSystemTimer();
+        if (e.PropertyName is nameof(SouffleSettings.UiAccentFollowSystem) or nameof(SouffleSettings.UiThemeMode))
+            SyncSystemTimer();
     }
+
+    /// <summary>需要轮询系统配色：跟随强调色，或外观模式为 system。</summary>
+    private bool ShouldPollSystem =>
+        _settings.UiAccentFollowSystem || ParseMode(_settings.UiThemeMode) == ThemeModes.System;
 
     private void SyncSystemTimer()
     {
         if (_disposed) return;
-        if (_settings.UiAccentFollowSystem)
+        if (ShouldPollSystem)
         {
             _lastSystemAccent = ReadSystemAccent() ?? string.Empty;
+            _lastSystemMode = ReadSystemLightTheme() ? ThemeModes.Light : ThemeModes.Dark;
             _systemTimer.Start();
         }
         else
@@ -175,15 +218,51 @@ public sealed class ThemeService : IDisposable
         }
     }
 
-    /// <summary>跟随系统时每 5 秒读一次 DWM 配色；变化才广播，避免页面反复重绘。</summary>
-    private void PollSystemAccent()
+    /// <summary>每 5 秒读一次 DWM 配色与系统应用主题；变化才广播，避免页面反复重绘。</summary>
+    private void PollSystemPreference()
     {
-        if (!_settings.UiAccentFollowSystem) return;
-        var accent = ReadSystemAccent();
-        if (accent is null || string.Equals(accent, _lastSystemAccent, StringComparison.OrdinalIgnoreCase)) return;
+        var accentChanged = false;
+        if (_settings.UiAccentFollowSystem)
+        {
+            var accent = ReadSystemAccent();
+            if (accent is not null && !string.Equals(accent, _lastSystemAccent, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastSystemAccent = accent;
+                accentChanged = true;
+            }
+        }
 
-        _lastSystemAccent = accent;
-        Raise(Build(accent, true));
+        var modeChanged = false;
+        if (ParseMode(_settings.UiThemeMode) == ThemeModes.System)
+        {
+            var mode = ReadSystemLightTheme() ? ThemeModes.Light : ThemeModes.Dark;
+            if (!string.Equals(mode, _lastSystemMode, StringComparison.Ordinal))
+            {
+                _lastSystemMode = mode;
+                modeChanged = true;
+            }
+        }
+
+        if (accentChanged || modeChanged) Raise(GetTheme());
+    }
+
+    /// <summary>Windows「应用主题」：AppsUseLightTheme = 1 表示浅色；读取失败按深色处理。</summary>
+    private static bool ReadSystemLightTheme()
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows()) return false;
+            var raw = Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "AppsUseLightTheme",
+                null);
+            return raw is int value && value != 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "read system theme mode failed");
+            return false;
+        }
     }
 
     /// <summary>DWM 的 ColorizationColor；失败时回退注册表 HKCU\...\DWM\ColorizationColor。</summary>

@@ -233,6 +233,9 @@ export interface MockHost {
 
 export interface MockHostOptions {
   scenario?: string | null
+  /** 初始外观；截图/调试时可通过 ?mode=light 打开浅色 */
+  mode?: 'dark' | 'light'
+  modePreference?: 'dark' | 'light' | 'system'
 }
 
 export function createMockHost(options: MockHostOptions = {}): MockHost {
@@ -241,8 +244,10 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
   let rev = 1024
   let activeId: string | null = 's-welcome'
   let maximized = false
+  const initialMode = options.mode ?? 'dark'
   let theme: ThemeDto = {
-    mode: 'dark',
+    mode: initialMode,
+    modePreference: options.modePreference ?? initialMode,
     accent: oklchToHex(DEFAULT_ACCENT),
     accentL: DEFAULT_ACCENT.l,
     accentC: DEFAULT_ACCENT.c,
@@ -1495,6 +1500,15 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
             response(id, theme)
             return
           }
+          case 'settings.appearance.setMode': {
+            const preference =
+              payload.mode === 'light' ? 'light' : payload.mode === 'system' ? 'system' : 'dark'
+            // mock 没有系统主题可读，system 按深色处理
+            theme = { ...theme, modePreference: preference, mode: preference === 'light' ? 'light' : 'dark' }
+            emitEvent('host.theme', { ...theme })
+            response(id, theme)
+            return
+          }
           case 'settings.appearance.reset': {
             theme = { ...theme, accent: oklchToHex(DEFAULT_ACCENT), followSystem: false }
             emitEvent('host.theme', { ...theme })
@@ -1820,6 +1834,23 @@ export function mockScenarioFromUrl(): string | null {
     return new URLSearchParams(window.location.search).get('scenario')
   } catch {
     return null
+  }
+}
+
+/** 截图/调试用：从 ?mode=light&modePreference=light 打开浅色，默认深色。 */
+export function mockModeFromUrl(): Pick<MockHostOptions, 'mode' | 'modePreference'> {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const rawMode = params.get('mode')
+    const mode = rawMode === 'light' ? 'light' : rawMode === 'dark' ? 'dark' : undefined
+    const rawPreference = params.get('modePreference')
+    const modePreference =
+      rawPreference === 'light' || rawPreference === 'dark' || rawPreference === 'system'
+        ? rawPreference
+        : undefined
+    return { mode, modePreference }
+  } catch {
+    return {}
   }
 }
 

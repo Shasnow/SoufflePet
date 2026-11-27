@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-import { Check, Palette, RotateCcw } from 'lucide-react'
+import { Check, Monitor, Moon, Palette, RotateCcw, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { invoke } from '@/bridge/client'
+import type { ThemeModePreference } from '@/bridge/contracts'
 import { useThemeStore } from '@/stores/themeStore'
 import { ACCENT_PRESETS } from '@/theme/presets'
 import { hexToOklch, harmonizeAccent, oklchToHex } from '@/theme/oklch'
 import { previewAccent } from '@/theme/apply'
 import { useToastStore } from '@/stores/toastStore'
 import { errorMessage, SettingsCard, SettingsError, Toggle } from './SettingsShared'
+
+const MODE_OPTIONS: { id: ThemeModePreference; label: string; icon: typeof Moon }[] = [
+  { id: 'dark', label: '深色', icon: Moon },
+  { id: 'light', label: '浅色', icon: Sun },
+  { id: 'system', label: '跟随系统', icon: Monitor },
+]
 
 export function AppearanceSettings() {
   const theme = useThemeStore((state) => state.theme)
@@ -25,8 +32,23 @@ export function AppearanceSettings() {
 
   const preview = (hex: string) => {
     setAccent(hex)
-    const applied = previewAccent(hex)
+    const applied = previewAccent(hex, theme.mode, theme.modePreference)
     if (applied) setTheme(applied)
+  }
+
+  const setMode = async (mode: ThemeModePreference) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await invoke<typeof theme>('settings.appearance.setMode', { mode })
+      setTheme(updated)
+      // 与 setFollow/reset 一致：丢弃未保存的颜色预览，避免输入框显示的颜色与实际应用不一致
+      setAccent(updated.accent)
+    } catch (modeError) {
+      setError(`切换外观模式失败：${errorMessage(modeError)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const apply = async () => {
@@ -75,6 +97,32 @@ export function AppearanceSettings() {
   return (
     <div className="settings-stack">
       <SettingsError message={error} />
+
+      <SettingsCard
+        title="外观模式"
+        desc="浅色与深色共用同一套 OKLCH 色阶，只反转表面与文字的明度。跟随系统会读取 Windows 的应用主题。"
+      >
+        <div className="settings-mode-group" role="group" aria-label="外观模式">
+          {MODE_OPTIONS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              className="settings-mode-option"
+              data-active={(theme.modePreference === id).toString()}
+              aria-pressed={theme.modePreference === id}
+              disabled={busy}
+              onClick={() => void setMode(id)}
+            >
+              <Icon size={14} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="field-hint">
+          当前实际外观：{theme.mode === 'light' ? '浅色' : '深色'}
+          {theme.modePreference === 'system' ? '（跟随 Windows 应用主题）' : ''}。
+        </div>
+      </SettingsCard>
 
       <SettingsCard
         title="强调色"

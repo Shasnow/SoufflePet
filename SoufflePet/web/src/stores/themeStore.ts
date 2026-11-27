@@ -2,23 +2,30 @@
 // Copyright (C) 2026 Shasnow
 
 import { create } from 'zustand'
-import type { ThemeDto } from '@/bridge/contracts'
+import type { ThemeDto, ThemeMode, ThemeModePreference } from '@/bridge/contracts'
 import { applyTheme } from '@/theme/apply'
 import { hexToOklch, oklchToHex } from '@/theme/oklch'
 import { DEFAULT_ACCENT } from '@/theme/presets'
 
-const urlAccent = (() => {
+const params = (() => {
   try {
-    return new URLSearchParams(window.location.search).get('accent')
+    return new URLSearchParams(window.location.search)
   } catch {
-    return null
+    return new URLSearchParams('')
   }
 })()
 
-const initialAccent = urlAccent ?? oklchToHex(DEFAULT_ACCENT)
+const initialAccent = params.get('accent') ?? oklchToHex(DEFAULT_ACCENT)
+const initialMode: ThemeMode = params.get('mode') === 'light' ? 'light' : 'dark'
+const preferenceParam = params.get('modePreference')
+const initialPreference: ThemeModePreference =
+  preferenceParam === 'dark' || preferenceParam === 'light' || preferenceParam === 'system'
+    ? preferenceParam
+    : initialMode
 const initialOklch = hexToOklch(initialAccent) ?? DEFAULT_ACCENT
 const initialTheme: ThemeDto = {
-  mode: 'dark',
+  mode: initialMode,
+  modePreference: initialPreference,
   accent: oklchToHex(initialOklch),
   accentL: initialOklch.l,
   accentC: initialOklch.c,

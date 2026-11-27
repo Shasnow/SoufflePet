@@ -78,7 +78,7 @@
   }
 
   a {
-    color: var(--accent);
+    color: var(--accent-text);
     text-decoration: none;
   }
 
@@ -772,7 +772,7 @@ body.is-resizing-sidebar .sidebar {
   display: grid;
   place-items: center;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 700;
   font-size: 13px;
 }
@@ -1024,7 +1024,7 @@ body.is-resizing-sidebar .sidebar {
 
 .menu-item .menu-check {
   margin-left: auto;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .menu-sep {
@@ -2588,7 +2588,7 @@ body.is-resizing-sidebar .sidebar {
 }
 
 .md a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -3609,7 +3609,7 @@ body.is-resizing-sidebar .sidebar {
   flex: none;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .settings-model-cards {
@@ -3641,6 +3641,44 @@ body.is-resizing-sidebar .sidebar {
   color: var(--text-1);
   font-size: 13px;
   font-weight: 650;
+}
+
+.settings-mode-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.settings-mode-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding-inline: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-mode-option:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.settings-mode-option[data-active='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+.settings-mode-option:disabled {
+  color: var(--text-disabled);
+  cursor: default;
 }
 
 .settings-presets {

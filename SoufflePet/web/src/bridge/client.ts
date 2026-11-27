@@ -4,7 +4,7 @@
 import type { AppSnapshotDto, ChatMessageDto, ChatOp, ThemeDto } from './contracts'
 import type { IncomingEnvelope, RequestEnvelope } from './protocol'
 import { BridgeError, makeRequest, parseIncoming } from './protocol'
-import { createMockHost, mockScenarioFromUrl } from './mock-host'
+import { createMockHost, mockModeFromUrl, mockScenarioFromUrl } from './mock-host'
 import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -57,7 +57,7 @@ class NativeTransport implements Transport {
 class MockTransport implements Transport {
   readonly kind = 'mock' as const
   private receiver: ((data: unknown) => void) | null = null
-  private readonly host = createMockHost({ scenario: mockScenarioFromUrl() })
+  private readonly host = createMockHost({ scenario: mockScenarioFromUrl(), ...mockModeFromUrl() })
 
   send(envelope: RequestEnvelope): void {
     // mock 与真实宿主一样走一次 JSON 序列化，避免 mock 内部对象与 store 共享引用

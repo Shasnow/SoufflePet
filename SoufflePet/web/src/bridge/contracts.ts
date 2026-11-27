@@ -151,8 +151,14 @@ export interface SessionSummaryDto {
   waitingForUser?: boolean
 }
 
+export type ThemeMode = 'dark' | 'light'
+/** 用户选择的外观偏好；system 表示跟随 Windows 应用主题 */
+export type ThemeModePreference = ThemeMode | 'system'
+
 export interface ThemeDto {
-  mode: 'dark' | 'light'
+  /** 解析后的实际外观；modePreference 为 system 时由宿主换算 */
+  mode: ThemeMode
+  modePreference: ThemeModePreference
   accent: string
   accentL: number
   accentC: number

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Shasnow
 
-import type { ThemeDto } from '@/bridge/contracts'
+import type { ThemeDto, ThemeMode, ThemeModePreference } from '@/bridge/contracts'
 import { hexToOklch, harmonizeAccent, onAccentCss } from './oklch'
 
 /** 把宿主/首帧的主题写进 :root。返回实际采用的（可能被夹过的）主题。 */
@@ -29,12 +29,17 @@ export function applyTheme(theme: ThemeDto): ThemeDto {
   }
 }
 
-/** 只用于外观面板的实时预览：不落盘，不改 followSystem。 */
-export function previewAccent(accent: string): ThemeDto | null {
+/** 只用于外观面板的实时预览：不落盘，不改 followSystem / modePreference。 */
+export function previewAccent(
+  accent: string,
+  mode: ThemeMode = 'dark',
+  modePreference: ThemeModePreference = mode,
+): ThemeDto | null {
   const parsed = hexToOklch(accent)
   if (!parsed) return null
   return applyTheme({
-    mode: 'dark',
+    mode,
+    modePreference,
     accent,
     accentL: parsed.l,
     accentC: parsed.c,

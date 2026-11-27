@@ -188,7 +188,8 @@ interface SessionSummaryDto {
 }
 
 interface ThemeDto {
-  mode: 'dark' | 'light'
+  mode: 'dark' | 'light'       // 解析后的实际外观；modePreference 为 system 时由宿主换算
+  modePreference: 'dark' | 'light' | 'system'  // 用户选择的外观偏好
   accent: string                // #RRGGBB
   accentL: number
   accentC: number
@@ -342,6 +343,7 @@ interface AppSnapshotDto {
 | `settings.appearance.get` | `{}` | `ThemeDto` |
 | `settings.appearance.setAccent` | `{accent:'#RRGGBB'}` | `ThemeDto` |
 | `settings.appearance.setFollowSystem` | `{enabled:boolean}` | `ThemeDto` |
+| `settings.appearance.setMode` | `{mode:'dark'\|'light'\|'system'}` | `ThemeDto`；system 读取 Windows 应用主题 |
 | `settings.appearance.reset` | `{}` | `ThemeDto` |
 | `settings.appearance.preview` | `{accent}` | `ThemeDto`（不落盘，仅宿主广播） |
 | `settings.appearance.setSidebarCollapsed` | `{collapsed:boolean}` | `null` |
@@ -475,6 +477,7 @@ type ChatOp =
 - `accent` 必须是 `#RRGGBB`，宿主保证在 sRGB gamut 内；页面用 `src/theme/oklch.ts` 复核并夹回 gamut。
 - 页面不得写死色值；`src/styles/tokens.css` 是唯一来源，`scripts/check-colors.mjs` 在构建时检查。
 - 跟随系统开启时宿主在系统强调色变化后广播；关闭时保留用户颜色。
+- 外观模式为 `system` 时宿主读取 `AppsUseLightTheme` 并每 5 秒轮询；`mode` 是换算后的实际外观，页面据此切换 `data-mode`。
 
 ## 7. 存储与数据兼容
 

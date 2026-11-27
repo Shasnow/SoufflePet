@@ -221,6 +221,10 @@ public partial class SouffleSettings : ObservableObject
     public partial bool UiAccentFollowSystem { get; set; }
 
     [ObservableProperty]
+    [Description("React UI 外观模式：dark / light / system（system 跟随 Windows 应用主题）")]
+    public partial string UiThemeMode { get; set; } = "dark";
+
+    [ObservableProperty]
     [Description("React UI 侧栏是否手动收起（跨断点时页面自行决定抽屉/常驻）")]
     public partial bool UiSidebarCollapsed { get; set; }
 
@@ -258,6 +262,9 @@ public partial class SouffleSettings : ObservableObject
         // 列表被改短/清空后旧下标可能越界：回到第一个，避免启动时加载不存在的模型
         if (ActiveLive2DModelIndex < 0 || ActiveLive2DModelIndex >= Live2DModels.Count)
             ActiveLive2DModelIndex = 0;
+        // 外观模式只认三个值，判定口径与 ThemeService.ParseMode 一致（忽略大小写与首尾空白）；坏值回到深色
+        var themeMode = (UiThemeMode ?? string.Empty).Trim().ToLowerInvariant();
+        UiThemeMode = themeMode is "dark" or "light" or "system" ? themeMode : "dark";
         // 历史窗口：至少要保留 1 轮，且低水位必须小于高水位，否则裁剪逻辑会退化成每轮都切
         if (HistoryWindowTurns < 2) HistoryWindowTurns = 2;
         if (HistoryKeepTurns < 1) HistoryKeepTurns = 1;

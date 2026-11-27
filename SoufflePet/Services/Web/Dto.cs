@@ -16,6 +16,7 @@ public sealed record PetDto(string Name, string Initial);
 
 public sealed record ThemeDto(
     string Mode,
+    string ModePreference,
     string Accent,
     double AccentL,
     double AccentC,

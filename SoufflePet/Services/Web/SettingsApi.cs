@@ -95,6 +95,7 @@ public sealed class SettingsApi(
                 "settings.appearance.get" => theme.GetTheme(),
                 "settings.appearance.setAccent" => theme.SetAccent(RequireString(parameters, "accent")),
                 "settings.appearance.setFollowSystem" => theme.SetFollowSystem(GetBool(parameters, "enabled")),
+                "settings.appearance.setMode" => theme.SetMode(RequireString(parameters, "mode")),
                 "settings.appearance.reset" => theme.Reset(),
                 "settings.appearance.preview" => theme.Preview(RequireString(parameters, "accent")),
                 "settings.appearance.setSidebarCollapsed" => SetSidebarCollapsed(GetBool(parameters, "collapsed")),
