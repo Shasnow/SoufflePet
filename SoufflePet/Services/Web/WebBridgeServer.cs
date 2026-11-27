@@ -153,7 +153,7 @@ public sealed class WebBridgeServer : IDisposable
                 return;
             }
 
-            if (IsReadOnly(method))
+            if (RunsWithoutWriteGate(method))
             {
                 await InvokeHandlerAsync(id, method, parameters, _lifetime.Token).ConfigureAwait(false);
                 return;
@@ -228,14 +228,18 @@ public sealed class WebBridgeServer : IDisposable
     }
 
     /// <summary>
-    /// 只读请求不占写锁：窗口命令与 Core 内部已加锁的会话列表/搜索可即时执行；
-    /// fetchModels 只发网络请求、不改设置，避免 30 s 网络等待阻塞其它写请求。
-    /// 设置列表/详情仍走写锁：它们会枚举可变的 ChatProviders/任务集合，不能与保存并发。
+    /// 可以脱离写锁执行的请求：
+    /// 只读请求（窗口命令，以及 Core 内部已加锁的会话列表/搜索）与 fetchModels 不占写锁，
+    /// 避免网络等待把其它写请求堵在后面；设置列表/详情仍走写锁，它们会枚举可变的集合。
+    /// 命令执行同样不占写锁：`/compact` 要把整段历史交给模型总结，可能跑几分钟，占着写锁期间
+    /// 连 `/stop`、`chat.send`、草稿同步都要排到它结束之后，取消按钮就成了摆设。
+    /// 命令自身的状态改动由 Core 的会话锁与「压缩中」标记保证。
     /// </summary>
-    private static bool IsReadOnly(string method) =>
+    private static bool RunsWithoutWriteGate(string method) =>
         method.StartsWith("window.", StringComparison.Ordinal)
         || method is "session.list" or "session.search"
-        || method is "settings.llm.fetchModels";
+        || method is "settings.llm.fetchModels"
+        || method is "chat.command.execute";
 
     private void SendResponse(int id, bool ok, object? result, object? error)
     {

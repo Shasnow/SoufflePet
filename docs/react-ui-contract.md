@@ -265,7 +265,7 @@ interface AppSnapshotDto {
 | `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
 | `chat.model.select` | `{sessionId?,key}` | `null` |
 | `chat.command.list` | `{}` | `{commands:SlashCommandDto[]}`；命令目录（`{name,usage,summary,description,argumentKind:'none'\|'model'\|'approval',argumentLabel?,aliases:string[]}`），命令定义由 Core 的 `SlashCommandCatalog` 提供 |
-| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?,skipped?}`；`ok` 为 false 时 `message` 是可展示的原因；`skipped` 表示命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消），界面按提示呈现而不是报错。命令结果会写进会话的通知气泡。`clearDraft` 默认 true：执行成功或返回 skipped（未改动但有效）时宿主**无条件**清空该会话的 `draft`（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
+| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?,skipped?}`；`ok` 为 false 时 `message` 是可展示的原因；`skipped` 表示命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消），界面按提示呈现而不是报错。命令结果会写进会话的通知气泡。**调用一律不设超时**（`/compact` 可能要跑几分钟）。`clearDraft` 默认 true：界面**提交命令的那一刻**就把输入框清空并同步 `chat.draft`，宿主在命令成功或返回 skipped（未改动但有效）时再**无条件**清一次（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；命令失败时宿主保留草稿，界面若发现输入框还是空的就把命令文本填回去，方便改一下重试。从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
 | `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |
 | `chat.approval.decide` | `{sessionId?,messageId,approve:boolean}` | `null` |
 | `chat.workspace.switch` | `{sessionId?,path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
@@ -524,8 +524,8 @@ type ChatOp =
 6. 生产关闭 DevTools；页面默认右键菜单在非输入框/可编辑区且无文本选区时禁用（输入框与复制选区仍可用）。CSP 由 `LocalFileServer` 对 `/app/*` 下发：
    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'`。
 7. 页面不请求 CDN/网络字体/远程图片；所有依赖随包分发。
-8. RPC 载荷上限 256 KB（超出走 `/state`）；单请求 30 s 超时（模型列表/MCP/导入 60 s）。
-9. 写请求（`session.*` 变更、`chat.*`、`settings.*` 保存）由宿主 `SemaphoreSlim(1,1)` 串行执行；只读列表/详情查询与 `window.*` 即时执行。请求 token 绑定主窗口生命周期，窗口关闭时取消在途 Core 操作并停止处理排队请求。
+8. RPC 载荷上限 256 KB（超出走 `/state`）；单请求 30 s 超时（模型列表/MCP/导入 60 s）。**`chat.command.execute` 例外：不设超时**（`timeoutMs` 传 0）——`/compact` 要把整段历史总结一遍，宿主的摘要请求本身也不设超时，前端套 30 s 只会在压缩途中误报失败（还会因此不清空输入框，而宿主其实已经执行完）。取消交给 `/stop`，请求 token 仍绑定窗口生命周期。
+9. 写请求（`session.*` 变更、`chat.*`、`settings.*` 保存）由宿主 `SemaphoreSlim(1,1)` 串行执行；只读列表/详情查询、`window.*` 与 `chat.command.execute` 即时执行（命令可能跑几分钟，占着写锁会让 `/stop`、`chat.send`、草稿同步全部排队）。请求 token 绑定主窗口生命周期，窗口关闭时取消在途 Core 操作并停止处理排队请求。
 
 ## 9. 路由
 

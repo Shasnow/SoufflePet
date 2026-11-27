@@ -281,7 +281,7 @@ describe('Composer', () => {
           sessionId: 's1',
           text: '/model m',
           clearDraft: true,
-        })
+        }, 0)
       })
       // 命令不进模型上下文：不会走 chat.send
       expect(invoke).not.toHaveBeenCalledWith('chat.send', expect.anything())
@@ -302,10 +302,42 @@ describe('Composer', () => {
           sessionId: 's1',
           text: '/help',
           clearDraft: true,
-        })
+        }, 0)
       })
       // 页面侧也立即清空，避免旧命令残留在输入框里把面板又弹回来
       expect(useChatStore.getState().bySession.s1.draft).toBe('')
+    })
+
+    it('命令一提交就清空输入框，不等执行结果；失败再把命令填回来', async () => {
+      let finish: (value: unknown) => void = () => undefined
+      vi.mocked(invoke).mockImplementation(async (method: string) => {
+        if (method === 'chat.command.list') return { commands: SLASH_CATALOG }
+        if (method === 'chat.command.execute') {
+          return new Promise((resolve) => {
+            finish = resolve
+          })
+        }
+        return null
+      })
+
+      render(<Harness />)
+      const input = screen.getByLabelText('输入消息') as HTMLTextAreaElement
+      fireEvent.change(input, { target: { value: '/help' } })
+      await screen.findByRole('option', { name: /\/help/ })
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith('chat.command.execute', expect.anything(), 0)
+      })
+      // 命令还没返回，输入框已经空了：长命令（/compact）不该把输入框占住
+      expect(useChatStore.getState().bySession.s1.draft).toBe('')
+      expect(input.value).toBe('')
+
+      // 失败：宿主没清草稿，页面把命令文本填回来，方便改一下重试
+      finish({ ok: false, command: 'help', message: '命令出错了' })
+      await waitFor(() => {
+        expect(useChatStore.getState().bySession.s1.draft).toBe('/help')
+      })
     })
 
     it('Esc 收起面板，未知斜杠内容仍按普通消息发送', async () => {
@@ -357,7 +389,7 @@ describe('Composer', () => {
         shiftKey: true,
       })
       expect(notPrevented).toBe(true)
-      expect(invoke).not.toHaveBeenCalledWith('chat.command.execute', expect.anything())
+      expect(invoke).not.toHaveBeenCalledWith('chat.command.execute', expect.anything(), expect.anything())
       expect(invoke).not.toHaveBeenCalledWith('chat.send', expect.anything())
     })
 
@@ -374,7 +406,7 @@ describe('Composer', () => {
         shiftKey: true,
       })
       expect(notPrevented).toBe(true)
-      expect(invoke).not.toHaveBeenCalledWith('chat.command.execute', expect.anything())
+      expect(invoke).not.toHaveBeenCalledWith('chat.command.execute', expect.anything(), expect.anything())
     })
 
     it('面板打开时无修饰键的 Enter 仍然确认候选', async () => {
@@ -386,7 +418,7 @@ describe('Composer', () => {
       const prevented = fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
       expect(prevented).toBe(false)
       await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('chat.command.execute', expect.objectContaining({ text: '/model m' }))
+        expect(invoke).toHaveBeenCalledWith('chat.command.execute', expect.objectContaining({ text: '/model m' }), 0)
       })
     })
 
@@ -407,7 +439,7 @@ describe('Composer', () => {
           sessionId: 's1',
           text: '/model m',
           clearDraft: false,
-        })
+        }, 0)
       })
       expect(useChatStore.getState().bySession.s1.draft).toBe('写了一半的草稿')
     })
@@ -439,12 +471,14 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith(
           'chat.command.execute',
           expect.objectContaining({ text: '/model m2' }),
+          0,
         )
       })
       // 关键：不能落到列表第一项 m1（那会把当前模型悄悄换掉）
       expect(invoke).not.toHaveBeenCalledWith(
         'chat.command.execute',
         expect.objectContaining({ text: '/model m1' }),
+        0,
       )
     })
 
@@ -465,11 +499,13 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith(
           'chat.command.execute',
           expect.objectContaining({ text: '/approval full' }),
+          0,
         )
       })
       expect(invoke).not.toHaveBeenCalledWith(
         'chat.command.execute',
         expect.objectContaining({ text: '/approval manual' }),
+        0,
       )
     })
 
@@ -566,6 +602,7 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith(
           'chat.command.execute',
           expect.objectContaining({ text: '/model @src' }),
+          0,
         )
       })
       // @ 候选没有被 pickMention 插入：草稿没有被改成 @src/
@@ -618,7 +655,7 @@ describe('Composer', () => {
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
 
       await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('chat.command.execute', expect.objectContaining({ text: '/help' }))
+        expect(invoke).toHaveBeenCalledWith('chat.command.execute', expect.objectContaining({ text: '/help' }), 0)
       })
       // 命令执行后 @ 浮层已清掉，不会残留
       expect(document.querySelector('.mention-popover')).toBeNull()

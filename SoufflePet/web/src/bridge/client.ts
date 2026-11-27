@@ -83,7 +83,8 @@ export class BridgeClient {
     {
       resolve: (value: unknown) => void
       reject: (error: Error) => void
-      timer: number
+      /** 超时定时器；无超时的调用（timeoutMs <= 0）为 null。 */
+      timer: number | null
     }
   >()
   private nextId = 1
@@ -128,6 +129,12 @@ export class BridgeClient {
     return ok
   }
 
+  /**
+   * 发一条 RPC。<paramref name="timeoutMs" /> 是等待上限，<c>&lt;= 0</c> 表示不设超时：
+   * 有的调用本身没有固定时长（`/compact` 要把整段历史总结一遍，宿主侧也不设超时），
+   * 给它套默认 30 秒只会误报「超时」——界面还会因此不清空输入框，而宿主其实已经做完了。
+   * 这类调用的取消归宿主自己的流程（如 `/stop`），不靠前端超时。
+   */
   invoke<T>(method: string, params?: unknown, timeoutMs = 30_000): Promise<T> {
     if (this.disposed) {
       return Promise.reject(new BridgeError('bridge_unavailable', '桥已关闭'))
@@ -135,10 +142,13 @@ export class BridgeClient {
 
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(id)
-        reject(new BridgeError('timeout', `调用 ${method} 超时（${timeoutMs} ms）`))
-      }, timeoutMs)
+      const timer =
+        timeoutMs > 0
+          ? window.setTimeout(() => {
+              this.pending.delete(id)
+              reject(new BridgeError('timeout', `调用 ${method} 超时（${timeoutMs} ms）`))
+            }, timeoutMs)
+          : null
 
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
@@ -149,7 +159,7 @@ export class BridgeClient {
       try {
         this.transport.send(makeRequest(id, method, params))
       } catch (error) {
-        window.clearTimeout(timer)
+        if (timer !== null) window.clearTimeout(timer)
         this.pending.delete(id)
         reject(error instanceof Error ? error : new Error(String(error)))
       }
@@ -228,7 +238,7 @@ export class BridgeClient {
     const pending = this.pending.get(envelope.id)
     if (!pending) return
     this.pending.delete(envelope.id)
-    window.clearTimeout(pending.timer)
+    if (pending.timer !== null) window.clearTimeout(pending.timer)
 
     if (envelope.ok) {
       pending.resolve(envelope.result)
@@ -368,7 +378,7 @@ export class BridgeClient {
     this.disposed = true
     this.transport.dispose()
     for (const pending of this.pending.values()) {
-      window.clearTimeout(pending.timer)
+      if (pending.timer !== null) window.clearTimeout(pending.timer)
       pending.reject(new BridgeError('bridge_unavailable', '桥已关闭'))
     }
     this.pending.clear()

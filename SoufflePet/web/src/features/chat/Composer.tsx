@@ -243,24 +243,13 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     }, 100)
   }
 
-  /** 清空输入框（含待同步草稿），命令执行成功后调用，避免残留「/model」。 */
-  const clearDraft = () => {
-    if (draftTimer.current !== null) {
-      window.clearTimeout(draftTimer.current)
-      draftTimer.current = null
-    }
-    pendingDraft.current = null
-    setDraft(sessionId, '')
-  }
-
   /**
    * 执行一条命令：结果用 toast 呈现。
-   * 命令来自输入框时成功后清空输入框；来自消息操作菜单 / 工具栏按钮时不动当前草稿。
-   * 失败保留内容，方便修改重试。
-   *
-   * 清空必须两端一起做：宿主的 `_draft` 由 `clearDraft` 参数在成功后**无条件**清掉
-   * （面板选中的候选和草稿并不相等：草稿 /hel → 执行 /help；草稿 /model → 执行 /model DeepSeek Chat），
-   * 否则重新打开会话时快照会带回旧命令、面板还会自动弹回。
+   * 命令来自输入框时**提交那一刻就清空输入框**（两端一起清）：命令也可能跑很久
+   * （`/compact` 要把整段历史总结一遍，宿主侧不设超时），等结果回来再清等于把输入框占住，
+   * 用户既没法输入下一条，看着也像命令没发出去。
+   * 失败时若输入框还是空的，把命令文本填回去，方便改一下重试。
+   * 来自消息操作菜单 / 工具栏按钮时不动当前草稿（那段文字跟命令无关）。
    */
   const executeCommand = async (text: string, options?: { clearDraftOnSuccess?: boolean }) => {
     const input = text.trim()
@@ -277,26 +266,43 @@ export function Composer({ chat, hero = false }: ComposerProps) {
     // 否则它会在命令执行之后才把旧命令写回宿主，把宿主的清空覆盖掉。
     // 消息菜单 / 工具栏按钮触发的命令（clearDraftOnSuccess=false）草稿是普通文本，
     // 不能掐 timer，否则这段草稿永远同步不到宿主。
-    // pendingDraft 先保留：执行失败时切换会话仍会把它补发给宿主，方便修改重试。
     if (clearDraftOnSuccess && draftTimer.current !== null) {
       window.clearTimeout(draftTimer.current)
       draftTimer.current = null
     }
+
+    // 提交即清空：clearDraft 只清页面侧，这里再同步给宿主，免得命令跑到一半推快照又把旧命令带回来
+    // （命令成功后宿主自己也会清一次，幂等）
+    const submitted = input
+    const restoreDraft = () => {
+      const current = useChatStore.getState().bySession[sessionId]
+      if (current && current.draft.length === 0) syncDraft(submitted)
+    }
+
+    if (clearDraftOnSuccess) syncDraft('')
+
     try {
-      const result = await invoke<SlashCommandResultDto>('chat.command.execute', {
-        sessionId,
-        text: input,
-        clearDraft: clearDraftOnSuccess,
-      })
+      const result = await invoke<SlashCommandResultDto>(
+        'chat.command.execute',
+        {
+          sessionId,
+          text: input,
+          clearDraft: clearDraftOnSuccess,
+        },
+        // 命令可能跑很久：/compact 要把整段历史总结一遍，宿主侧不设超时。
+        // 用默认的 30 秒会在压缩途中误报失败。真正的取消归宿主（/stop），这里只负责等结果。
+        0,
+      )
       if (!result) return
       // skipped = 命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消）：按提示呈现
       pushToast({
         level: result.skipped ? 'info' : result.ok ? 'success' : 'error',
         text: result.message,
       })
-      if ((result.ok || result.skipped) && clearDraftOnSuccess) clearDraft()
+      if (!result.ok && !result.skipped && clearDraftOnSuccess) restoreDraft()
     } catch (error) {
       pushToast({ level: 'error', text: `命令执行失败：${error instanceof Error ? error.message : String(error)}` })
+      if (clearDraftOnSuccess) restoreDraft()
     }
   }
 
