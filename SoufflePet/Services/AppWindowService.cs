@@ -28,6 +28,12 @@ public interface IAppWindowService
     void Toggle(Window anchor, bool fromPet = false);
 
     /// <summary>
+    /// 呼出主窗口并提到前台（可见时只激活、不收起）：供托盘图标单击使用，
+    /// 与 <see cref="Toggle" /> 的区别是永远不会把已打开的窗口隐藏。
+    /// </summary>
+    void Show(Window anchor);
+
+    /// <summary>
     /// 戳一戳唤醒：让桌宠发起一轮自主对话（反应动作由桌宠窗口先播），
     /// 并确保主窗口可见，以便用户看到桌宠的回应。
     /// </summary>
@@ -126,6 +132,12 @@ public sealed class AppWindowService : IAppWindowService, IDisposable
 
         if (window.IsVisible) window.HideAndSave();
         else window.ShowNear(anchor);
+    }
+
+    public void Show(Window anchor)
+    {
+        if (_disposed) return;
+        GetWindow()?.ShowNear(anchor);
     }
 
     /// <summary>戳一戳：发起一轮自主对话，并保证主窗口显示在桌宠旁边（已显示则仅激活）。</summary>

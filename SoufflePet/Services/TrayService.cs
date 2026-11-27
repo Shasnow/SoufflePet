@@ -115,6 +115,19 @@ public sealed class TrayService(
         };
         _trayIcons = [trayIcon];
         TrayIcon.SetIcons(app, _trayIcons);
+
+        // 左键单击托盘图标：直接呼出对话窗口（已打开则提到前台，不收起）；右键仍是菜单
+        trayIcon.Clicked += (_, _) =>
+        {
+            if (desktop.MainWindow is not { } anchor)
+            {
+                Logger.Warning("tray click ignored: pet window not available");
+                return;
+            }
+
+            appWindow.Show(anchor);
+        };
+
         Logger.Information("Tray icon set, initialization completed");
     }
 
