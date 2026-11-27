@@ -556,7 +556,7 @@ type ChatOp =
 | 项 | 值 |
 | --- | --- |
 | `protocolVersion` | 1 |
-| 最低 WebView2 | Chromium 156（Avalonia.Controls.WebView 12.1.1 自带） |
+| 最低 WebView2 | Chromium 156（Avalonia.Controls.WebView 12.1.2 自带；该包尚无 12.2.0，Avalonia 主包已升到 12.2.0） |
 | 页面 base | `/app/` |
 | 事件 rev | 宿主全局单调递增；页面按 session 缓存 |
 | 后端 Core | `SoufflePet.Core` net10.0，无 Avalonia 引用 |
