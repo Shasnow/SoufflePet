@@ -280,7 +280,6 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith('chat.command.execute', {
           sessionId: 's1',
           text: '/model m',
-          clearDraft: true,
         }, 0)
       })
       // 命令不进模型上下文：不会走 chat.send
@@ -301,7 +300,6 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith('chat.command.execute', {
           sessionId: 's1',
           text: '/help',
-          clearDraft: true,
         }, 0)
       })
       // 页面侧也立即清空，避免旧命令残留在输入框里把面板又弹回来
@@ -438,7 +436,6 @@ describe('Composer', () => {
         expect(invoke).toHaveBeenCalledWith('chat.command.execute', {
           sessionId: 's1',
           text: '/model m',
-          clearDraft: false,
         }, 0)
       })
       expect(useChatStore.getState().bySession.s1.draft).toBe('写了一半的草稿')

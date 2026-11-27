@@ -1343,9 +1343,6 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
 
             const result = executeMockCommand(command, argument, chat)
             if (result.ok) {
-              // 与宿主一致：命令来自输入框时成功后清掉草稿（默认 true），
-              // 否则重新打开会话时快照会带回旧命令、面板自动弹回
-              if (payload.clearDraft !== false) chat.draft = ''
               const summary = result.summaryText
                 ? {
                     id: newId('m'),

@@ -271,8 +271,8 @@ export function Composer({ chat, hero = false }: ComposerProps) {
       draftTimer.current = null
     }
 
-    // 提交即清空：clearDraft 只清页面侧，这里再同步给宿主，免得命令跑到一半推快照又把旧命令带回来
-    // （命令成功后宿主自己也会清一次，幂等）
+    // 提交即清空：清页面侧的同时同步给宿主，免得命令跑到一半推快照又把旧命令带回来。
+    // 宿主不再碰草稿，期间用户输入的新内容不会被命令结果冲掉。
     const submitted = input
     const restoreDraft = () => {
       const current = useChatStore.getState().bySession[sessionId]
@@ -287,7 +287,6 @@ export function Composer({ chat, hero = false }: ComposerProps) {
         {
           sessionId,
           text: input,
-          clearDraft: clearDraftOnSuccess,
         },
         // 命令可能跑很久：/compact 要把整段历史总结一遍，宿主侧不设超时。
         // 用默认的 30 秒会在压缩途中误报失败。真正的取消归宿主（/stop），这里只负责等结果。

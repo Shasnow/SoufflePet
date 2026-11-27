@@ -322,11 +322,9 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                     var session = await ResolveSessionAsync(parameters, cancellationToken).ConfigureAwait(false);
                     var text = RequireString(parameters, "text");
 
-                    // 命令来自输入框（默认）时，成功后由 Core 无条件清掉会话草稿：面板选中的候选文本
-                    // 和草稿并不相等（草稿 /hel → 执行 /help），不清的话重新打开会话会从快照带回旧命令、
-                    // 输入面板还会自动弹回。命令来自消息操作菜单 / 工具栏按钮时前端传 false，草稿是别的文字，保持不动。
-                    var clearDraft = GetBool(parameters, "clearDraft", fallback: true);
-                    var result = await SlashCommands.ExecuteAsync(session, text, fromPlatform: false, clearDraft)
+                    // 草稿由界面提交命令时自行清空并同步，宿主不碰草稿：命令可能跑几分钟（/compact），
+                    // 期间用户输入的新内容不能被命令成功后的回调冲掉。
+                    var result = await SlashCommands.ExecuteAsync(session, text, fromPlatform: false)
                         .ConfigureAwait(false);
 
                     return new SlashCommandResultDto(result.Success, result.CommandName, result.Message,

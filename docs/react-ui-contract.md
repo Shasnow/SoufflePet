@@ -265,7 +265,7 @@ interface AppSnapshotDto {
 | `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
 | `chat.model.select` | `{sessionId?,key}` | `null` |
 | `chat.command.list` | `{}` | `{commands:SlashCommandDto[]}`；命令目录（`{name,usage,summary,description,argumentKind:'none'\|'model'\|'approval',argumentLabel?,aliases:string[]}`），命令定义由 Core 的 `SlashCommandCatalog` 提供 |
-| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?,skipped?}`；`ok` 为 false 时 `message` 是可展示的原因；`skipped` 表示命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消），界面按提示呈现而不是报错。命令结果会写进会话的通知气泡。**调用一律不设超时**（`/compact` 可能要跑几分钟）。`clearDraft` 默认 true：界面**提交命令的那一刻**就把输入框清空并同步 `chat.draft`，宿主在命令成功或返回 skipped（未改动但有效）时再**无条件**清一次（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；命令失败时宿主保留草稿，界面若发现输入框还是空的就把命令文本填回去，方便改一下重试。从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
+| `chat.command.execute` | `{sessionId?,text}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?,skipped?}`；`ok` 为 false 时 `message` 是可展示的原因；`skipped` 表示命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消），界面按提示呈现而不是报错。命令结果会写进会话的通知气泡。**调用一律不设超时**（`/compact` 可能要跑几分钟）。**宿主不碰草稿**：界面在**提交命令的那一刻**就把输入框清空并同步 `chat.draft`（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`，必须两端一致清空）；命令失败时界面若发现输入框还是空的就把命令文本填回去，方便改一下重试。长命令期间宿主不再清空草稿，用户输入的新内容不会被冲掉；从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时界面不清输入框 |
 | `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |
 | `chat.approval.decide` | `{sessionId?,messageId,approve:boolean}` | `null` |
 | `chat.workspace.switch` | `{sessionId?,path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |

@@ -258,25 +258,25 @@ public sealed class SlashCommandTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExecuteClearsDraftOnSuccessButKeepsItOnFailure()
+    public async Task ExecuteNeverTouchesDraft()
     {
         var session = _manager.ActiveSession!;
 
-        // 失败：草稿原样保留，方便修改重试
+        // 草稿由界面提交命令时自行清空，宿主一概不碰：
+        // 长命令（/compact）期间用户输入的新内容不能被命令成功后的回调冲掉。
         await session.SetDraftAsync("/nope");
-        var failed = await SlashCommands.ExecuteAsync(session, "/nope", clearDraft: true);
+        var failed = await SlashCommands.ExecuteAsync(session, "/nope");
         Assert.False(failed.Success);
         Assert.Equal("/nope", session.Snapshot.Draft);
 
-        // 成功：无条件清空——哪怕草稿和执行文本不一样（草稿 /hel → 执行 /help）
         await session.SetDraftAsync("/hel");
-        var succeeded = await SlashCommands.ExecuteAsync(session, "/help", clearDraft: true);
+        var succeeded = await SlashCommands.ExecuteAsync(session, "/help");
         Assert.True(succeeded.Success);
-        Assert.Equal(string.Empty, session.Snapshot.Draft);
+        Assert.Equal("/hel", session.Snapshot.Draft);
     }
 
     [Fact]
-    public async Task ExecuteKeepsDraftWhenCallerDoesNotAskForClear()
+    public async Task ExecuteKeepsPlainDraftUntouched()
     {
         var session = _manager.ActiveSession!;
         await session.SetDraftAsync("写了一半的草稿");

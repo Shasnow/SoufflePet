@@ -292,16 +292,13 @@ public static class SlashCommands
     /// 执行结果会写进会话的可见消息（通知气泡）：页面刷新后仍在（会话还在内存里），
     /// 但通知气泡**不落盘**——会话关闭 / 空闲卸载或应用重启后就不再出现。
     /// <paramref name="fromPlatform" /> 为 true 时拒绝只在桌面端可用的命令（如审批模式）。
-    /// <paramref name="clearDraft" /> 为 true 时，执行成功会清空会话草稿——命令来自输入框时应当清空，
-    /// 且必须**无条件**清空：面板选中的候选文本和草稿并不相等（草稿 <c>/hel</c> → 执行 <c>/help</c>），
-    /// 不清掉的话重新打开会话会从快照里带回旧命令、输入面板还会自动弹回。
-    /// 失败时始终保留草稿，方便修改重试。
+    /// 草稿由界面在提交命令的那一刻自行清空并同步，宿主不碰草稿：命令可能跑几分钟（<c>/compact</c>），
+    /// 期间用户输入的新内容不能被命令成功后的回调冲掉。
     /// </summary>
     public static async Task<SlashCommandResult> ExecuteAsync(
         ChatSession session,
         string? text,
-        bool fromPlatform = false,
-        bool clearDraft = false)
+        bool fromPlatform = false)
     {
         ArgumentNullException.ThrowIfNull(session);
 
@@ -340,8 +337,6 @@ public static class SlashCommands
         }
 
         await session.AddNoticeAsync(NoticeText(command, result)).ConfigureAwait(false);
-        if ((result.Success || result.Skipped) && clearDraft)
-            await session.SetDraftAsync(string.Empty).ConfigureAwait(false);
         return result;
     }
 
