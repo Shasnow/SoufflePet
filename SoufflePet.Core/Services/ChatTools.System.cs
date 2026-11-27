@@ -301,11 +301,20 @@ public sealed partial class ChatTools
         startInfo.ArgumentList.Add("-NonInteractive");
         startInfo.ArgumentList.Add("-Command");
         // 命令前先做三件事：强制 UTF-8（避免中文按控制台代码页解成乱码）、
-        // 关掉彩色输出（PS 7 的 $PSStyle 在 5.1 里不存在，需判空；NO_COLOR / TERM 让外部命令也别上色）
+        // 关掉彩色输出（PS 7 的 $PSStyle 在 5.1 里不存在，需判空；NO_COLOR / TERM 让外部命令也别上色）。
+        // 光设 OutputRendering='PlainText' 不够：脚本解析错误 / 引擎错误由格式化器直接写到 stderr，
+        // 绕过 rendering 管道，仍会带上 $PSStyle.Formatting.Error 的 ANSI 色（\x1b[31;1m）。
+        // 把这些 Formatting 字段清空才能彻底去掉颜色码，避免它混进回传给模型的文本里。
         startInfo.ArgumentList.Add(
             "$OutputEncoding=[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
             + "$env:NO_COLOR='1'; $env:TERM='dumb'; "
-            + "if ($null -ne $PSStyle) { $PSStyle.OutputRendering='PlainText' }; "
+            + "if ($null -ne $PSStyle) { "
+            + "$PSStyle.OutputRendering='PlainText'; "
+            + "$empty=[System.Management.Automation.PSStyle]::Empty; "
+            + "$PSStyle.Formatting.Error=$empty; $PSStyle.Formatting.ErrorAccent=$empty; "
+            + "$PSStyle.Formatting.FormatAccent=$empty; $PSStyle.Formatting.Warning=$empty; "
+            + "$PSStyle.Formatting.Verbose=$empty; $PSStyle.Formatting.Debug=$empty; "
+            + "}; "
             + command);
 
         using var process = new Process();
