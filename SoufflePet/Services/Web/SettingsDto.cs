@@ -6,7 +6,7 @@ using System.Collections.Generic;
 namespace SoufflePet.Services.Web;
 
 /// <summary>设置面板的 v1 DTO（与 web/src/bridge/contracts.ts 对齐）。</summary>
-public sealed record ChatProviderModelDto(string ModelId, string? Name, bool IsActive);
+public sealed record ChatProviderModelDto(string ModelId, string? Name, bool IsActive, int ContextWindowTokens = 0);
 
 public sealed record ProviderDto(
     string Name,

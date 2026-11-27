@@ -232,6 +232,32 @@ function MessageItemInner({ sessionId, message, streaming }: MessageItemProps) {
       )
     }
 
+    // 上下文压缩摘要：正文是模型写的 Markdown，默认展开（可折叠），只用于回看，不是对话正文
+    case 'summary':
+      return (
+        <div className="message-row" data-kind="summary">
+          <div className="bubble bubble-summary">
+            <button type="button" className="collapse-head" onClick={toggleExpand}>
+              <ChevronDown
+                size={13}
+                style={{
+                  transform: message.expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                  transition: 'transform 120ms ease',
+                }}
+              />
+              <FileText size={13} />
+              <span className="collapse-title">上下文摘要</span>
+            </button>
+            {message.expanded ? (
+              <div className="collapse-body">
+                <RenderMarkdown text={message.text} />
+              </div>
+            ) : null}
+          </div>
+          {meta}
+        </div>
+      )
+
     case 'approval':
       return (
         <div className="message-row" data-kind="approval">

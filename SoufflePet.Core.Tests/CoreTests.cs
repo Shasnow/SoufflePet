@@ -57,6 +57,24 @@ public sealed class ChatMemoryTests : IDisposable
     }
 
     [Fact]
+    public void SavesAndReloadsContextSummary()
+    {
+        var settings = new SouffleSettings { ChatMemoryEnabled = true };
+        var memory = new ChatMemory(settings, _root);
+        Assert.Null(memory.Summary);
+
+        memory.SaveSummary("<conversation_summary>\n要点\n</conversation_summary>");
+        Assert.Contains("要点", memory.Summary);
+
+        var reloaded = new ChatMemory(settings, _root);
+        Assert.Contains("要点", reloaded.Summary);
+
+        reloaded.ClearSummary();
+        Assert.Null(reloaded.Summary);
+        Assert.Null(new ChatMemory(settings, _root).Summary);
+    }
+
+    [Fact]
     public void RemembersAndForgetsProfileEntries()
     {
         var settings = new SouffleSettings { ChatMemoryEnabled = true };

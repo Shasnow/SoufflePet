@@ -129,6 +129,431 @@ public sealed class ChatSessionTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task AutoCompactsWhenContextExceedsWindow()
+    {
+        // 窗口 64K → 保留预算 32K token、触发线约 54.9K token；轮数与拆分点无关
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history)
+        {
+            histories.Add(history);
+            await Task.Yield();
+            yield return new LlmTextDelta("回复");
+        }
+
+        var llm = new FakeLlm((_, history, _) => StreamAsync(history));
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        // 第一轮自己还在触发线以下（约 52.5K），第二轮补上后才超窗
+        await session.SendAsync(new string('a', 210_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync(new string('b', 30_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // 第二次请求前已压缩：摘要挂进历史，只保留预算内的最近一轮原文
+        var last = histories[^1];
+        Assert.Contains(last, message => message.Text.Contains("<conversation_summary>"));
+        Assert.Equal(1, last.Count(message => message.Role == Microsoft.Extensions.AI.ChatRole.User));
+        Assert.Contains(session.Snapshot.Messages, message => message.Text.Contains("已压缩上下文"));
+        // 摘要本体单独一条气泡（默认展开），自动压缩也要能让用户看到被折叠成什么
+        var summaryBubble = Assert.Single(
+            session.Snapshot.Messages, message => message.Kind == ChatMessageKinds.Summary);
+        Assert.Equal("已压缩的对话摘要", summaryBubble.Text);
+        Assert.True(summaryBubble.Expanded);
+    }
+
+    [Fact]
+    public async Task CompactionSplitsByTokensNotByTurnCount()
+    {
+        // 保留预算 32K token：历史总量（约 40K）超过预算但远没到自动触发线（54.9K），
+        // 只要执行压缩，就必须由 token 预算决定拆分点（仅保留最后一轮），而不是「保留最近 30 轮」。
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        _settings.HistoryKeepTurns = 30;
+
+        var summarized = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var llm = new FakeLlm(
+            (_, _, _) => Streams(new LlmTextDelta("回复")),
+            summary: "要点摘要",
+            onSummarize: summarized.Add);
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync("问题2", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await SlashCommands.ExecuteAsync(session, "/compact");
+
+        Assert.True(result.Success);
+        // 保留 1 轮原文并报告大致的保留 token 数
+        Assert.Contains("保留最近 1 轮原文", result.Message);
+        Assert.Single(summarized);
+
+        var last = session.Snapshot.Messages.Last(message => message.Kind == ChatMessageKinds.Notice);
+        Assert.Contains("已压缩上下文", last.Text);
+    }
+
+    [Fact]
+    public async Task DropsOldestTurnsWhenCompactionFails()
+    {
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        _settings.HistoryKeepTurns = 1;
+
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history)
+        {
+            histories.Add(history);
+            await Task.Yield();
+            yield return new LlmTextDelta("回复");
+        }
+
+        // 摘要恒为空 → 压缩失败，退回按轮数丢弃
+        var llm = new FakeLlm((_, history, _) => StreamAsync(history), summary: string.Empty);
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync(new string('a', 210_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync(new string('b', 30_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // 没有摘要，但旧的轮次已被丢弃：请求里只剩本轮提问
+        var last = histories[^1];
+        Assert.DoesNotContain(last, message => message.Text.Contains("<conversation_summary>"));
+        Assert.Equal(1, last.Count(message => message.Role == Microsoft.Extensions.AI.ChatRole.User));
+        Assert.Contains(session.Snapshot.Messages, message => message.Text.Contains("压缩失败"));
+        Assert.Contains(session.Snapshot.Messages, message => message.Text.Contains("按轮数丢弃"));
+        // 压缩没成，就没有摘要气泡（否则「摘要为空」也会让界面以为压缩成功）
+        Assert.DoesNotContain(session.Snapshot.Messages, message => message.Kind == ChatMessageKinds.Summary);
+    }
+
+    [Fact]
+    public async Task TurnContextGuardCompactsMidTurn()
+    {
+        // 窗口 64K → 触发线约 54.9K、保留预算 32.7K。第一轮 40K token 不会触发自动压缩，
+        // 但已经超过保留预算，所以中途守卫压缩时必须丢掉它。
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+
+        var estimates = 0;
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var requestsSeen = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var guardResults = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>?>();
+
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history)
+        {
+            histories.Add(history);
+            await Task.Yield();
+            yield return new LlmTextDelta("回复");
+        }
+
+        // 入场检查报「还没超」（奇数次估算），工具循环中途报「已超」（偶数次估算），
+        // 模拟工具结果把水位顶过触发线；守卫压缩后用压缩后的历史继续本轮请求。
+        var llm = new FakeLlm(
+            (_, history, _) => StreamAsync(history),
+            estimate: (_, _) => Interlocked.Increment(ref estimates) % 2 == 1 ? 1_000 : 80_000,
+            guard: async (contextGuard, request) =>
+            {
+                requestsSeen.Add(request);
+                var compacted = await contextGuard.CompactIfNeededAsync(request, CancellationToken.None);
+                guardResults.Add(compacted);
+                return compacted;
+            });
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync("问题2", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // 第一轮中途：只有一轮可摘要 → 不压缩；第二轮中途：压缩并返回重建后的历史
+        Assert.Equal(2, guardResults.Count);
+        Assert.Null(guardResults[0]);
+        var compacted = Assert.IsAssignableFrom<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>(guardResults[1]);
+        Assert.Contains(compacted, message => message.Text.Contains("<conversation_summary>"));
+        Assert.Contains(compacted, message => message.Text.Contains("问题2"));
+
+        // 守卫拿到的是「即将发出的请求」：压缩前的那份，含本轮提问、不含系统提示词
+        Assert.Contains(requestsSeen[1], message => message.Text.Contains("问题2"));
+        Assert.DoesNotContain(requestsSeen[1],
+            message => message.Role == Microsoft.Extensions.AI.ChatRole.System);
+
+        // 本轮请求就是用压缩后的历史发的
+        Assert.Contains(histories[^1], message => message.Text.Contains("问题2"));
+        Assert.Contains(session.Snapshot.Messages, message => message.Text.Contains("已压缩上下文"));
+        // 工具循环中途压缩同样要留下摘要气泡
+        Assert.Contains(session.Snapshot.Messages, message => message.Kind == ChatMessageKinds.Summary);
+    }
+
+    [Fact]
+    public async Task CompactCommandCompactsIdleSession()
+    {
+        // 窗口 64K → 保留预算 32K token
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var summarized = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history)
+        {
+            histories.Add(history);
+            await Task.Yield();
+            yield return new LlmTextDelta("回复");
+        }
+
+        var llm = new FakeLlm(
+            (_, history, _) => StreamAsync(history),
+            summary: "要点摘要",
+            onSummarize: summarized.Add);
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        // 两轮合计约 40K token：不到自动触发线，但已超过保留预算
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync("问题2", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await SlashCommands.ExecuteAsync(session, "/compact");
+        Assert.True(result.Success);
+        Assert.Contains("已压缩上下文", result.Message);
+
+        // 摘要正文落进一条 summary 气泡：命令路径由 SlashCommands 自己提示结果，这条只放摘要
+        var summaryBubble = Assert.Single(
+            session.Snapshot.Messages, message => message.Kind == ChatMessageKinds.Summary);
+        Assert.Equal("要点摘要", summaryBubble.Text);
+        Assert.True(summaryBubble.Expanded);
+
+        // 摘要请求携带的是完整历史（2 问 2 答），而不是被丢弃的那部分
+        var summaryInput = Assert.Single(summarized);
+        Assert.Equal(4, summaryInput.Count);
+        // 压缩这次请求的开销计入会话用量（之前是隐形的）
+        Assert.Equal(100, session.Snapshot.Usage?.InputTokens);
+        Assert.Equal(20, session.Snapshot.Usage?.OutputTokens);
+
+        // 压缩后的下一轮请求里应带上摘要，且只保留预算内的那一轮原文（问题2）
+        await session.SendAsync("问题3", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var last = histories[^1];
+        Assert.Contains(last, message => message.Text.Contains("要点摘要"));
+        Assert.Equal(2, last.Count(message => message.Role == Microsoft.Extensions.AI.ChatRole.User));
+    }
+
+    [Fact]
+    public async Task PublishesContextUsageBeforeEachTurn()
+    {
+        async IAsyncEnumerable<LlmStreamEvent> StreamAsync()
+        {
+            await Task.Yield();
+            yield return new LlmTextDelta("回复");
+        }
+
+        var llm = new FakeLlm((_, _, _) => StreamAsync());
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        var published = new List<ChatContextUsageState?>();
+        session.OpsProduced += batch =>
+        {
+            foreach (var op in batch.Ops)
+                if (op is ChatOpContextUsage usage) published.Add(usage.ContextUsage);
+        };
+
+        await session.SendAsync("第一问", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        // 请求前估算并推给界面：估算值大于 0，窗口取全局默认值
+        var state = Assert.IsType<ChatContextUsageState>(Assert.Single(published));
+        Assert.True(state.EstimatedTokens > 0);
+        Assert.Equal(_settings.DefaultContextWindowTokens, state.WindowTokens);
+        // 触发线由后端统一给出，界面直接比它，不再自己算 90%
+        Assert.Equal(ContextCompaction.TriggerTokens(state.WindowTokens), state.TriggerTokens);
+
+        // 快照同样带上上下文占用，页面刷新后底部水位条不会丢
+        Assert.Equal(state, session.Snapshot.ContextUsage);
+    }
+
+    [Fact]
+    public async Task CompactRejectsWhileGenerating()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async IAsyncEnumerable<LlmStreamEvent> Slow([EnumeratorCancellation] CancellationToken ct)
+        {
+            await release.Task.WaitAsync(ct);
+            yield return new LlmTextDelta("完成");
+        }
+
+        var llm = new FakeLlm((_, _, ct) => Slow(ct));
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync("问", null, CancellationToken.None);
+        var outcome = await session.CompactAsync();
+
+        Assert.Equal(CompactionStatus.Failed, outcome.Status);
+        Assert.Contains("正在生成回复", outcome.Message);
+
+        release.SetResult();
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task CompactCanBeStoppedBySlashStop()
+    {
+        // 窗口 64K → 保留预算 32K：第一轮 40K token 已超预算，压缩才有东西可摘要
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        // 摘要挂在 await 上：先让压缩真正开始，再用 /stop 打断
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var llm = new FakeLlm(
+            (_, _, _) => Streams(new LlmTextDelta("回复")),
+            summary: "要点摘要",
+            summarizeDelay: async ct => await release.Task.WaitAsync(ct));
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync("问题2", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var compacting = session.CompactAsync();
+        await WaitForAsync(() => session.Compacting ? session : null);
+
+        // 压缩期间没有活动 turn，/stop 仍然要能中断（不能回「当前没有正在生成的回复」）
+        var stop = await SlashCommands.ExecuteAsync(session, "/stop");
+        Assert.Contains("已请求停止压缩上下文", stop.Message);
+
+        var outcome = await compacting.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(CompactionStatus.Cancelled, outcome.Status);
+        release.TrySetResult();
+
+        // 取消后历史保持原样：下一轮请求里没有摘要
+        IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>? next = null;
+        var followUp = new FakeLlm((_, history, _) =>
+        {
+            next = history;
+            return Streams(new LlmTextDelta("好"));
+        });
+        var manager2 = CreateManager(followUp);
+        var session2 = await manager2.OpenAsync(session.Id, CancellationToken.None);
+        await session2.SendAsync("问", null, CancellationToken.None);
+        await session2.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.DoesNotContain(next!, message => message.Text.Contains("<conversation_summary>"));
+    }
+
+    [Fact]
+    public async Task RestoresCompactionSummaryAfterRestart()
+    {
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        var llm = new FakeLlm((_, _, _) => Streams(new LlmTextDelta("回复")), summary: "重启后要挂回的摘要");
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync("问题2", null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await SlashCommands.ExecuteAsync(session, "/compact");
+        Assert.True(result.Success);
+        var id = session.Id;
+
+        // 重启：同一个 store 新建管理器，摘要应从 summary.md 挂回请求历史开头
+        var summaryFile = Path.Combine(_store.SessionDirectory(id), "summary.md");
+        Assert.Equal("重启后要挂回的摘要", File.ReadAllText(summaryFile));
+        IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>? next = null;
+        var manager2 = CreateManager(new FakeLlm((_, history, _) =>
+        {
+            next = history;
+            return Streams(new LlmTextDelta("好"));
+        }));
+        var reopened = await manager2.OpenAsync(id, CancellationToken.None);
+        await reopened.SendAsync("重启后的提问", null, CancellationToken.None);
+        await reopened.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains(next!, message => message.Text.Contains("<conversation_summary>"));
+        Assert.Contains(next!, message => message.Text.Contains("重启后要挂回的摘要"));
+    }
+
+    [Fact]
+    public async Task KeepsAllTurnsWithoutCountTrimming()
+    {
+        // 不再按轮数自动裁剪：兜底低水位设得很小也照样一轮不丢（旧逻辑超过高水位会一次性裁到它）
+        _settings.HistoryKeepTurns = 3;
+
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var llm = new FakeLlm((_, history, _) =>
+        {
+            histories.Add(history);
+            return Streams(new LlmTextDelta("回复"));
+        });
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        for (var i = 1; i <= 55; i++)
+        {
+            await session.SendAsync($"问题{i}", null, CancellationToken.None);
+            await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var last = histories[^1];
+        Assert.Equal(55, last.Count(message => message.Role == Microsoft.Extensions.AI.ChatRole.User));
+        Assert.Contains(last, message => message.Text.Contains("问题1"));
+        // 没有触发压缩，也就没有丢弃提示
+        Assert.DoesNotContain(session.Snapshot.Messages, message => message.Text.Contains("按轮数丢弃"));
+    }
+
+    [Fact]
+    public async Task CompactionFailureDropKeepsTheExistingSummary()
+    {
+        // 压缩失败时的按轮数丢弃会把承载摘要的首条用户消息一起删掉，
+        // 必须按 summary.md 重新挂回，否则摘要只存在于磁盘、当前请求里反而丢了。
+        _settings.DefaultContextWindowTokens = 64 * 1024;
+        _settings.HistoryKeepTurns = 1;
+
+        var histories = new List<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>();
+        var summarizeCalls = 0;
+        var llm = new FakeLlm(
+            (_, history, _) =>
+            {
+                histories.Add(history);
+                return Streams(new LlmTextDelta("回复"));
+            },
+            summary: "首次压缩的摘要",
+            onSummarize: _ =>
+            {
+                // 第一次压缩成功，之后每次都失败：走「按轮数丢弃」的兜底
+                if (++summarizeCalls > 1) throw new InvalidOperationException("摘要服务不可用");
+            });
+        var manager = CreateManager(llm);
+        var session = manager.ActiveSession!;
+
+        // 第一轮 40K + 第二轮 40K：第二轮请求前自动压缩成功（保留预算 32K，只留最后一轮）
+        await session.SendAsync(new string('a', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        await session.SendAsync(new string('b', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, summarizeCalls);
+
+        // 第三轮同样超窗：这次压缩失败 → 按轮数丢弃到最近 1 轮，摘要必须重新挂回请求开头
+        await session.SendAsync(new string('c', 160_000), null, CancellationToken.None);
+        await session.WaitForIdleAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, summarizeCalls);
+        var last = histories[^1];
+        Assert.Contains(last, message => message.Text.Contains("<conversation_summary>"));
+        Assert.Contains(last, message => message.Text.Contains("首次压缩的摘要"));
+        Assert.Equal(1, last.Count(message => message.Role == Microsoft.Extensions.AI.ChatRole.User));
+        Assert.Contains(session.Snapshot.Messages, message => message.Text.Contains("按轮数丢弃"));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -775,6 +1200,34 @@ public sealed class ChatSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public void SummaryIsStoredAsPlainMarkdown()
+    {
+        var root = Path.Combine(_root, "summary-md");
+        var profile = Path.Combine(_root, "memory.json");
+        var memory = new ChatMemory(_settings, root, "conversation.jsonl", profile);
+        const string body = "## 要点\n\n- 用户在做上下文压缩\n- 已确认 128K 窗口";
+
+        memory.SaveSummary(body);
+
+        // 落盘的就是模型写出的 Markdown 原文：没有 JSON 包装，换行原样保留
+        var file = Path.Combine(root, "summary.md");
+        Assert.True(File.Exists(file));
+        Assert.Equal(body, File.ReadAllText(file));
+        Assert.False(File.Exists(Path.Combine(root, "summary.json")));
+        // 内存里仍然是可直接挂进请求历史的摘要块
+        Assert.Equal($"<conversation_summary>\n{body}\n</conversation_summary>", memory.Summary);
+
+        // 重启后按同一份 Markdown 重建摘要块
+        var reopened = new ChatMemory(_settings, root, "conversation.jsonl", profile);
+        Assert.Equal(memory.Summary, reopened.Summary);
+
+        // 清除时文件一起删掉
+        reopened.ClearSummary();
+        Assert.False(File.Exists(file));
+        Assert.Null(reopened.Summary);
+    }
+
+    [Fact]
     public async Task ApprovalIsRoutedToCurrentSessionWithMultipleLoaded()
     {
         var llm = new FakeLlm((_, _, ct) => ApprovalStreamAsync(ct));
@@ -936,12 +1389,49 @@ public sealed class ChatSessionTests : IAsyncLifetime
 
     private sealed class FakeLlm(
         Func<ChatModelConfig, IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>, CancellationToken,
-            IAsyncEnumerable<LlmStreamEvent>> stream) : ILlmChatService
+            IAsyncEnumerable<LlmStreamEvent>> stream,
+        Func<ChatModelConfig, IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>, int>? estimate = null,
+        string summary = "已压缩的对话摘要",
+        Action<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>>? onSummarize = null,
+        Func<ITurnContextGuard, IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>,
+            Task<IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>?>>? guard = null,
+        Func<CancellationToken, Task>? summarizeDelay = null)
+        : ILlmChatService
     {
-        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+        /// <summary>模拟工具循环：真服务在下一轮请求前会问一次守卫，这里在开播前问一次。</summary>
+        public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             ChatModelConfig model,
             IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
-            CancellationToken cancellationToken) => stream(model, history, cancellationToken);
+            [EnumeratorCancellation] CancellationToken cancellationToken,
+            ITurnContextGuard? contextGuard = null)
+        {
+            var effectiveHistory = guard is null || contextGuard is null
+                ? history
+                : await guard(contextGuard, history) ?? history;
+            await foreach (var evt in stream(model, effectiveHistory, cancellationToken))
+                yield return evt;
+        }
+
+        public Task<int> EstimateContextTokensAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(estimate?.Invoke(model, history)
+                            ?? SoufflePet.Services.TokenEstimator.EstimateMessages(history));
+
+        public async IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            string instruction,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            onSummarize?.Invoke(history);
+            if (summarizeDelay is not null) await summarizeDelay(cancellationToken);
+            await Task.Yield();
+            yield return new LlmTextDelta(summary);
+            // 真服务的摘要请求同样带用量：压缩开销必须能被计入会话用量与统计
+            yield return new LlmUsageEvent(100, 20, 0);
+        }
     }
 
     private sealed class FakeStatistics : IStatisticsService

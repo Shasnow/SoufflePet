@@ -80,6 +80,15 @@ const SLASH_COMMANDS: SlashCommandDto[] = [
     aliases: ['m', 'models'],
   },
   {
+    name: 'compact',
+    usage: '/compact',
+    summary: '压缩当前会话的上下文',
+    description:
+      '把较早的对话总结成摘要、只保留窗口预算内的最近原文，释放上下文窗口；接近窗口上限时会自动压缩。',
+    argumentKind: 'none',
+    aliases: ['compress'],
+  },
+  {
     name: 'approval',
     usage: '/approval [manual/full]',
     summary: '切换工具审批模式',
@@ -110,6 +119,9 @@ interface MockCommandResult {
   ok: boolean
   message: string
   modelKey?: string
+  skipped?: boolean
+  /** 命令自己插的气泡（目前只有 /compact 的摘要气泡）：排在命令结果气泡之前，与宿主顺序一致。 */
+  summaryText?: string
   ops?: ChatOp[]
 }
 
@@ -131,7 +143,11 @@ function executeMockCommand(
       const listing = MODELS.map(
         (model, index) => `  ${index + 1}. ${model.name}（${model.provider} · ${model.modelId}）`,
       ).join('\n')
-      return { ok: false, message: `当前模型：${chat.selectedModelKey ?? '未选择'}。\n可用模型：\n${listing}` }
+      return {
+        ok: false,
+        skipped: true,
+        message: `当前模型：${chat.selectedModelKey ?? '未选择'}。\n可用模型：\n${listing}`,
+      }
     }
 
     const query = argument.toLowerCase()
@@ -152,6 +168,27 @@ function executeMockCommand(
       message: `已切换模型：${model.name}，本会话立即生效，并记为默认模型（新会话沿用）。`,
       modelKey: model.key,
       ops: [{ op: 'models', models: MODELS, selectedModelKey: model.key }],
+    }
+  }
+
+  if (command.name === 'compact') {
+    const windowTokens = chat.contextUsage?.windowTokens ?? 128 * 1024
+    const triggerTokens = chat.contextUsage?.triggerTokens ?? Math.ceil(windowTokens * 0.9) - 4096
+    const contextUsage = { estimatedTokens: 2400, windowTokens, triggerTokens }
+    chat.contextUsage = contextUsage
+    return {
+      ok: true,
+      message: '已压缩上下文：保留最近 3 轮原文（约 1.2K token），摘要 96 字。',
+      // 与宿主一致：压缩成功后会话自己再插一条摘要气泡（正文是 Markdown，默认展开）
+      summaryText: [
+        '## 已折叠的对话',
+        '',
+        '- 用户在确认上下文压缩的保留预算与触发线',
+        '- 已确认默认窗口 128K、保留预算取窗口的一半',
+        '',
+        '**下一步**：继续打磨压缩后的界面提示。',
+      ].join('\n'),
+      ops: [{ op: 'context', contextUsage }],
     }
   }
 
@@ -283,15 +320,15 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       baseUrl: 'https://api.deepseek.com',
       apiKey: 'sk-mock',
       models: [
-        { modelId: 'deepseek-chat', name: 'DeepSeek Chat', isActive: true },
-        { modelId: 'deepseek-reasoner', name: 'DeepSeek Reasoner', isActive: true },
+        { modelId: 'deepseek-chat', name: 'DeepSeek Chat', isActive: true, contextWindowTokens: 0 },
+        { modelId: 'deepseek-reasoner', name: 'DeepSeek Reasoner', isActive: true, contextWindowTokens: 0 },
       ],
     },
     {
       name: 'openai',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-mock',
-      models: [{ modelId: 'gpt-4.1', name: 'GPT-4.1', isActive: true }],
+      models: [{ modelId: 'gpt-4.1', name: 'GPT-4.1', isActive: true, contextWindowTokens: 0 }],
     },
   ]
 
@@ -473,6 +510,11 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
       workspaces: [WORKSPACE, NOTES_WORKSPACE],
       usage: null,
       ask: null,
+      contextUsage: {
+        estimatedTokens: null,
+        windowTokens: 128 * 1024,
+        triggerTokens: Math.ceil(128 * 1024 * 0.9) - 4096,
+      },
     }
   }
 
@@ -990,6 +1032,14 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
           message.time = timeLabel()
         }
         current.usage = usage
+        // 模拟宿主：每轮结束后推送估算的上下文占用，底部水位条随之增长
+        const windowTokens = current.contextUsage?.windowTokens ?? 128 * 1024
+        const contextUsage = {
+          estimatedTokens: 1200 + current.messages.length * 260,
+          windowTokens,
+          triggerTokens: current.contextUsage?.triggerTokens ?? Math.ceil(windowTokens * 0.9) - 4096,
+        }
+        current.contextUsage = contextUsage
         const summary = getSessionSummary(sessionId)
         if (summary) {
           summary.updatedAt = iso()
@@ -1000,6 +1050,7 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
           { op: 'msg:patch', id: assistantId, patch: { usage, time: timeLabel() } },
           { op: 'turn', generating: false },
           { op: 'usage', usage },
+          { op: 'context', contextUsage },
         ])
         emitSessions()
       }
@@ -1295,16 +1346,35 @@ export function createMockHost(options: MockHostOptions = {}): MockHost {
               // 与宿主一致：命令来自输入框时成功后清掉草稿（默认 true），
               // 否则重新打开会话时快照会带回旧命令、面板自动弹回
               if (payload.clearDraft !== false) chat.draft = ''
+              const summary = result.summaryText
+                ? {
+                    id: newId('m'),
+                    kind: 'summary' as const,
+                    text: result.summaryText,
+                    time: timeLabel(),
+                    expanded: true,
+                  }
+                : null
               const notice = {
                 id: newId('m'),
                 kind: 'notice' as const,
                 text: `${command.usage} · ${result.message}`,
                 time: timeLabel(),
               }
-              chat.messages = [...chat.messages, notice]
-              emitOps(sessionId!, [{ op: 'msg:add', msg: notice }, ...(result.ops ?? [])])
+              chat.messages = [...chat.messages, ...(summary ? [summary] : []), notice]
+              emitOps(sessionId!, [
+                ...(summary ? [{ op: 'msg:add' as const, msg: summary }] : []),
+                { op: 'msg:add', msg: notice },
+                ...(result.ops ?? []),
+              ])
             }
-            response(id, { ok: result.ok, command: command.name, message: result.message, modelKey: result.modelKey })
+            response(id, {
+              ok: result.ok,
+              command: command.name,
+              message: result.message,
+              modelKey: result.modelKey,
+              skipped: result.skipped,
+            })
             return
           }
           case 'chat.approval.mode': {

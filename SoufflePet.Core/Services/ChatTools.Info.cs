@@ -15,6 +15,12 @@ namespace SoufflePet.Services;
 /// </summary>
 public sealed partial class ChatTools
 {
+    /// <summary>
+    /// recall 的排除范围（最近多少轮）：这些内容大概率已在本次请求里（压缩后仍保留约窗口一半的近期原文），
+    /// 再返回一遍只会挤掉真正需要回忆的更早内容。只影响去重，不影响检索范围。
+    /// </summary>
+    private const int RecallRecentTurns = 40;
+
     /// <summary>统计查询：不传 item 返回全部统计项，传名称/标识返回匹配的单项。</summary>
     private string GetStatistics(string? item = null)
     {
@@ -178,7 +184,7 @@ public sealed partial class ChatTools
 
         // 最近几轮已经随请求发给模型了，不再重复返回；TopK 只有 3 条，重复会挤掉真正需要的回忆
         var exclude = memory
-            .RecentTurns(Math.Max(1, _settings.HistoryWindowTurns) * 2 + 2, includeTools: false)
+            .RecentTurns(RecallRecentTurns, includeTools: false)
             .Select(turn => turn.Text)
             .ToList();
 

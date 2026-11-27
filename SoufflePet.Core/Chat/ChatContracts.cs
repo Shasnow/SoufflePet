@@ -15,6 +15,10 @@ public static class ChatMessageKinds
     public const string Reasoning = "reasoning";
     public const string Tool = "tool";
     public const string Notice = "notice";
+
+    /// <summary>上下文压缩摘要：气泡里摊开模型写出的摘要正文（Markdown），便于回看被折叠的内容。</summary>
+    public const string Summary = "summary";
+
     public const string Attachment = "attachment";
     public const string Approval = "approval";
 }
@@ -45,6 +49,13 @@ public sealed record ChatUsageState(
 
 /// <summary>模型选择项。</summary>
 public sealed record ChatModelState(string Key, string Provider, string Name, string ModelId);
+
+/// <summary>
+/// 当前上下文占用：一次请求预计要发送的 token 数（系统提示词 + 工具定义 + 历史）、所用模型的窗口大小，
+/// 以及触发自动压缩的 token 数（窗口的 90% 减去为输出预留的部分）——界面按后者变色，与后端同一口径。
+/// <see cref="EstimatedTokens" /> 为 null 表示本轮还没估算过。
+/// </summary>
+public sealed record ChatContextUsageState(int? EstimatedTokens, int WindowTokens, int TriggerTokens);
 
 /// <summary>工作区。</summary>
 public sealed record ChatWorkspaceState(string Path, string Name);
@@ -116,7 +127,8 @@ public sealed record ChatSessionSnapshot(
     ChatWorkspaceState? Workspace,
     IReadOnlyList<ChatWorkspaceState> Workspaces,
     ChatUsageState? Usage,
-    ChatAskState? Ask);
+    ChatAskState? Ask,
+    ChatContextUsageState? ContextUsage = null);
 
 /// <summary>会话用途：普通对话，或由后台事件固定投递的专用会话。</summary>
 public enum SessionKind
@@ -187,6 +199,7 @@ public sealed record ChatMessagePatch(
 [JsonDerivedType(typeof(ChatOpModels), "models")]
 [JsonDerivedType(typeof(ChatOpAsk), "ask")]
 [JsonDerivedType(typeof(ChatOpUsage), "usage")]
+[JsonDerivedType(typeof(ChatOpContextUsage), "context")]
 public abstract record ChatOp;
 
 public sealed record ChatOpMessageAdd(ChatMessageState Msg) : ChatOp;
@@ -212,3 +225,6 @@ public sealed record ChatOpModels(IReadOnlyList<ChatModelState> Models, string? 
 public sealed record ChatOpAsk(ChatAskState? Ask) : ChatOp;
 
 public sealed record ChatOpUsage(ChatUsageState? Usage) : ChatOp;
+
+/// <summary>上下文占用变化（每轮估算后、压缩后、切换模型后）。</summary>
+public sealed record ChatOpContextUsage(ChatContextUsageState? ContextUsage) : ChatOp;

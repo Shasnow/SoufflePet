@@ -289,8 +289,12 @@ export function Composer({ chat, hero = false }: ComposerProps) {
         clearDraft: clearDraftOnSuccess,
       })
       if (!result) return
-      pushToast({ level: result.ok ? 'success' : 'error', text: result.message })
-      if (result.ok && clearDraftOnSuccess) clearDraft()
+      // skipped = 命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消）：按提示呈现
+      pushToast({
+        level: result.skipped ? 'info' : result.ok ? 'success' : 'error',
+        text: result.message,
+      })
+      if ((result.ok || result.skipped) && clearDraftOnSuccess) clearDraft()
     } catch (error) {
       pushToast({ level: 'error', text: `命令执行失败：${error instanceof Error ? error.message : String(error)}` })
     }

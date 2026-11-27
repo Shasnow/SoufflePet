@@ -100,6 +100,8 @@ public sealed record ChatMessageDto(
     ApprovalDetailDto? Approval = null,
     string? RawText = null);
 
+public sealed record ChatContextUsageDto(int? EstimatedTokens, int WindowTokens, int TriggerTokens);
+
 public sealed record ChatSnapshotDto(
     string SessionId,
     IReadOnlyList<ChatMessageDto> Messages,
@@ -112,7 +114,8 @@ public sealed record ChatSnapshotDto(
     WorkspaceDto? Workspace,
     IReadOnlyList<WorkspaceDto> Workspaces,
     UsageDto? Usage,
-    AskStateDto? Ask);
+    AskStateDto? Ask,
+    ChatContextUsageDto? ContextUsage = null);
 
 public sealed record SessionSummaryDto(
     string Id,
@@ -154,7 +157,7 @@ public sealed record SlashCommandDto(
     IReadOnlyList<string> Aliases);
 
 /// <summary>命令的执行结果；<c>Ok</c> 为 false 时 <c>Message</c> 是可直接展示的原因。</summary>
-public sealed record SlashCommandResultDto(bool Ok, string Command, string Message, string? ModelKey = null);
+public sealed record SlashCommandResultDto(bool Ok, string Command, string Message, string? ModelKey = null, bool Skipped = false);
 
 /// <summary>响应 / 事件的统一序列化选项。</summary>
 public static class WebJson

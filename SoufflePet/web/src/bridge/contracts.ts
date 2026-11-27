@@ -14,6 +14,7 @@ export type ChatMessageKind =
   | 'reasoning'
   | 'tool'
   | 'notice'
+  | 'summary'
   | 'attachment'
   | 'approval'
 
@@ -131,6 +132,17 @@ export interface ChatSnapshotDto {
   workspaces: WorkspaceDto[]
   usage: UsageDto | null
   ask: AskStateDto | null
+  /** 上下文占用（估算的请求 token 数与模型窗口）；没有可用模型时省略。 */
+  contextUsage?: ContextUsageDto | null
+}
+
+/** 上下文占用：一次请求预计发送的 token 数（系统提示词 + 工具定义 + 历史）与所用量模型的窗口大小。 */
+export interface ContextUsageDto {
+  /** 本轮还没估算过（新会话 / 刚重启）时为 null 或省略。 */
+  estimatedTokens?: number | null
+  windowTokens: number
+  /** 触发自动压缩的 token 数（窗口 90% 减去为输出预留的部分）；界面按它变色，与后端同一口径。 */
+  triggerTokens: number
 }
 
 export interface SessionSummaryDto {
@@ -218,6 +230,8 @@ export interface ChatProviderModelDto {
   modelId: string
   name?: string
   isActive: boolean
+  /** 上下文窗口长度（token）；0 或省略表示未设置，使用全局默认值。 */
+  contextWindowTokens?: number
 }
 
 export interface ProviderDto {
@@ -360,6 +374,8 @@ export interface SlashCommandResultDto {
   command: string
   message: string
   modelKey?: string
+  /** 命令没做任何改动但不是错误（列出模型、无需压缩、用户取消）：按提示呈现，不按失败报错。 */
+  skipped?: boolean
 }
 
 export interface HostLogDto {
@@ -387,6 +403,7 @@ export type ChatOp =
   | { op: 'models'; models: ChatModelDto[]; selectedModelKey: string | null }
   | { op: 'ask'; ask: AskStateDto | null }
   | { op: 'usage'; usage: UsageDto | null }
+  | { op: 'context'; contextUsage: ContextUsageDto | null }
 
 export interface ChatOpsPayload {
   sessionId: string

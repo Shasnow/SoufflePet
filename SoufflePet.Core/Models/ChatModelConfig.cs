@@ -28,6 +28,12 @@ public class ChatModelConfig
     [Description("API 密钥")]
     public string ApiKey { get; set; } = string.Empty;
 
+    [Description("上下文窗口长度（token）；0 表示未设置，使用全局默认值")]
+    public int ContextWindowTokens { get; set; }
+
+    /// <summary>实际使用的上下文窗口：模型单独设置时用它，否则回落到全局默认值。</summary>
+    public int EffectiveContextWindow(int fallback) => ContextWindowTokens > 0 ? ContextWindowTokens : fallback;
+
     /// <summary>提供商 + 模型标识组成的稳定键：重建列表与恢复上次选中项时用它对应同一个模型。</summary>
     [JsonIgnore]
     public string Key => KeyOf(Provider, ModelId);

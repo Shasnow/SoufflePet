@@ -3,7 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { ChatSnapshotDto } from '@/bridge/contracts'
+import type { ChatMessageDto, ChatSnapshotDto } from '@/bridge/contracts'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
@@ -28,6 +28,66 @@ const snapshot: ChatSnapshotDto = {
   usage: null,
   ask: null,
 }
+
+const USER_MESSAGE: ChatMessageDto = {
+  id: 'm1',
+  kind: 'user',
+  text: '在吗',
+  time: '12:00',
+}
+
+/** 底部上下文水位需要非空会话（空会话渲染欢迎页），窗口取 mock 宿主的默认值。 */
+function snapshotWithMeter(usage: ChatSnapshotDto['contextUsage']): ChatSnapshotDto {
+  return { ...snapshot, messages: [USER_MESSAGE], contextUsage: usage }
+}
+
+describe('ChatPage 上下文水位', () => {
+  const open = (value: ChatSnapshotDto) => {
+    vi.mocked(invoke).mockImplementation((async (method: string) => {
+      if (method === 'session.open') return value
+      return null
+    }) as never)
+    useSessionStore.setState({ sessions: [], activeId: 's1' })
+    useChatStore.setState({ bySession: { s1: { ...value } }, activeId: 's1' })
+    return render(<ChatPage sessionId="s1" />)
+  }
+
+  it('还没估算过时只显示窗口大小', () => {
+    const { container } = open(
+      snapshotWithMeter({ estimatedTokens: null, windowTokens: 131072, triggerTokens: 113869 }),
+    )
+
+    expect(container.querySelector('.context-usage-text')?.textContent).toBe('— / 131.1K · —')
+    expect(container.querySelector('.context-usage')?.className).not.toContain('is-hot')
+  })
+
+  it('显示估算占用与百分比', () => {
+    const { container } = open(
+      snapshotWithMeter({ estimatedTokens: 65536, windowTokens: 131072, triggerTokens: 113869 }),
+    )
+
+    expect(container.querySelector('.context-usage-text')?.textContent).toBe('65.5K / 131.1K · 50%')
+    expect(container.querySelector('.context-usage')?.className).not.toContain('is-hot')
+  })
+
+  it('到达宿主给的触发线时变黄，而不是按固定 90%', () => {
+    const hot = open(
+      snapshotWithMeter({ estimatedTokens: 113869, windowTokens: 131072, triggerTokens: 113869 }),
+    )
+    expect(hot.container.querySelector('.context-usage')?.className).toContain('is-hot')
+
+    // 87% 时压缩已触发（触发线 = 90% 窗口 - 4K 预留），界面必须已经变黄
+    const near = open(
+      snapshotWithMeter({ estimatedTokens: 110000, windowTokens: 131072, triggerTokens: 113869 }),
+    )
+    expect(near.container.querySelector('.context-usage')?.className).not.toContain('is-hot')
+  })
+
+  it('没有模型（宿主返回 null）时不显示水位', () => {
+    const { container } = open(snapshotWithMeter(null))
+    expect(container.querySelector('.context-usage')).toBeNull()
+  })
+})
 
 describe('ChatPage 拖拽附件', () => {
   beforeEach(() => {

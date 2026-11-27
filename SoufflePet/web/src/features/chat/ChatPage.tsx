@@ -4,12 +4,13 @@
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { invoke } from '@/bridge/client'
-import type { AttachmentDto, ChatSnapshotDto } from '@/bridge/contracts'
+import type { AttachmentDto, ChatSnapshotDto, ContextUsageDto } from '@/bridge/contracts'
 import { useAppStore } from '@/stores/appStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useToastStore } from '@/stores/toastStore'
 import { GlobalUsageButton } from '@/ui/Usage'
+import { formatCompactTokens } from '@/ui/format'
 import { chatRoute, navigate } from '@/app/router'
 import { Composer } from './Composer'
 import { MessageList } from './MessageList'
@@ -51,6 +52,36 @@ async function uploadFile(sessionId: string, file: File): Promise<string> {
     })
   }
   return uploadId
+}
+
+/**
+ * 上下文占用：估算的请求 token / 模型窗口。
+ * 数据由宿主在每轮请求前、压缩后与切换模型时推送；还没估算过时只显示窗口大小。
+ */
+function ContextUsageMeter({ usage }: { usage?: ContextUsageDto | null }) {
+  if (!usage) return null
+  const used = usage.estimatedTokens ?? null
+  const ratio = used != null && usage.windowTokens > 0 ? Math.min(1, used / usage.windowTokens) : 0
+  const percent = used != null ? `${Math.round(ratio * 100)}%` : '—'
+  // 变色与自动压缩同一口径：由宿主给出触发线（窗口 90% 减去为输出预留的 token），
+  // 前端不再自己算 90%，否则压缩实际先于变色发生、黄条永远看不到
+  const hot = used != null && usage.triggerTokens > 0 && used >= usage.triggerTokens
+  return (
+    <div
+      className={`context-usage${hot ? ' is-hot' : ''}`}
+      title="估算占用 = 系统提示词 + 工具定义 + 历史；达到触发线时自动压缩上下文"
+      aria-label={`上下文占用 ${percent}`}
+    >
+      <span>上下文</span>
+      <span className="context-usage-track" aria-hidden="true">
+        <span className="context-usage-fill" style={{ width: `${ratio * 100}%` }} />
+      </span>
+      <span className="context-usage-text">
+        {used != null ? `${formatCompactTokens(used)} / ` : '— / '}
+        {formatCompactTokens(usage.windowTokens)} · {percent}
+      </span>
+    </div>
+  )
 }
 
 export function ChatPage({ sessionId }: { sessionId?: string }) {
@@ -240,6 +271,7 @@ export function ChatPage({ sessionId }: { sessionId?: string }) {
           />
           <Composer key={`composer-${chat.sessionId}`} chat={chat} />
           <div className="composer-foot">
+            <ContextUsageMeter usage={chat.contextUsage} />
             <GlobalUsageButton usage={usage} />
           </div>
         </>

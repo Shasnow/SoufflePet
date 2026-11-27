@@ -108,6 +108,14 @@ public static class SlashCommandCatalog
             null,
             ["cancel"]),
         new(
+            "compact",
+            "压缩当前会话的上下文",
+            "把较早的对话总结成摘要、只保留窗口预算内的最近原文，释放上下文窗口；" +
+            "通常不需要手动执行，接近窗口上限时会自动压缩。",
+            SlashCommandArgumentKind.None,
+            null,
+            ["compress"]),
+        new(
             "help",
             "列出全部命令",
             "列出全部命令与用法。",
@@ -319,6 +327,8 @@ public static class SlashCommands
                 result = await SetApprovalAsync(session, input.Argument).ConfigureAwait(false);
             else if (command.Name == "stop")
                 result = await StopAsync(session).ConfigureAwait(false);
+            else if (command.Name == "compact")
+                result = await CompactAsync(session).ConfigureAwait(false);
             else if (command.Name == "help")
                 result = new SlashCommandResult(true, command.Name, SlashCommandCatalog.HelpText(fromPlatform));
             else
@@ -330,12 +340,13 @@ public static class SlashCommands
         }
 
         await session.AddNoticeAsync(NoticeText(command, result)).ConfigureAwait(false);
-        if (result.Success && clearDraft) await session.SetDraftAsync(string.Empty).ConfigureAwait(false);
+        if ((result.Success || result.Skipped) && clearDraft)
+            await session.SetDraftAsync(string.Empty).ConfigureAwait(false);
         return result;
     }
 
     private static string NoticeText(SlashCommandDefinition command, SlashCommandResult result) =>
-        result.Success
+        result.Success || result.Skipped
             ? $"{command.ContractName} · {result.Message}"
             : $"{command.ContractName} 未执行：{result.Message}";
 
@@ -354,8 +365,10 @@ public static class SlashCommands
             var listing = string.Join("\n", models.Select((model, index) =>
                 $"  {index + 1}. {model.Name}（{model.Provider} · {model.ModelId}）" +
                 (ReferenceEquals(model, current) ? " ← 当前" : string.Empty)));
+            // 只是列出可用模型，没有做改动：按提示呈现，不算失败
             return Task.FromResult(new SlashCommandResult(false, "model",
-                $"当前模型：{Describe(current)}。\n可用模型：\n{listing}\n用法：/model [模型名称/模型ID]"));
+                $"当前模型：{Describe(current)}。\n可用模型：\n{listing}\n用法：/model [模型名称/模型ID]",
+                Skipped: true));
         }
 
         var resolution = ResolveModel(models, argument);
@@ -380,8 +393,9 @@ public static class SlashCommands
             case "":
             {
                 var current = session.Snapshot.ApprovalMode;
+                // 只是列出当前模式，没有做改动：按提示呈现，不算失败
                 return new SlashCommandResult(false, "approval",
-                    $"当前审批模式：{current}。用法：/approval [manual|full]");
+                    $"当前审批模式：{current}。用法：/approval [manual|full]", Skipped: true);
             }
             case ApprovalManual:
             case ApprovalFull:
@@ -398,11 +412,33 @@ public static class SlashCommands
 
     private static async Task<SlashCommandResult> StopAsync(ChatSession session)
     {
+        // 压缩期间没有活动 turn：`/stop` 也要能中断摘要生成，所以先看压缩
         if (!session.Snapshot.Generating)
-            return new SlashCommandResult(false, "stop", "当前没有正在生成的回复。");
+        {
+            if (!session.Compacting) return new SlashCommandResult(false, "stop", "当前没有正在生成的回复。");
+
+            await session.StopAsync().ConfigureAwait(false);
+            return new SlashCommandResult(true, "stop", "已请求停止压缩上下文。");
+        }
 
         await session.StopAsync().ConfigureAwait(false);
         return new SlashCommandResult(true, "stop", "已请求停止当前回复。");
+    }
+
+    /// <summary>
+    /// 手动压缩上下文。压缩过程本身会插一条「正在压缩上下文…」，结果由 <see cref="ExecuteAsync" />
+    /// 统一包成通知；成败按 <see cref="CompactionStatus" /> 判断，不看文案。
+    /// </summary>
+    private static async Task<SlashCommandResult> CompactAsync(ChatSession session)
+    {
+        var outcome = await session.CompactAsync().ConfigureAwait(false);
+        return outcome.Status switch
+        {
+            CompactionStatus.Compacted => new SlashCommandResult(true, "compact", outcome.Message),
+            CompactionStatus.Failed => new SlashCommandResult(false, "compact", outcome.Message),
+            // 无需压缩 / 用户取消：都不算失败，按提示呈现
+            _ => new SlashCommandResult(false, "compact", outcome.Message, Skipped: true),
+        };
     }
 
     /// <summary>模型解析结果：成功时 <see cref="Model" /> 非空，失败时 <see cref="Error" /> 是可读原因。</summary>
@@ -454,5 +490,14 @@ public static class SlashCommands
         model is null ? "（未选择）" : $"{model.Name}（{model.Provider} · {model.ModelId}）";
 }
 
-/// <summary>命令的执行结果。<see cref="ModelKey" /> 只在校切模型成功时有值。</summary>
-public sealed record SlashCommandResult(bool Success, string CommandName, string Message, string? ModelKey = null);
+/// <summary>
+/// 命令的执行结果。<see cref="ModelKey" /> 只在切换模型成功时有值；
+/// <see cref="Skipped" /> 表示命令没有做任何改动但不是错误（列表、无需压缩、用户取消），
+/// 界面按提示呈现——不要用「消息文案开头是什么」来表达这种区别。
+/// </summary>
+public sealed record SlashCommandResult(
+    bool Success,
+    string CommandName,
+    string Message,
+    string? ModelKey = null,
+    bool Skipped = false);

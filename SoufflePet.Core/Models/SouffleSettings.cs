@@ -164,15 +164,20 @@ public partial class SouffleSettings : ObservableObject
     [Description("最大工具调用轮数")]
     public int MaxToolRounds { get; init; } = 10;
 
+    [Description("默认上下文窗口长度（token）：模型未单独设置时使用；接近 90% 时自动压缩历史")]
+    public int DefaultContextWindowTokens { get; set; } = 128 * 1024;
+
+    /// <summary>允许的最小上下文窗口：再小会让压缩几乎每轮都触发。</summary>
+    public const int MinContextWindowTokens = 64 * 1024;
+
+    /// <summary>允许的最大上下文窗口：防止误填超大值导致请求远超模型能力。</summary>
+    public const int MaxContextWindowTokens = 2_000_000;
+
     [Description("子代理最大嵌套深度：子代理再创建子代理时超过此深度将被拒绝")]
     public int MaxSubagentDepth { get; set; } = 2;
 
     [ObservableProperty]
-    [Description("对话历史窗口高水位（用户提问轮数）：超过后一次性裁到 HistoryKeepTurns；越小越省 token，但上下文越短")]
-    public partial int HistoryWindowTurns { get; set; } = 50;
-
-    [ObservableProperty]
-    [Description("对话历史窗口低水位（用户提问轮数）：与高水位差得越多，裁剪越少、前缀缓存越稳定，但上下文压缩得越狠")]
+    [Description("上下文压缩失败时的兜底（用户提问轮数）：丢弃较早历史只保留这么多轮；正常压缩按 token 预算保留，与轮数无关")]
     public partial int HistoryKeepTurns { get; set; } = 30;
 
     [ObservableProperty]
@@ -265,10 +270,19 @@ public partial class SouffleSettings : ObservableObject
         // 外观模式只认三个值，判定口径与 ThemeService.ParseMode 一致（忽略大小写与首尾空白）；坏值回到深色
         var themeMode = (UiThemeMode ?? string.Empty).Trim().ToLowerInvariant();
         UiThemeMode = themeMode is "dark" or "light" or "system" ? themeMode : "dark";
-        // 历史窗口：至少要保留 1 轮，且低水位必须小于高水位，否则裁剪逻辑会退化成每轮都切
-        if (HistoryWindowTurns < 2) HistoryWindowTurns = 2;
+        // 压缩失败的兜底：至少要保留 1 轮，否则丢弃后请求里连提问都没有
         if (HistoryKeepTurns < 1) HistoryKeepTurns = 1;
-        if (HistoryKeepTurns >= HistoryWindowTurns) HistoryKeepTurns = HistoryWindowTurns - 1;
+        // 上下文窗口：太小会让压缩每次请求都触发，太大则可能超出实际模型能力
+        DefaultContextWindowTokens = Math.Clamp(
+            DefaultContextWindowTokens, MinContextWindowTokens, MaxContextWindowTokens);
+        // 模型单独设置的窗口同样夹到合法区间；0 仍表示未设置（回落到全局默认值）
+        foreach (var provider in ChatProviders)
+        foreach (var model in provider.Models)
+        {
+            if (model.ContextWindowTokens > 0)
+                model.ContextWindowTokens = Math.Clamp(
+                    model.ContextWindowTokens, MinContextWindowTokens, MaxContextWindowTokens);
+        }
         // 对话模型：按提供商配置展开成对话窗口用的列表
         RebuildChatModels();
     }
@@ -295,7 +309,8 @@ public partial class SouffleSettings : ObservableObject
                     Name = DisplayNameOf(model),
                     ModelId = model.ModelId,
                     BaseUrl = provider.BaseUrl,
-                    ApiKey = provider.ApiKey
+                    ApiKey = provider.ApiKey,
+                    ContextWindowTokens = model.ContextWindowTokens
                 });
             }
         }
@@ -316,6 +331,7 @@ public partial class SouffleSettings : ObservableObject
             existing.Name = target.Name;
             existing.BaseUrl = target.BaseUrl;
             existing.ApiKey = target.ApiKey;
+            existing.ContextWindowTokens = target.ContextWindowTokens;
         }
 
         while (ChatModels.Count > desired.Count) ChatModels.RemoveAt(ChatModels.Count - 1);

@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using Serilog;
+using SoufflePet.Chat;
 using SoufflePet.Core.Chat;
 using SoufflePet.Models;
 
@@ -85,9 +86,11 @@ public sealed class ChatMemory
     private string _conversationsPath;
     private string _profilePath;
     private string _windowPath;
+    private string _summaryPath;
     private readonly List<Turn> _turns = [];
     private List<MemoryEntry> _profile = [];
     private int _windowTurns;
+    private string? _summary;
 
     /// <summary>
     /// 用户级数据根目录：默认 <c>%USERPROFILE%\.souffle</c>，长期档案、统计、调度日志、窗口几何、附件与
@@ -131,10 +134,12 @@ public sealed class ChatMemory
         _conversationsPath = Path.Combine(root, conversationFileName);
         _profilePath = profilePath;
         _windowPath = Path.Combine(root, "window.json");
+        _summaryPath = Path.Combine(root, "summary.md");
 
         LoadProfile();
         LoadTurns();
         LoadWindow();
+        LoadSummary();
     }
 
     /// <summary>会话目录：conversation.jsonl / window.json / diffs / backups 都在这里。</summary>
@@ -179,6 +184,7 @@ public sealed class ChatMemory
                 Directory.CreateDirectory(target);
                 MoveFileIfExists(_conversationsPath, Path.Combine(target, Path.GetFileName(_conversationsPath)));
                 MoveFileIfExists(_windowPath, Path.Combine(target, "window.json"));
+                MoveFileIfExists(_summaryPath, Path.Combine(target, "summary.md"));
                 MoveDirectoryIfExists(Path.Combine(source, "diffs"), Path.Combine(target, "diffs"));
                 MoveDirectoryIfExists(Path.Combine(source, "backups"), Path.Combine(target, "backups"));
 
@@ -194,6 +200,7 @@ public sealed class ChatMemory
             _root = target;
             _conversationsPath = Path.Combine(target, Path.GetFileName(_conversationsPath));
             _windowPath = Path.Combine(target, "window.json");
+            _summaryPath = Path.Combine(target, "summary.md");
         }
     }
 
@@ -545,6 +552,65 @@ public sealed class ChatMemory
     private sealed class WindowState
     {
         public int Turns { get; set; }
+    }
+
+    /// <summary>
+    /// 之前压缩出的上下文摘要（带 <c>&lt;conversation_summary&gt;</c> 标记的整块文本，可直接挂进请求历史）；
+    /// 重启后据此重建请求历史的前缀，避免摘要丢失。落盘的是纯 Markdown 正文，标记在读写时补上。
+    /// </summary>
+    public string? Summary => _summary;
+
+    /// <summary>
+    /// 写入/覆盖压缩摘要（<c>summary.md</c>）：传模型写出的正文，文件里存的就是这段 Markdown 原文
+    /// （不带 <c>&lt;conversation_summary&gt;</c> 标记，直接用编辑器看/改都行）；空文本等同于清除。
+    /// </summary>
+    public void SaveSummary(string summary)
+    {
+        summary = summary?.Trim() ?? string.Empty;
+        if (summary.Length == 0)
+        {
+            ClearSummary();
+            return;
+        }
+
+        lock (_gate) _summary = ContextCompaction.WrapSummary(summary);
+        try
+        {
+            EnsureDirectory();
+            File.WriteAllText(_summaryPath, summary);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "save context summary failed");
+        }
+    }
+
+    /// <summary>清除压缩摘要（同时删除 summary.md）。</summary>
+    public void ClearSummary()
+    {
+        lock (_gate) _summary = null;
+        try
+        {
+            if (File.Exists(_summaryPath)) File.Delete(_summaryPath);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "clear context summary failed");
+        }
+    }
+
+    private void LoadSummary()
+    {
+        try
+        {
+            if (!File.Exists(_summaryPath)) return;
+            var text = File.ReadAllText(_summaryPath).Trim();
+            if (text.Length > 0) _summary = ContextCompaction.WrapSummary(text);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "load context summary failed");
+        }
     }
 
     /// <summary>写入/覆盖一条档案；value 为空等同于删除。</summary>

@@ -147,6 +147,7 @@ SoufflePet.sln
 | 命令（/model 等） | [SlashCommands.cs](SoufflePet.Core/Chat/SlashCommands.cs)、[Composer.tsx](SoufflePet/web/src/features/chat/Composer.tsx)、[SlashCommandMenu.tsx](SoufflePet/web/src/features/chat/SlashCommandMenu.tsx) |
 | 平台消息路由 / 平台命令管理员 | [ChatTriggerRouter.cs](SoufflePet.Core/Chat/ChatTriggerRouter.cs)、[PlatformService.cs](SoufflePet.Core/Services/PlatformService.cs)、[NapCatConfig.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatConfig.cs) |
 | 平台消息解析（@ 了你 / 引用） | [NapCatMessageParser.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatMessageParser.cs)、[NapCatQuoteTracker.cs](Plugins/SoufflePet.Plugin.NapCat/NapCatQuoteTracker.cs)、[IMessagePlatform.cs](SoufflePet.Plugin.Sdk/IMessagePlatform.cs) |
+| 上下文压缩 / 水位估算 | [ContextCompaction.cs](SoufflePet.Core/Chat/ContextCompaction.cs)、[TokenEstimator.cs](SoufflePet.Core/Services/TokenEstimator.cs)、[ChatSession.cs](SoufflePet.Core/Chat/ChatSession.cs) |
 | 主窗口呼出 / 热键 / 戳一戳 | [AppWindowService.cs](SoufflePet/Services/AppWindowService.cs) |
 | 对话模型配置 / 设置页 | [ChatProviderConfig.cs](SoufflePet.Core/Models/ChatProviderConfig.cs)、[LlmSettings.tsx](SoufflePet/web/src/features/settings/LlmSettings.tsx)、[LlmModelCatalog.cs](SoufflePet.Core/Services/LlmModelCatalog.cs) |
 | 消息气泡 / Markdown 渲染 | [MessageList.tsx](SoufflePet/web/src/features/chat/MessageList.tsx)、[Markdown.tsx](SoufflePet/web/src/ui/Markdown.tsx) |

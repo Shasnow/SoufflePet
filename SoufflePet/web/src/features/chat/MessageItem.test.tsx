@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
+import { invoke } from '@/bridge/client'
 import type { ChatMessageDto } from '@/bridge/contracts'
 import { useSlashPaletteStore } from '@/stores/slashPaletteStore'
 import { MessageItem } from './MessageItem'
@@ -67,6 +68,31 @@ describe('MessageItem', () => {
     const title = container.querySelector('.bubble-tool .collapse-title')
     expect(title?.textContent).toBe('运行命令 · npm test')
     expect(title?.getAttribute('title')).toBe('run_shell_command')
+  })
+
+  it('上下文摘要气泡默认展开、按 Markdown 渲染，点击可折叠', () => {
+    const message: ChatMessageDto = {
+      id: 'm-summary',
+      kind: 'summary',
+      text: '## 已折叠的对话\n\n- 窗口取默认 128K\n- **保留预算**取窗口的一半',
+      time: new Date(2026, 10, 5, 19, 54).toISOString(),
+      expanded: true,
+    }
+
+    const { container } = render(<MessageItem sessionId="s1" message={message} streaming={false} />)
+    const bubble = container.querySelector('.bubble-summary')
+    expect(bubble?.querySelector('.collapse-title')?.textContent).toBe('上下文摘要')
+    // 正文走 Markdown 渲染，不是原样文本
+    expect(bubble?.querySelector('h2')?.textContent).toBe('已折叠的对话')
+    expect(bubble?.querySelector('strong')?.textContent).toBe('保留预算')
+    // 摘要不是对话正文：不显示时间/复制/用量那一行
+    expect(container.querySelector('.bubble-meta')).toBeNull()
+
+    fireEvent.click(bubble!.querySelector('.collapse-head') as HTMLButtonElement)
+    expect(vi.mocked(invoke).mock.calls.at(-1)).toEqual([
+      'chat.msg.expand',
+      { sessionId: 's1', messageId: 'm-summary', expanded: false },
+    ])
   })
 
   it('系统消息可展开查看原始文本', () => {

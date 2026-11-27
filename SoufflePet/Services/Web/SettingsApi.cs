@@ -150,6 +150,11 @@ public sealed class SettingsApi(
                 ModelId = model.ModelId.Trim(),
                 Name = (model.Name ?? string.Empty).Trim(),
                 IsActive = model.IsActive,
+                // 0 = 未设置（回落到全局默认值）；显式设置时夹到允许的最小窗口（64K）
+                ContextWindowTokens = model.ContextWindowTokens <= 0
+                    ? 0
+                    : Math.Clamp(model.ContextWindowTokens,
+                        SouffleSettings.MinContextWindowTokens, SouffleSettings.MaxContextWindowTokens),
             })];
 
         settings.ChatModelKey = ChatModelConfig.RenameProvider(settings.ChatModelKey, previousName, name);
@@ -229,7 +234,8 @@ public sealed class SettingsApi(
         [.. provider.Models.Select(model => new ChatProviderModelDto(
             model.ModelId,
             string.IsNullOrWhiteSpace(model.Name) ? null : model.Name,
-            model.IsActive))]);
+            model.IsActive,
+            model.ContextWindowTokens))]);
 
     // ===== 人设 =====
 

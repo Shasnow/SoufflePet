@@ -54,9 +54,52 @@ public interface ILlmChatService
     /// （调用方可用于界面展示）。请求会自动注入系统提示词。
     /// 接口/网络错误以异常抛出，取消通过 cancellationToken 传递。
     /// </summary>
+    /// <param name="contextGuard">
+    /// 工具循环的上下文守卫：每轮工具调用后的下一次请求前询问一次。工具结果（大段文件内容、
+    /// 截图）会把上下文顶过窗口，而只有会话知道怎么压缩，所以在这里回调；为了不影响
+    /// 没有守卫的实现，参数可省略。
+    /// </param>
     IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         ChatModelConfig model,
         IReadOnlyList<ChatMessage> history,
+        CancellationToken cancellationToken,
+        ITurnContextGuard? contextGuard = null);
+
+    /// <summary>
+    /// 估算「系统提示词 + 工具定义 + 历史」的总 token 数，用于判断是否接近上下文窗口上限。
+    /// 只是近似值：实现按字符粗略折算，不依赖 tokenizer。
+    /// </summary>
+    Task<int> EstimateContextTokensAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> history,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 上下文压缩专用：把完整对话历史原样带上，追加一条压缩指令；不注入工具、无工具循环，
+    /// 只产出 <see cref="LlmTextDelta" />。与 <see cref="StreamAsync" /> 分开，避免压缩过程触发有副作用的工具。
+    /// </summary>
+    IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> history,
+        string instruction,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// 工具循环里的上下文守卫：在每轮工具调用之后、下一次请求之前问一次「要不要压缩」。
+/// 工具循环在 <see cref="LlmChatService" /> 内部，而压缩（生成摘要 + 替换会话历史）由会话负责，
+/// 所以用这个窄接口把两边接起来，不让 LLM 服务认识会话。
+/// </summary>
+public interface ITurnContextGuard
+{
+    /// <summary>
+    /// 需要时压缩上下文。<paramref name="request" /> 是即将发出的消息（**不含**系统提示词，
+    /// 但含本轮工具调用的结果与媒体）：用它比用会话历史更准，工具刚返回的截图/大段文件内容也在里面。
+    /// 返回 null 表示无需改动，请求按原样发出；返回历史表示已压缩，调用方要用它（配上系统提示词）
+    /// 重建本次请求，否则工具循环会继续按压缩前那份超窗的消息发请求。
+    /// </summary>
+    Task<IReadOnlyList<ChatMessage>?> CompactIfNeededAsync(
+        IReadOnlyList<ChatMessage> request,
         CancellationToken cancellationToken);
 }
 
@@ -95,10 +138,12 @@ public sealed class LlmChatService(
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         ChatModelConfig model,
         IReadOnlyList<ChatMessage> history,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        ITurnContextGuard? contextGuard = null)
     {
         var chars = 0;
-        var events = StreamCoreAsync(model, history, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        var events = StreamCoreAsync(model, history, contextGuard, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
         try
         {
             while (true)
@@ -132,9 +177,119 @@ public sealed class LlmChatService(
         }
     }
 
+    /// <summary>
+    /// 拼装系统提示词。缓存友好：系统提示词处在整个请求的最前面，任何一处变化都会让服务端的
+    /// 前缀缓存从变化处起全部失效。因此各块按「变化频率从低到高」排列——
+    /// 人设 → 工作区（AGENTS.md）→ 技能清单 → 子代理 → 上下文摘要 → 消息平台 → 用户档案；
+    /// 随每轮提问变化的「当前时间」不写进系统提示词，改由 ChatSession 追加到本轮用户消息末尾
+    /// 并随消息进入历史，让「系统提示词 + 历史对话」这段前缀逐字节稳定，后续提问可以持续命中缓存。
+    /// 调整顺序前请先读这段注释。
+    /// </summary>
+    private string BuildSystemPrompt()
+    {
+        var systemPrompt = new StringBuilder();
+        systemPrompt.AppendLine("## 人设\n");
+        systemPrompt.AppendLine(settings.ChatSystemPrompt);
+
+        // 工作区信息：工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
+        BuildWorkspaceBlock(systemPrompt);
+        // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
+        skills.BuildCatalog(systemPrompt);
+        // 子代理用法：静态说明，告诉模型何时创建子代理以及三个工具怎么配合
+        BuildSubagentBlock(systemPrompt);
+        // 上下文摘要说明：静态文本，解释历史里 <conversation_summary> 的含义
+        BuildContextSummaryBlock(systemPrompt);
+        // 消息平台：只有真的接入了平台才注入使用说明，没有平台时提示词里不出现这类内容
+        BuildPlatformBlock(systemPrompt);
+        // 长期记忆里的用户档案：只在 remember / forget 后变化，放在系统提示词最末位，尽量少影响前缀
+        memory.BuildProfileBlock(systemPrompt);
+
+        return systemPrompt.ToString();
+    }
+
+    /// <summary>上下文摘要说明：静态块，告诉模型历史里的摘要不是新的用户请求。</summary>
+    private static void BuildContextSummaryBlock(StringBuilder builder)
+    {
+        builder.AppendLine();
+        builder.AppendLine("## 上下文摘要");
+        builder.AppendLine();
+        builder.AppendLine("历史里若出现 `<conversation_summary>…</conversation_summary>`，它是此前对话被压缩后的要点摘要，" +
+                           "不是用户的新请求；请把它当作已知背景继续对话，不要向用户复述这段摘要。");
+    }
+
+    /// <summary>估算系统提示词 + 工具定义 + 历史的 token 数，供 <c>ChatSession</c> 判断上下文水位。</summary>
+    public async Task<int> EstimateContextTokensAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> history,
+        CancellationToken cancellationToken)
+    {
+        var total = TokenEstimator.Estimate(BuildSystemPrompt()) + TokenEstimator.EstimateMessages(history);
+
+        var tools = await chatTools.GetToolsAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var function in tools.OfType<AIFunction>())
+            total += TokenEstimator.Estimate(function.Name) + TokenEstimator.Estimate(function.Description)
+                     + EstimateToolSchema(function);
+
+        return total;
+    }
+
+    /// <summary>工具参数的 JSON Schema 体积：估成文本 token，避免把工具定义漏算。</summary>
+    private static int EstimateToolSchema(AIFunction function)
+    {
+        try
+        {
+            return TokenEstimator.Estimate(function.JsonSchema.ToString());
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// 上下文压缩：把完整对话历史原样发给模型，再追加一条压缩指令；不注入任何工具，也不跑工具循环。
+    /// 只转发文本增量，调用方自行累积成摘要。
+    /// </summary>
+    public async IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> history,
+        string instruction,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var endpoint = OpenAiEndpoint.BaseUrl(model.BaseUrl);
+        var options = new OpenAIClientOptions
+        {
+            Endpoint = new Uri(endpoint),
+            NetworkTimeout = TimeSpan.FromMinutes(10)
+        };
+        var openAiClient = new ChatClient(
+            model.ModelId,
+            new ApiKeyCredential(OpenAiEndpoint.ApiKey(model.ApiKey)),
+            options);
+        using var chatClient = openAiClient.AsIChatClient();
+
+        // 系统提示 + 原样历史 + 压缩指令：不在客户端做转录，模型直接读真实对话
+        var messages = new List<ChatMessage>(history.Count + 2)
+        {
+            new(ChatRole.System, "你是对话摘要助手。请阅读完整对话，按用户给出的结构输出 Markdown 摘要，不要调用任何工具。"),
+        };
+        messages.AddRange(history);
+        messages.Add(new ChatMessage(ChatRole.User, instruction));
+        var chatOptions = new ChatOptions { ModelId = model.ModelId };
+
+        await foreach (var update in chatClient
+                           .GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            if (update.Text is not { Length: > 0 } text) continue;
+            yield return new LlmTextDelta(text);
+        }
+    }
+
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         ChatModelConfig model,
         IReadOnlyList<ChatMessage> history,
+        ITurnContextGuard? contextGuard,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var endpoint = OpenAiEndpoint.BaseUrl(model.BaseUrl);
@@ -160,22 +315,7 @@ public sealed class LlmChatService(
         // 追加到本轮用户消息末尾并随消息进入历史，让「系统提示词 + 历史对话」这段前缀
         // 逐字节稳定，后续提问可以持续命中缓存。调整顺序前请先读这段注释。
         var messages = new List<ChatMessage>(history.Count + 3);
-        var systemPrompt = new StringBuilder();
-        systemPrompt.AppendLine("## 人设\n");
-        systemPrompt.AppendLine(settings.ChatSystemPrompt);
-
-        // 工作区信息：工作目录下的 AGENTS.md：每次对话重新读取完整内容，改动后下一轮立即生效
-        BuildWorkspaceBlock(systemPrompt);
-        // 技能清单：每轮注入已启用技能的 frontmatter（名称+描述），正文由模型按需调用 read_skill 读取
-        skills.BuildCatalog(systemPrompt);
-        // 子代理用法：静态说明，告诉模型何时创建子代理以及三个工具怎么配合
-        BuildSubagentBlock(systemPrompt);
-        // 消息平台：只有真的接入了平台才注入使用说明，没有平台时提示词里不出现这类内容
-        BuildPlatformBlock(systemPrompt);
-        // 长期记忆里的用户档案：只在 remember / forget 后变化，放在系统提示词最末位，尽量少影响前缀
-        memory.BuildProfileBlock(systemPrompt);
-
-        var stringSystemPrompt = systemPrompt.ToString();
+        var stringSystemPrompt = BuildSystemPrompt();
         // 记录哈希：两次请求的哈希相同，说明系统提示词这段前缀没变、缓存仍有效，
         // 排查「命中率突然掉到 0」时先看这里有没有每轮都变。
         Logger.Debug("System prompt hash={Hash} chars={Length}",
@@ -223,6 +363,23 @@ public sealed class LlmChatService(
 
         for (var round = 0;; round++)
         {
+            // 工具循环会把工具结果（整段文件内容、截图）接进请求，水位可能在中途越过窗口：
+            // 每轮请求前问一次守卫，压缩后用它重建请求（系统提示词 + 摘要 + 最近原文）。
+            // 首轮由会话在进入本轮对话前就检查过，这里只管中途增长的部分。
+            if (round > 0 && contextGuard is not null
+                && await contextGuard
+                        // 去掉首条系统提示词：守卫自己要把它算进去，这里只交出「本轮请求的对话部分」
+                        .CompactIfNeededAsync(messages.GetRange(1, messages.Count - 1), cancellationToken)
+                        .ConfigureAwait(false)
+                    is { } compactedHistory)
+            {
+                messages.Clear();
+                messages.Add(new ChatMessage(ChatRole.System, stringSystemPrompt));
+                messages.AddRange(compactedHistory);
+                Logger.Warning("request rebuilt after mid-turn compaction round={Round} messages={Count}",
+                    round, messages.Count);
+            }
+
             // OpenAI 适配器不会序列化 TextReasoningContent，这里把思考内容补成 reasoning_content
             AttachReasoning(messages);
 

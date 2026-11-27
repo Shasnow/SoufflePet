@@ -310,6 +310,23 @@ export function LlmSettings() {
                             setDraft({ ...draft, models })
                           }}
                         />
+                        <input
+                          className="input settings-model-context"
+                          type="number"
+                          min={65536}
+                          step={1024}
+                          placeholder="上下文(默认)"
+                          value={model.contextWindowTokens ? String(model.contextWindowTokens) : ''}
+                          onChange={(event) => {
+                            const parsed = Number.parseInt(event.target.value, 10)
+                            const contextWindowTokens = Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+                            const models = draft.models.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, contextWindowTokens } : item,
+                            )
+                            setDraft({ ...draft, models })
+                          }}
+                          aria-label={`${model.modelId} 的上下文长度（token）`}
+                        />
                         <button
                           type="button"
                           className="icon-btn"

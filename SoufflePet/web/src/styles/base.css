@@ -1297,6 +1297,7 @@ body.is-resizing-sidebar .sidebar {
 .message-row[data-kind='reasoning'],
 .message-row[data-kind='approval'],
 .message-row[data-kind='notice'],
+.message-row[data-kind='summary'],
 .message-row[data-kind='attachment'] {
   align-items: flex-start;
 }
@@ -1328,6 +1329,23 @@ body.is-resizing-sidebar .sidebar {
   background: var(--surface-1);
   color: var(--text-2);
   font-size: 13px;
+}
+
+/* 上下文压缩摘要：与提示气泡同为虚线（系统行为），正文是 Markdown 且默认展开 */
+.bubble-summary {
+  max-width: min(90%, 680px);
+  padding: 0;
+  border-style: dashed;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+/* 摘要是 Markdown：不继承折叠面板的 pre-wrap，排版交给 .md */
+.bubble-summary .collapse-body {
+  padding: 0 12px 12px;
+  color: var(--text-1);
+  font-size: 13px;
+  white-space: normal;
 }
 
 /* 系统/平台提醒：display 摘要展开查看原始文本 */
@@ -2269,6 +2287,44 @@ body.is-resizing-sidebar .sidebar {
 
 .usage-foot-btn:hover {
   color: var(--text-2);
+}
+
+/* 上下文占用：估算 token / 模型窗口 */
+.context-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-track {
+  width: 56px;
+  height: 4px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.context-usage-fill {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.context-usage.is-hot {
+  color: var(--warning);
+}
+
+.context-usage.is-hot .context-usage-fill {
+  background: var(--warning);
 }
 
 /* ============================== 设置页 ============================== */
@@ -3411,6 +3467,12 @@ body.is-resizing-sidebar .sidebar {
 
 .settings-model-name {
   width: 160px;
+  flex: none;
+  height: 30px;
+}
+
+.settings-model-context {
+  width: 116px;
   flex: none;
   height: 30px;
 }

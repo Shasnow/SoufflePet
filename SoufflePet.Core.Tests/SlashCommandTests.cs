@@ -108,9 +108,11 @@ public sealed class SlashCommandTests : IAsyncLifetime
         Assert.Equal("model", SlashCommandCatalog.Find("m")!.Name);
         Assert.Equal("model", SlashCommandCatalog.Find("MODELS")!.Name);
         Assert.Equal("help", SlashCommandCatalog.Find("?")!.Name);
+        Assert.Equal("compact", SlashCommandCatalog.Find("compress")!.Name);
         Assert.Null(SlashCommandCatalog.Find("nope"));
         Assert.Equal("model", SlashCommandCatalog.All[0].Name);
         Assert.Contains("/model [模型名称/模型ID]", SlashCommandCatalog.HelpText());
+        Assert.Contains("/compact", SlashCommandCatalog.HelpText());
     }
 
     [Fact]
@@ -181,16 +183,20 @@ public sealed class SlashCommandTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExecuteModelWithoutArgumentListsModelsAndFails()
+    public async Task ExecuteModelWithoutArgumentListsModelsAsSkipped()
     {
         var session = _manager.ActiveSession!;
 
         var result = await SlashCommands.ExecuteAsync(session, "/model");
 
+        // 列出模型没有做任何改动：不是失败，界面按提示呈现（不显示「未执行」也不弹错误 toast）
         Assert.False(result.Success);
+        Assert.True(result.Skipped);
         Assert.Contains("可用模型", result.Message);
         Assert.Contains("DeepSeek Chat", result.Message);
-        Assert.Equal(ChatMessageKinds.Notice, session.Snapshot.Messages.Last().Kind);
+        var notice = session.Snapshot.Messages.Last();
+        Assert.Equal(ChatMessageKinds.Notice, notice.Kind);
+        Assert.DoesNotContain("未执行", notice.Text);
     }
 
     [Fact]
@@ -302,10 +308,27 @@ public sealed class SlashCommandTests : IAsyncLifetime
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             ChatModelConfig model,
             IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken,
+            ITurnContextGuard? contextGuard = null)
         {
             await Task.Yield();
             yield return new LlmTextDelta("ok");
+        }
+
+        public Task<int> EstimateContextTokensAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(SoufflePet.Services.TokenEstimator.EstimateMessages(history));
+
+        public async IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            string instruction,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            yield return new LlmTextDelta("摘要");
         }
     }
 

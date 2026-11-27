@@ -19,12 +19,34 @@ public sealed class ChatSessionException(string code, string message) : Exceptio
     public string Code { get; } = code;
 }
 
+/// <summary>上下文压缩的结果种类。</summary>
+public enum CompactionStatus
+{
+    /// <summary>历史已替换成「摘要块 + 保留预算内的最近原文」。</summary>
+    Compacted,
+
+    /// <summary>没有可摘要的部分：整段历史都在保留预算内，或只剩一个提问。</summary>
+    NothingToCompact,
+
+    /// <summary>摘要请求抛错或返回空摘要，历史保持原样。</summary>
+    Failed,
+
+    /// <summary>被 <see cref="ChatSession.StopAsync" /> 或调用方的取消令牌中断，历史保持原样。</summary>
+    Cancelled,
+}
+
+/// <summary>压缩结果：<see cref="Status" /> 说明有没有真的压，<see cref="Message" /> 是给用户看的文案。</summary>
+public sealed record CompactionOutcome(CompactionStatus Status, string Message)
+{
+    public bool Compacted => Status == CompactionStatus.Compacted;
+}
+
 /// <summary>
 /// 单会话状态机（替代旧 ChatViewModel 的状态部分）：
 /// 消息/草稿/附件/模型/审批/工作区/用量/Ask 全部由本类持有，界面只镜像 <see cref="ChatOp" /> 事件。
 /// 内部用锁保护状态、单一生成任务串行执行一轮对话；不引用 Avalonia/Dispatcher，也不使用 async void。
 /// </summary>
-public sealed class ChatSession : IAsyncDisposable
+public sealed class ChatSession : IAsyncDisposable, ITurnContextGuard
 {
     private static readonly ILogger Logger = Log.ForContext<ChatSession>();
 
@@ -80,8 +102,14 @@ public sealed class ChatSession : IAsyncDisposable
     /// <summary>最近一次活动时间（Environment.TickCount64），供管理器判断闲置会话是否可卸载。</summary>
     private long _lastActivityMilliseconds = Environment.TickCount64;
     private bool _processingPending;
+    /// <summary>正在压缩上下文：期间的发送/排队轮次一律延后，避免与历史替换交错。</summary>
+    private bool _compacting;
+    /// <summary>手动压缩的取消源：压缩期间没有活动 turn，`/stop` 要靠它才能中断摘要生成。</summary>
+    private CancellationTokenSource? _compactCts;
     private bool _disposed;
     private ChatUsageState? _usage;
+    /// <summary>最近一次估算的上下文占用（token）；null 表示本轮还没估算过。</summary>
+    private int? _contextEstimatedTokens;
     private ChatAskState? _ask;
     private UserQuestionRequest? _askRequest;
     private ToolApprovalRequest? _approvalRequest;
@@ -202,6 +230,7 @@ public sealed class ChatSession : IAsyncDisposable
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_generating) throw new ChatSessionException("conflict", "正在生成回复，请先停止当前回复");
+                if (_compacting) throw new ChatSessionException("conflict", "正在压缩上下文，请稍候再发送");
                 if (SelectedModelLocked() is not { } found)
                     throw new ChatSessionException("invalid_argument", "请先选择模型");
                 if (!IsUsable(found))
@@ -221,6 +250,7 @@ public sealed class ChatSession : IAsyncDisposable
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_generating) throw new ChatSessionException("conflict", "正在生成回复，请先停止当前回复");
+                if (_compacting) throw new ChatSessionException("conflict", "正在压缩上下文，请稍候再发送");
 
                 // 附件气泡列出文件名；发给模型的正文统一附加 @绝对路径
                 var attachmentLines = string.Join("\n", selected.Select(a => $"[附件] {a.Name}"));
@@ -287,9 +317,24 @@ public sealed class ChatSession : IAsyncDisposable
     public Task WakeByHeadPatAsync() => EnqueueSystemTurnAsync(
         $"{SystemInfoOpen}用户摸了摸你的头。{SystemInfoClose}", "🖐 摸摸头", isPlatformNotice: true);
 
+    /// <summary>是否正在压缩上下文（压缩期间没有活动 turn，`/stop` 与界面据此区分状态）。</summary>
+    public bool Compacting
+    {
+        get
+        {
+            lock (_gate) return _compacting;
+        }
+    }
+
+    /// <summary>停止当前生成，或中断正在进行的上下文压缩。</summary>
     public Task StopAsync()
     {
-        lock (_gate) _cts?.Cancel();
+        lock (_gate)
+        {
+            _cts?.Cancel();
+            _compactCts?.Cancel();
+        }
+
         return Task.CompletedTask;
     }
 
@@ -299,14 +344,27 @@ public sealed class ChatSession : IAsyncDisposable
     /// 注意这些气泡**不落盘**：页面刷新后仍在（会话还在内存里），但会话关闭 / 空闲卸载
     /// 或应用重启后就不会再出现（历史只保存用户/助手消息）。
     /// </summary>
-    public Task AddNoticeAsync(string text, string? rawText = null)
+    public Task AddNoticeAsync(string text, string? rawText = null) =>
+        AppendBubbleAsync(ChatMessageKinds.Notice, text, rawText: rawText);
+
+    /// <summary>
+    /// 追加一条「上下文摘要」气泡：压缩成功后把模型写出的摘要正文摊在对话里，
+    /// 让用户看得见较早的对话被折叠成了什么（正文是 Markdown，由界面渲染）。
+    /// 与提示气泡一样不落盘、不进模型上下文；摘要本身另外写进 summary.md，重启后仍会挂回历史。
+    /// </summary>
+    public Task AddSummaryAsync(string summary) =>
+        string.IsNullOrWhiteSpace(summary)
+            ? Task.CompletedTask
+            : AppendBubbleAsync(ChatMessageKinds.Summary, summary.Trim(), expanded: true);
+
+    private Task AppendBubbleAsync(string kind, string text, bool? expanded = null, string? rawText = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
 
         lock (_gate)
         {
             if (_disposed) return Task.CompletedTask;
-            var message = NewMessage(ChatMessageKinds.Notice, text, rawText: rawText);
+            var message = NewMessage(kind, text, expanded: expanded, rawText: rawText);
             _messages.Add(message);
             EmitLocked(new ChatOpMessageAdd(message.ToState()));
         }
@@ -420,6 +478,7 @@ public sealed class ChatSession : IAsyncDisposable
             _settings.ChatModelKey = key;
             _settings.Save();
             EmitLocked(new ChatOpModels(SnapshotModelsLocked(), _selectedModelKey));
+            EmitContextUsageLocked();
         }
 
         return Task.CompletedTask;
@@ -438,6 +497,7 @@ public sealed class ChatSession : IAsyncDisposable
             if (string.Equals(_selectedModelKey, key, StringComparison.Ordinal)) return;
             _selectedModelKey = key;
             EmitLocked(new ChatOpModels(SnapshotModelsLocked(), _selectedModelKey));
+            EmitContextUsageLocked();
         }
     }
 
@@ -455,6 +515,7 @@ public sealed class ChatSession : IAsyncDisposable
             }
 
             EmitLocked(new ChatOpModels(models, _selectedModelKey));
+            EmitContextUsageLocked();
         }
     }
 
@@ -779,7 +840,6 @@ public sealed class ChatSession : IAsyncDisposable
             _history.Add(new ChatMessage(ChatRole.User, requestText));
             _memory.AddTurn(ChatMemory.UserRole, messageText, display: displayText,
                 isPlatformNotice: isPlatformNotice, requestText: requestText);
-            TrimHistory();
 
             reply = NewMessage(ChatMessageKinds.Assistant, string.Empty);
             _reply = reply;
@@ -807,7 +867,6 @@ public sealed class ChatSession : IAsyncDisposable
             {
                 pendingToolText = content;
                 _memory.AddTurn(ChatMemory.AssistantRole, content);
-                TrimHistory();
                 segment = string.Empty;
                 return true;
             }
@@ -828,7 +887,6 @@ public sealed class ChatSession : IAsyncDisposable
                 outputTokens: usage?.OutputTokens,
                 cachedInputTokens: usage?.CachedInputTokens,
                 model: FormatModelLabel(model));
-            TrimHistory();
             segment = string.Empty;
             return true;
         }
@@ -881,7 +939,24 @@ public sealed class ChatSession : IAsyncDisposable
             using var workspaceScope = WorkspaceContext.Enter(workspacePath);
             // 编辑工具覆盖文件前把旧版本备份到本轮会话目录，删除会话时随目录进入 .deleted
             using var backupScope = ToolInvocationContext.EnterBackupDirectory(_memory.SessionDirectory);
-            await foreach (var evt in _llm.StreamAsync(model, [.. _history], token)
+            // 上下文水位：估算接近窗口 90% 时先把较早历史压成摘要，避免请求超出模型窗口；
+            // 估算值同时推给界面，用于底部显示上下文占用
+            var estimated = await EstimateContextAsync(model, token).ConfigureAwait(false);
+            if (estimated is { } estimatedTokens
+                && ContextCompaction.ShouldCompress(estimatedTokens, ResolveContextWindow(model)))
+            {
+                var outcome = await CompactCoreAsync(model, announceResult: true, token).ConfigureAwait(false);
+                // 压缩失败时退回按轮数丢弃：否则这次请求仍按超窗的全量历史发出，只会换来上游的
+                // 「上下文超长」错误，用户也看不出是在哪一步出的问题（失败原因已由压缩自己插了气泡）
+                if (outcome.Status == CompactionStatus.Failed)
+                    await DropOldestTurnsAfterFailureAsync(model, token).ConfigureAwait(false);
+                else if (outcome.Status == CompactionStatus.NothingToCompact)
+                    // 超窗的部分不在可丢弃的历史里（系统提示词/工具定义本身体积就很大，或历史只有一轮），
+                    // 按轮数丢弃也腾不出空间，直接记日志，不做无谓的历史破坏
+                    Logger.Warning("context over window but nothing to compact: history already within keep budget");
+            }
+
+            await foreach (var evt in _llm.StreamAsync(model, [.. _history], token, this)
                                .ConfigureAwait(false))
             {
                 switch (evt)
@@ -970,7 +1045,6 @@ public sealed class ChatSession : IAsyncDisposable
                             call.Result, toolReasoning, toolLabel: toolLabel, diffs: toolDiffs);
                         AddToolHistory(call.CallId, call.Name, call.Arguments, call.Result, toolText,
                             toolReasoning, assistantText);
-                        TrimHistory();
                         break;
                 }
             }
@@ -1036,7 +1110,6 @@ public sealed class ChatSession : IAsyncDisposable
                 if (pendingReasoning.Length > 0) contents.Add(new TextReasoningContent(pendingReasoning));
                 contents.Add(new TextContent(leftovers));
                 _history.Add(new ChatMessage(ChatRole.Assistant, contents));
-                TrimHistory();
             }
 
             var committed = CommitSegment(withReasoning: true);
@@ -1099,7 +1172,7 @@ public sealed class ChatSession : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (_disposed || _processingPending || _generating || _pendingTurns.Count == 0) return;
+            if (_disposed || _processingPending || _generating || _compacting || _pendingTurns.Count == 0) return;
             _processingPending = true;
         }
 
@@ -1115,7 +1188,7 @@ public sealed class ChatSession : IAsyncDisposable
                 PendingTurn turn;
                 lock (_gate)
                 {
-                    if (_disposed || _generating || _pendingTurns.Count == 0) break;
+                    if (_disposed || _generating || _compacting || _pendingTurns.Count == 0) break;
                     turn = _pendingTurns.Dequeue();
                     _generating = true;
                     // 复用上一轮尚未完成的等待状态：等待者（子代理 wait_agent / 测试）要一直等到
@@ -1361,7 +1434,11 @@ public sealed class ChatSession : IAsyncDisposable
     private void LoadRecentHistory()
     {
         var recent = _memory.RecentTurns(RestoreWindowTurns(), includeTools: true);
-        if (recent.Count == 0) return;
+        if (recent.Count == 0)
+        {
+            AttachLoadedSummary();
+            return;
+        }
 
         void AddReasoning(string? reasoning, DateTimeOffset time)
         {
@@ -1462,6 +1539,18 @@ public sealed class ChatSession : IAsyncDisposable
                     turn.CachedInputTokens ?? 0, turn.Model, turn.Time);
             _messages.Add(restored);
         }
+
+        AttachLoadedSummary();
+    }
+
+    /// <summary>重启后把落盘的压缩摘要挂回请求历史的开头，保证摘要不随窗口重建而丢失。</summary>
+    private void AttachLoadedSummary()
+    {
+        if (string.IsNullOrWhiteSpace(_memory.Summary)) return;
+
+        var rebuilt = ContextCompaction.AttachSummary(_history, _memory.Summary);
+        _history.Clear();
+        _history.AddRange(rebuilt);
     }
 
     /// <summary>
@@ -1485,14 +1574,13 @@ public sealed class ChatSession : IAsyncDisposable
     private int CountHistoryUserTurns() =>
         _history.Count(message => message.Role == ChatRole.User);
 
-    private void TrimHistory()
+    /// <summary>
+    /// 按用户轮数丢弃较早的历史，只保留最近 <paramref name="keepTurns" /> 个提问。
+    /// 唯一用途是压缩失败后的兜底（正常历史只按 token 预算压缩，不按轮数裁剪）。
+    /// 返回丢弃的用户轮数，0 表示没有可丢的。
+    /// </summary>
+    private int DropOldestTurnsLocked(int keepTurns)
     {
-        var before = _history.Count;
-        var userTurns = CountHistoryUserTurns();
-        var windowTurns = _settings.HistoryWindowTurns;
-        var keepTurns = _settings.HistoryKeepTurns;
-        if (userTurns <= windowTurns) return;
-
         var keepFrom = 0;
         var kept = 0;
         for (var i = _history.Count - 1; i >= 0; i--)
@@ -1503,21 +1591,312 @@ public sealed class ChatSession : IAsyncDisposable
             break;
         }
 
-        if (keepFrom > 0)
+        if (keepFrom <= 0) return 0;
+
+        var dropped = _history.Take(keepFrom).Count(message => message.Role == ChatRole.User);
+        var summary = _memory.Summary;
+        _history.RemoveRange(0, keepFrom);
+        // 兜底裁剪可能把承载摘要的首条用户消息一起删掉：按落盘的摘要重新挂回新开头，
+        // 否则摘要只存在于磁盘、当前请求里反而丢了。
+        if (!string.IsNullOrWhiteSpace(summary))
         {
-            _history.RemoveRange(0, keepFrom);
-            _memory.SaveWindowTurns(keepTurns);
+            var rebuilt = ContextCompaction.AttachSummary(_history, summary);
+            _history.Clear();
+            _history.AddRange(rebuilt);
         }
 
-        if (before != _history.Count)
-            Logger.Debug("session history trimmed before={Before} after={After} turns={Turns} keep={Keep}",
-                before, _history.Count, userTurns, keepTurns);
+        _memory.SaveWindowTurns(keepTurns);
+        return dropped;
     }
 
+    /// <summary>
+    /// 重启后恢复的历史窗口：有记录就按上次请求用的轮数恢复，第一次请求才能接上前缀缓存；
+    /// 没有记录（会话还没完整跑过一轮）时全量恢复——现在不再按轮数裁剪，超了由 token 压缩兜住。
+    /// </summary>
     private int RestoreWindowTurns()
     {
         var saved = _memory.WindowTurns;
-        return saved > 0 && saved <= _settings.HistoryWindowTurns ? saved : _settings.HistoryWindowTurns;
+        return saved > 0 ? saved : int.MaxValue;
+    }
+
+    /// <summary>
+    /// 工具循环的上下文守卫：每轮工具调用之后、下一次请求之前问一次窗口水位。超了就压缩，
+    /// 并把重建后的历史交回给 <c>LlmChatService</c> 替换本次请求的消息列表。
+    /// 压缩失败时**不**在这里按轮数丢弃：本轮工具循环还在跑，丢掉历史会让已经执行过的工具结果
+    /// 与调用消息对不上；兜底交给下一轮对话按正常路径处理。
+    /// </summary>
+    async Task<IReadOnlyList<ChatMessage>?> ITurnContextGuard.CompactIfNeededAsync(
+        IReadOnlyList<ChatMessage> request,
+        CancellationToken cancellationToken)
+    {
+        ChatModelConfig? model;
+        lock (_gate)
+        {
+            if (_disposed || !_generating) return null;
+            model = SelectedModelLocked();
+        }
+
+        if (model is null) return null;
+
+        var window = ResolveContextWindow(model);
+        // 按「即将发出的请求」估算：本轮工具调用的结果与媒体都在里面，比只算会话历史更准
+        var estimated = await EstimateContextAsync(model, request, cancellationToken).ConfigureAwait(false);
+        if (estimated is not { } estimatedTokens || !ContextCompaction.ShouldCompress(estimatedTokens, window))
+            return null;
+
+        Logger.Warning("context over window mid-turn estimate={Estimate} window={Window}, compacting",
+            estimatedTokens, window);
+        var outcome = await CompactCoreAsync(model, announceResult: true, cancellationToken).ConfigureAwait(false);
+        if (!outcome.Compacted)
+        {
+            Logger.Warning("mid-turn compaction skipped reason={Reason}", outcome.Message);
+            return null;
+        }
+
+        lock (_gate) return [.. _history];
+    }
+
+    /// <summary>按模型配置解析实际上下文窗口：模型未单独设置时用全局默认值。</summary>
+    private int ResolveContextWindow(ChatModelConfig model) =>
+        model.EffectiveContextWindow(_settings.DefaultContextWindowTokens);
+
+    /// <summary>
+    /// 估算当前上下文占用（系统提示词 + 工具定义 + 历史）并把结果推给界面。
+    /// 估算失败不影响正常对话：返回 null（按「无需压缩」处理）。取消会向上抛出。
+    /// </summary>
+    private async Task<int?> EstimateContextAsync(ChatModelConfig model, CancellationToken cancellationToken)
+    {
+        List<ChatMessage> snapshot;
+        lock (_gate) snapshot = [.. _history];
+        return await EstimateContextAsync(model, snapshot, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 按给定的消息集合估算（系统提示词与工具定义由实现补上）：工具循环里传入的是
+    /// 「即将发出的请求」，比会话历史更准——工具刚返回的截图与大段内容也在里面。
+    /// </summary>
+    private async Task<int?> EstimateContextAsync(
+        ChatModelConfig model,
+        IReadOnlyList<ChatMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var estimated = await _llm.EstimateContextTokensAsync(model, messages, cancellationToken)
+                .ConfigureAwait(false);
+            PublishContextUsage(estimated);
+            return estimated;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "estimate context tokens failed");
+            return null;
+        }
+    }
+
+    /// <summary>记录最新估算值并推给界面；切换模型、压缩后复用同一个出口。</summary>
+    private void PublishContextUsage(int estimatedTokens)
+    {
+        ChatContextUsageState? usage;
+        lock (_gate)
+        {
+            _contextEstimatedTokens = estimatedTokens;
+            usage = ContextUsageLocked();
+            if (usage is null) return;
+            EmitLocked(new ChatOpContextUsage(usage));
+        }
+    }
+
+    /// <summary>估算当前会话（系统提示词 + 工具定义 + 历史）的 token 占用。</summary>
+    public async Task<int> EstimateContextTokensAsync(CancellationToken cancellationToken)
+    {
+        ChatModelConfig? model;
+        lock (_gate)
+        {
+            if (_disposed) return 0;
+            model = SelectedModelLocked();
+        }
+
+        if (model is null) return 0;
+        return await EstimateContextAsync(model, cancellationToken).ConfigureAwait(false) ?? 0;
+    }
+
+    /// <summary>
+    /// 手动压缩上下文：按 token 预算把较早的历史总结成摘要、只保留预算内的最近原文。
+    /// 生成中或正在压缩时直接返回提示，不排队；可用 <see cref="StopAsync" />（`/stop`）中断。
+    /// 过程中会自己插一条「正在压缩上下文…」，成功后另插一条摘要气泡（<see cref="AddSummaryAsync" />）；
+    /// 结果文案交给调用方统一提示。
+    /// </summary>
+    public async Task<CompactionOutcome> CompactAsync(CancellationToken cancellationToken = default)
+    {
+        ChatModelConfig model;
+        CancellationTokenSource cts;
+        lock (_gate)
+        {
+            if (_disposed) return new CompactionOutcome(CompactionStatus.Failed, "会话已关闭。");
+            if (_compacting) return new CompactionOutcome(CompactionStatus.Failed, "正在压缩上下文，请稍候。");
+            if (_generating) return new CompactionOutcome(CompactionStatus.Failed, "正在生成回复，稍后再压缩上下文。");
+            if (SelectedModelLocked() is not { } selected)
+                return new CompactionOutcome(CompactionStatus.Failed, "请先选择模型。");
+
+            _compacting = true;
+            model = selected;
+            // 压缩期间没有活动 turn（_cts 为空），所以单独建一个取消源挂给 /stop
+            cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _compactCts = cts;
+        }
+
+        try
+        {
+            return await CompactCoreAsync(model, announceResult: false, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            Logger.Information("context compaction cancelled session={Session}", Id);
+            return new CompactionOutcome(CompactionStatus.Cancelled, "已取消压缩，历史保持原样。");
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _compacting = false;
+                if (ReferenceEquals(_compactCts, cts)) _compactCts = null;
+            }
+
+            cts.Dispose();
+            StartPendingTurns();
+        }
+    }
+
+    /// <summary>
+    /// 压缩实现：调用方须已确认当前可以压缩（非生成中）并给出模型。
+    /// 拆分点只看 token 预算（<see cref="ContextCompaction.SplitIndex" />），与轮数无关：
+    /// 摘要请求携带完整历史，替换后的历史 = 摘要块 + 预算内的最近原文。
+    /// 摘要失败或为空时保留原上下文（<see cref="CompactionOutcome.Compacted" /> = false），
+    /// 由调用方决定是否退回按轮数丢弃。
+    /// </summary>
+    private async Task<CompactionOutcome> CompactCoreAsync(
+        ChatModelConfig model,
+        bool announceResult,
+        CancellationToken cancellationToken)
+    {
+        List<ChatMessage> all;
+        List<ChatMessage> tail;
+        lock (_gate)
+        {
+            // 摘要输入是完整历史（含要保留的部分），这样摘要能看到全貌；tail 只用于替换后的历史
+            all = [.. _history];
+            var keepFrom = ContextCompaction.SplitIndex(all, ContextCompaction.KeepTokens(ResolveContextWindow(model)));
+            if (keepFrom <= 0) return new CompactionOutcome(CompactionStatus.NothingToCompact, "当前上下文都落在保留预算内，无需压缩。");
+
+            tail = all.Skip(keepFrom).ToList();
+        }
+
+        // 失败也要留下一条可见的结果气泡（否则「正在压缩…」会一直挂在界面上），
+        // 成功时的结果气泡由 announceResult 决定：命令路径由 SlashCommands 统一提示，避免重复
+        async Task<CompactionOutcome> FailAsync(string message)
+        {
+            if (announceResult) await AddNoticeAsync(message).ConfigureAwait(false);
+            return new CompactionOutcome(CompactionStatus.Failed, message);
+        }
+
+        // 压缩可能持续几分钟，且期间发送会被拒绝：开始的气泡总是插
+        await AddNoticeAsync("正在压缩上下文…").ConfigureAwait(false);
+
+        var builder = new StringBuilder();
+        try
+        {
+            // 不设超时：摘要长度不设上限，长会话可能生成很久；取消只跟随调用方
+            await foreach (var evt in _llm
+                           .SummarizeAsync(model, all, ContextCompaction.BuildSummaryInstruction(), cancellationToken)
+                           .ConfigureAwait(false))
+            {
+                switch (evt)
+                {
+                    case LlmTextDelta delta:
+                        builder.Append(delta.Text);
+                        break;
+                    // 压缩请求本身也是实打实的开销：计入会话用量与统计，别让它隐形
+                    case LlmUsageEvent usage:
+                        RecordUsage(model, usage, bubble: null);
+                        Logger.Information("context compaction tokens input={Input} output={Output} session={Session}",
+                            usage.InputTokens, usage.OutputTokens, Id);
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 用户取消：交给上层中断流程处理，不要误报成压缩失败
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "context compaction failed");
+            return await FailAsync($"压缩失败：{ex.Message}").ConfigureAwait(false);
+        }
+
+        var summary = builder.ToString().Trim();
+        if (summary.Length == 0)
+        {
+            Logger.Warning("context compaction returned empty summary");
+            return await FailAsync("压缩失败：模型没有返回摘要，已保留原上下文。").ConfigureAwait(false);
+        }
+
+        var block = ContextCompaction.WrapSummary(summary);
+        int keptTurns;
+        lock (_gate)
+        {
+            if (_disposed) return new CompactionOutcome(CompactionStatus.Failed, "会话已关闭。");
+            keptTurns = tail.Count(message => message.Role == ChatRole.User);
+            _history.Clear();
+            _history.AddRange(ContextCompaction.AttachSummary(tail, block));
+        }
+
+        // 落盘只存正文（summary.md 是纯 Markdown，给人看的），标记由 ChatMemory 读写时补
+        _memory.SaveSummary(summary);
+        _memory.SaveWindowTurns(keptTurns);
+        RaiseSummary();
+
+        // 压缩后重新估算一次：界面底部的上下文水位立刻回落
+        await EstimateContextAsync(model, cancellationToken).ConfigureAwait(false);
+
+        var message = $"已压缩上下文：保留最近 {keptTurns} 轮原文" +
+                      $"（约 {TokenEstimator.EstimateMessages(tail)} token），摘要 {summary.Length} 字。";
+        Logger.Information("context compaction done keptTurns={Turns} summaryChars={Chars} session={Session}",
+            keptTurns, summary.Length, Id);
+        if (announceResult) await AddNoticeAsync(message).ConfigureAwait(false);
+        // 摘要本体单独一条气泡：压缩只留下「摘要 + 最近原文」，用户得看得见被折叠掉的内容
+        await AddSummaryAsync(summary).ConfigureAwait(false);
+        return new CompactionOutcome(CompactionStatus.Compacted, message);
+    }
+
+    /// <summary>
+    /// 压缩失败时的兜底：按 <see cref="SouffleSettings.HistoryKeepTurns" /> 丢弃较早的轮次，
+    /// 让本次请求至少不会因为超窗直接失败。没有可丢的轮次时只记日志（失败原因压缩自己已经插了气泡）。
+    /// </summary>
+    private async Task DropOldestTurnsAfterFailureAsync(
+        ChatModelConfig model,
+        CancellationToken cancellationToken)
+    {
+        int dropped;
+        lock (_gate) dropped = DropOldestTurnsLocked(Math.Max(1, _settings.HistoryKeepTurns));
+
+        if (dropped == 0)
+        {
+            Logger.Warning("context over window and nothing to drop after compaction failure session={Session}", Id);
+            return;
+        }
+
+        Logger.Warning("context over window, dropped {Dropped} turns after compaction failure session={Session}",
+            dropped, Id);
+        await AddNoticeAsync($"上下文仍然吃紧，已按轮数丢弃较早的 {dropped} 轮对话。").ConfigureAwait(false);
+        // 丢弃后重新估算：底部水位随之回落
+        await EstimateContextAsync(model, cancellationToken).ConfigureAwait(false);
     }
 
     private void AddToolHistory(
@@ -1609,7 +1988,22 @@ public sealed class ChatSession : IAsyncDisposable
         ToWorkspace(_workspacePath),
         SnapshotWorkspacesLocked(),
         _usage,
-        _ask);
+        _ask,
+        ContextUsageLocked());
+
+    /// <summary>当前上下文占用：没有选中模型（窗口未知）时为 null。</summary>
+    private ChatContextUsageState? ContextUsageLocked()
+    {
+        if (SelectedModelLocked() is not { } model) return null;
+        var window = ResolveContextWindow(model);
+        return window > 0
+            ? new ChatContextUsageState(_contextEstimatedTokens, window, ContextCompaction.TriggerTokens(window))
+            : null;
+    }
+
+    /// <summary>把当前上下文占用推给界面（模型切换后窗口大小可能变化）。</summary>
+    private void EmitContextUsageLocked() =>
+        EmitLocked(new ChatOpContextUsage(ContextUsageLocked()));
 
     private IReadOnlyList<ChatModelState> SnapshotModelsLocked() =>
         [.. _settings.ChatModels.Select(model => new ChatModelState(
@@ -1944,6 +2338,7 @@ public sealed class ChatSession : IAsyncDisposable
             if (_disposed) return;
             _disposed = true;
             _cts?.Cancel();
+            _compactCts?.Cancel();
         }
 
         _toolAccess.ApprovalRequested -= OnApprovalRequested;

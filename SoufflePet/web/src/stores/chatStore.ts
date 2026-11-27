@@ -83,6 +83,10 @@ export function reduceChatOps(session: ChatSnapshotDto, ops: ChatOp[]): ChatSnap
         next = { ...next, usage: op.usage }
         break
       }
+      case 'context': {
+        next = { ...next, contextUsage: op.contextUsage }
+        break
+      }
       default: {
         const exhaustive: never = op
         void exhaustive

@@ -42,4 +42,7 @@ public class ChatProviderModel
 
     [Description("是否加入对话窗口的模型选择列表")]
     public bool IsActive { get; set; }
+
+    [Description("上下文窗口长度（token）；0 表示未设置，使用全局默认值")]
+    public int ContextWindowTokens { get; set; }
 }

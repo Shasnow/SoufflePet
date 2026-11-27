@@ -84,7 +84,7 @@ window.__bridge && window.__bridge.receive(<object>)
 type ApprovalMode = 'manual' | 'full'
 type ChatMessageKind =
   | 'user' | 'assistant' | 'reasoning' | 'tool'
-  | 'notice' | 'attachment' | 'approval'
+  | 'notice' | 'summary' | 'attachment' | 'approval'
 
 interface AttachmentDto {
   id: string            // 会话内稳定；拖放/粘贴/选择共用
@@ -171,6 +171,8 @@ interface ChatSnapshotDto {
   workspaces: WorkspaceDto[]
   usage: UsageDto | null        // 本会话累计
   ask: AskStateDto | null
+  // 上下文占用（估算的请求 token 与模型窗口）；没有可用模型时省略
+  contextUsage?: { estimatedTokens?: number | null; windowTokens: number; triggerTokens: number } | null
 }
 
 interface SessionSummaryDto {
@@ -263,7 +265,7 @@ interface AppSnapshotDto {
 | `chat.attach.remove` | `{sessionId?,id}` | `{attachments:AttachmentDto[]}` |
 | `chat.model.select` | `{sessionId?,key}` | `null` |
 | `chat.command.list` | `{}` | `{commands:SlashCommandDto[]}`；命令目录（`{name,usage,summary,description,argumentKind:'none'\|'model'\|'approval',argumentLabel?,aliases:string[]}`），命令定义由 Core 的 `SlashCommandCatalog` 提供 |
-| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?}`；`ok` 为 false 时 `message` 是可展示的原因。命令结果会写进会话的通知气泡。`clearDraft` 默认 true：执行成功时宿主**无条件**清空该会话的 `draft`（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
+| `chat.command.execute` | `{sessionId?,text,clearDraft?}` | `SlashCommandResultDto`：`{ok,command,message,modelKey?,skipped?}`；`ok` 为 false 时 `message` 是可展示的原因；`skipped` 表示命令没做任何改动但也不是错误（列出模型、无需压缩、用户取消），界面按提示呈现而不是报错。命令结果会写进会话的通知气泡。`clearDraft` 默认 true：执行成功或返回 skipped（未改动但有效）时宿主**无条件**清空该会话的 `draft`（面板选中的候选与输入框草稿并不相等，例如草稿 `/hel` → 执行 `/help`）；从消息操作菜单 / 工具栏按钮执行（草稿是别的文字）时传 false 保留草稿 |
 | `chat.approval.mode` | `{sessionId?,mode:'manual'|'full'}` | `null` |
 | `chat.approval.decide` | `{sessionId?,messageId,approve:boolean}` | `null` |
 | `chat.workspace.switch` | `{sessionId?,path}` | `{workspace:WorkspaceDto|null,workspaces:WorkspaceDto[]}` |
@@ -283,7 +285,7 @@ interface AppSnapshotDto {
 - 执行：已知命令走 `chat.command.execute`（不进模型上下文，结果以通知气泡 + toast 呈现）。通知气泡只进会话内存、**不落盘**：页面刷新后仍在，会话关闭 / 空闲卸载或应用重启后不再出现。未知的 `/xxx` 仍然作为普通文本经 `chat.send` 发给模型。
 - 副作用：`/model` 在切换当前会话模型的同时把 `ChatModelKey` 记为默认模型（新会话沿用）；`/approval` 写入全局 `ToolApproval`（不是会话局部状态），切换后当前及之后新开的会话都生效。
 - 平台入口：插件上报的 `PlatformIncomingMessage.Content` 是**纯正文**（不含「[会话 id] 发送者：」这类前缀，也不含「@你」「引用消息」这类装饰——「@ 了你」与「引用」分别用 `MentionsSelf` / `Quote` 表达，宿主拼进 `<platform_message>` 的属性与通知气泡的展示行），所以正文以 `/` 开头的已知命令会走平台命令分支，不再转给模型。是否允许该发送者执行由平台插件决定（`IMessagePlatform.AllowsPlatformCommands(senderId)`，接口默认返回 false），管理员名单属于**插件自己的配置**，不在 `SoufflePet.json` 里；`/approval` 属于整机安全策略，平台侧一律拒绝；执行结果通过 `send_platform_message` 同款通道回执到原会话，被拒绝时也会在「平台消息」会话里留下通知气泡。
-- 现有命令：`/model [模型名称/模型ID]`（支持模型名称、模型标识、`提供商/标识`、列表序号与模糊匹配，执行后立即作用于该会话后续对话）、`/approval [manual|full]`（仅桌面端）、`/stop`、`/help`。新增命令只需在 `SoufflePet.Core/Chat/SlashCommands.cs` 的目录里追加一条定义与执行分支，界面与平台入口自动跟上；平台可用性由定义的 `AllowFromPlatform` 控制。
+- 现有命令：`/model [模型名称/模型ID]`（支持模型名称、模型标识、`提供商/标识`、列表序号与模糊匹配，执行后立即作用于该会话后续对话）、`/approval [manual|full]`（仅桌面端）、`/stop`、`/compact`（把较早历史压缩成摘要、按窗口预算保留最近原文；接近上下文窗口触发线时也会自动触发，可用 `/stop` 中断）、`/help`。新增命令只需在 `SoufflePet.Core/Chat/SlashCommands.cs` 的目录里追加一条定义与执行分支，界面与平台入口自动跟上；平台可用性由定义的 `AllowFromPlatform` 控制。
 
 #### 窗口
 
@@ -374,7 +376,7 @@ interface MemoryEntryDto {
   updatedAt: string
 }
 
-interface ChatProviderModelDto { modelId: string; name?: string; isActive: boolean }
+interface ChatProviderModelDto { modelId: string; name?: string; isActive: boolean; contextWindowTokens?: number }
 interface ProviderDto { name: string; baseUrl: string; apiKey: string; models: ChatProviderModelDto[] }
 
 interface McpServerDto {
@@ -461,6 +463,7 @@ type ChatOp =
   | { op: 'models'; models: ChatModelDto[]; selectedModelKey: string | null }
   | { op: 'ask'; ask: AskStateDto | null }
   | { op: 'usage'; usage: UsageDto | null }
+  | { op: 'context'; contextUsage: { estimatedTokens?: number | null; windowTokens: number; triggerTokens: number } | null }
 ```
 
 约束：
@@ -594,3 +597,4 @@ type ChatOp =
 26. 新增 `write_file` / `edit_file` 工具与 diff 显示：写入前按 `ToolApproval` 审批（审批详情带 diff 摘要），写入后用 Myers 行级 diff 把结构化 `FileDiffDto[]` 挂到 `tool.diffs`；完整 hunk 存在会话目录 `diffs/<id>.json`，`conversation.jsonl` 只存 `DiffFile` 引用，恢复会话时按需加载，避免会话文件膨胀。文件超过 200 KB / 3000 行或差异超过展示上限时只给截断提示；`run_shell_command` 改文件无法可靠还原 diff，不做推断。
 27. 编辑工具保留原文件编码：读取时记录 BOM 与实际编码（UTF-8 / UTF-16 / UTF-32），写回沿用；无 BOM 只接受 UTF-8。Diff 卡片默认收起，只显示文件头与 `+N −M`，点击后才渲染 hunk 行，避免长会话里堆出大量 DOM。
 28. 写文件改为「同目录临时文件 + `File.Replace`」原子替换，`write_file` / `edit_file` 覆盖已有文件前把旧版本备份到会话目录 `backups/`（同一路径只保留最近一份），删除会话时随目录进入 `.deleted`；工具结果会带回备份路径。
+29. 上下文压缩成功后会话自己再插一条 `summary` 气泡：`text` 是模型写出的摘要正文（Markdown，界面按正文渲染，不是对话正文），`expanded` 默认 true 可折叠，标题固定为「上下文摘要」。它与通知气泡一样只进内存、不落盘（摘要本体另外写进 `summary.md`，重启后挂回请求历史）。顺序为「正在压缩上下文…」→ `summary` → 命令结果气泡；命令结果气泡里的 `已压缩上下文：保留最近 N 轮原文…` 仍由 `/compact` 自己给。

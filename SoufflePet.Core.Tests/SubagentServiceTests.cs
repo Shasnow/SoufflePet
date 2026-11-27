@@ -301,7 +301,24 @@ public sealed class SubagentServiceTests : IAsyncLifetime
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             ChatModelConfig model,
             IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
-            CancellationToken cancellationToken) => stream(model, history, cancellationToken);
+            CancellationToken cancellationToken,
+            ITurnContextGuard? contextGuard = null) => stream(model, history, cancellationToken);
+
+        public Task<int> EstimateContextTokensAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(SoufflePet.Services.TokenEstimator.EstimateMessages(history));
+
+        public async IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            string instruction,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            yield return new LlmTextDelta("摘要");
+        }
     }
 
     private sealed class FakeStatistics : IStatisticsService

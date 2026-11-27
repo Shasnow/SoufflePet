@@ -229,6 +229,8 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 {
                     var session = await _sessions.OpenAsync(
                         RequireString(parameters, "sessionId"), cancellationToken).ConfigureAwait(false);
+                    // 打开会话就先估一次上下文占用：否则底部水位要等到第一次提问才有数字
+                    await session.EstimateContextTokensAsync(cancellationToken).ConfigureAwait(false);
                     return MapChat(session.Snapshot);
                 }
                 case "session.close":
@@ -328,7 +330,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                         .ConfigureAwait(false);
 
                     return new SlashCommandResultDto(result.Success, result.CommandName, result.Message,
-                        result.ModelKey);
+                        result.ModelKey, result.Skipped);
                 }
                 case "chat.approval.mode":
                 {
@@ -532,7 +534,8 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         MapWorkspace(snapshot.Workspace),
         MapWorkspaces(snapshot.Workspaces),
         MapUsage(snapshot.Usage),
-        MapAsk(snapshot.Ask));
+        MapAsk(snapshot.Ask),
+        MapContextUsage(snapshot.ContextUsage));
 
     private ChatMessageDto MapMessage(ChatMessageState message) => new(
         message.Id,
@@ -612,6 +615,9 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
                 question.Options.Select(option => new AskOptionDto(option.Text, option.Description)).ToList()))
                 .ToList());
 
+    private static ChatContextUsageDto? MapContextUsage(ChatContextUsageState? usage) =>
+        usage is null ? null : new ChatContextUsageDto(usage.EstimatedTokens, usage.WindowTokens, usage.TriggerTokens);
+
     private static WorkspaceDto? MapWorkspace(ChatWorkspaceState? workspace) =>
         workspace is null ? null : new WorkspaceDto(workspace.Path, workspace.Name);
 
@@ -683,6 +689,7 @@ public sealed class ChatRpc : IWebRpcHandler, IDisposable
         },
         ChatOpAsk ask => new { op = "ask", ask = MapAsk(ask.Ask) },
         ChatOpUsage usage => new { op = "usage", usage = MapUsage(usage.Usage) },
+        ChatOpContextUsage context => new { op = "context", contextUsage = MapContextUsage(context.ContextUsage) },
         _ => new { op = "noop" },
     };
 

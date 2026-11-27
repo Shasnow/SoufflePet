@@ -340,11 +340,28 @@ public sealed class PlatformCommandTests : IAsyncLifetime
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             ChatModelConfig model,
             IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
+            [EnumeratorCancellation] CancellationToken cancellationToken,
+            ITurnContextGuard? contextGuard = null)
         {
             lock (_prompts) _prompts.Add(string.Join("\n", history.Select(message => message.Text)));
             await Task.Yield();
             yield return new LlmTextDelta("ok");
+        }
+
+        public Task<int> EstimateContextTokensAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(SoufflePet.Services.TokenEstimator.EstimateMessages(history));
+
+        public async IAsyncEnumerable<LlmStreamEvent> SummarizeAsync(
+            ChatModelConfig model,
+            IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> history,
+            string instruction,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            yield return new LlmTextDelta("摘要");
         }
     }
 
