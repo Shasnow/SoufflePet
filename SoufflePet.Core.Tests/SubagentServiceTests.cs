@@ -88,7 +88,7 @@ public sealed class SubagentServiceTests : IAsyncLifetime
                 activeDuringSpawn = _manager.ActiveSessionId;
                 spawnResult = await _service.SpawnAsync(new SubagentRequest("CHILD task", "调研缓存口径"), ct);
                 sessionsDuringSpawn = _manager.Sessions;
-                waitResult = await _service.WaitAsync(null, 10_000, ct);
+                waitResult = await _service.WaitAsync(null, 10, ct);
                 yield return new LlmTextDelta("父结论");
                 yield break;
             }
@@ -135,9 +135,9 @@ public sealed class SubagentServiceTests : IAsyncLifetime
             if (prompt.StartsWith("PARENT", StringComparison.Ordinal))
             {
                 await _service.SpawnAsync(new SubagentRequest("CHILD first", "探索"), ct);
-                waitResults.Add(await _service.WaitAsync("探索", 10_000, ct));
+                waitResults.Add(await _service.WaitAsync("探索", 10, ct));
                 await _service.SendAsync("探索", "CHILD second", ct);
-                waitResults.Add(await _service.WaitAsync("探索", 10_000, ct));
+                waitResults.Add(await _service.WaitAsync("探索", 10, ct));
                 yield return new LlmTextDelta("父结论");
                 yield break;
             }
@@ -179,7 +179,7 @@ public sealed class SubagentServiceTests : IAsyncLifetime
                 sendResult = await _service.SendAsync("探索", "CHILD second", ct);
                 // 子代理仍在执行，此时等待必须持续到排队轮次结束
                 releaseFirst.TrySetResult();
-                waitResult = await _service.WaitAsync("探索", 10_000, ct);
+                waitResult = await _service.WaitAsync("探索", 10, ct);
                 yield return new LlmTextDelta("父结论");
                 yield break;
             }
@@ -222,7 +222,7 @@ public sealed class SubagentServiceTests : IAsyncLifetime
             if (prompt.StartsWith("PARENT", StringComparison.Ordinal))
             {
                 await _service.SpawnAsync(new SubagentRequest("CHILD task", "探索"), ct);
-                await _service.WaitAsync(null, 10_000, ct);
+                await _service.WaitAsync(null, 10, ct);
                 yield return new LlmTextDelta("父结论");
                 yield break;
             }

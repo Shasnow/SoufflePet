@@ -35,8 +35,8 @@ public interface ISubagentService
     /// <summary>创建子会话并立即返回；子代理在后台继续执行。</summary>
     Task<string> SpawnAsync(SubagentRequest request, CancellationToken cancellationToken);
 
-    /// <summary>等待子代理当前这一轮结束。agent 为空时等待全部直接子代理。</summary>
-    Task<string> WaitAsync(string? agent, int timeoutMs, CancellationToken cancellationToken);
+    /// <summary>等待子代理当前这一轮结束。agent 为空时等待全部直接子代理；timeoutSeconds 为最长等待秒数。</summary>
+    Task<string> WaitAsync(string? agent, int timeoutSeconds, CancellationToken cancellationToken);
 
     /// <summary>继续给子代理发消息：空闲时开新一轮，执行中则排队。</summary>
     Task<string> SendAsync(string agent, string message, CancellationToken cancellationToken);
@@ -52,9 +52,9 @@ public sealed class SubagentService(SouffleSettings settings, Func<ChatSessionMa
 {
     private static readonly ILogger Logger = Log.ForContext<SubagentService>();
 
-    private const int DefaultWaitTimeoutMs = 30_000;
-    private const int MinWaitTimeoutMs = 10_000;
-    private const int MaxWaitTimeoutMs = 3_600_000;
+    private const int DefaultWaitTimeoutSeconds = 30;
+    private const int MinWaitTimeoutSeconds = 10;
+    private const int MaxWaitTimeoutSeconds = 3600;
     private const int NameLength = 30;
     private const int ResultTextMaxLength = 8000;
 
@@ -118,7 +118,7 @@ public sealed class SubagentService(SouffleSettings settings, Func<ChatSessionMa
         });
     }
 
-    public async Task<string> WaitAsync(string? agent, int timeoutMs, CancellationToken cancellationToken)
+    public async Task<string> WaitAsync(string? agent, int timeoutSeconds, CancellationToken cancellationToken)
     {
         if (ChatSession.CurrentTurnId is not { Length: > 0 } parentId)
             return "当前没有可等待的子代理。";
@@ -133,8 +133,9 @@ public sealed class SubagentService(SouffleSettings settings, Func<ChatSessionMa
         foreach (var record in targets)
             sessions.Add(await manager.ResolveAsync(record.Id, cancellationToken).ConfigureAwait(false));
 
-        var timeout = TimeSpan.FromMilliseconds(
-            Math.Clamp(timeoutMs <= 0 ? DefaultWaitTimeoutMs : timeoutMs, MinWaitTimeoutMs, MaxWaitTimeoutMs));
+        var timeout = TimeSpan.FromSeconds(
+            Math.Clamp(timeoutSeconds <= 0 ? DefaultWaitTimeoutSeconds : timeoutSeconds,
+                MinWaitTimeoutSeconds, MaxWaitTimeoutSeconds));
 
         var all = Task.WhenAll(sessions.Select(session => session.WaitForIdleAsync()));
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

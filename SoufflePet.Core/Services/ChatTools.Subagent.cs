@@ -28,10 +28,10 @@ public sealed partial class ChatTools
     private Task<string> WaitForAgent(
         [Description("要等待的子代理名称或会话 id（可选；留空等待全部直接子代理）")]
         string? agent = null,
-        [Description("最长等待毫秒数，默认 30000，允许范围 10000–3600000")]
-        int timeoutMs = 30000,
+        [Description("最长等待秒数，默认 30，允许范围 10–3600")]
+        int timeoutSeconds = 30,
         CancellationToken cancellationToken = default) =>
-        _subagents.WaitAsync(agent, timeoutMs, cancellationToken);
+        _subagents.WaitAsync(agent, timeoutSeconds, cancellationToken);
 
     private Task<string> SendMessageToAgent(
         [Description("子代理名称或会话 id")]
