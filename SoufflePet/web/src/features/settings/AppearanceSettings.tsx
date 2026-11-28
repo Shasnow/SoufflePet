@@ -42,8 +42,6 @@ export function AppearanceSettings() {
     try {
       const updated = await invoke<typeof theme>('settings.appearance.setMode', { mode })
       setTheme(updated)
-      // 与 setFollow/reset 一致：丢弃未保存的颜色预览，避免输入框显示的颜色与实际应用不一致
-      setAccent(updated.accent)
     } catch (modeError) {
       setError(`切换外观模式失败：${errorMessage(modeError)}`)
     } finally {

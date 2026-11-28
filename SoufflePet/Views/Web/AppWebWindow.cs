@@ -46,10 +46,6 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwcpRound = 2;
 
-    /// <summary>WebView 绘制前的兜底底色，与 tokens.css 的 surface-0 明度对齐。</summary>
-    private static readonly Color LightChrome = Color.FromRgb(0xF4, 0xF4, 0xF5);
-    private static readonly Color DarkChrome = Color.FromRgb(0x1B, 0x1C, 0x1E);
-
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -110,7 +106,9 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
         WindowDecorations = WindowDecorations.None;
         Topmost = false;
         // 窗口背景只用于 WebView 绘制前的兜底底色，跟随外观模式，避免浅色主题下露黑边。
-        Background = new SolidColorBrush(ChromeColor(theme.GetTheme().Mode));
+        Background = new SolidColorBrush(theme.GetTheme().Mode == ThemeModes.Light
+            ? Color.FromRgb(0xF4, 0xF4, 0xF5)
+            : Color.FromRgb(0x1B, 0x1C, 0x1E));
 
         _view = new NativeWebView { Background = Background };
         _view.EnvironmentRequested += OnEnvironmentRequested;
@@ -440,36 +438,17 @@ public sealed class AppWebWindow : Window, IAppWindowCommands
 
     private void OnThemeChanged(object? sender, ThemeDto e)
     {
-        // 事件可能来自 RPC / 后台线程：先推给页面（SendEvent 自带线程切换），再回 UI 线程更新兜底底色。
         try
         {
+            Background = new SolidColorBrush(e.Mode == ThemeModes.Light
+                ? Color.FromRgb(0xF4, 0xF4, 0xF5)
+                : Color.FromRgb(0x1B, 0x1C, 0x1E));
+            _view.Background = Background;
             _bridge.PublishTheme(e);
         }
         catch (Exception ex)
         {
             Logger.Warning(ex, "publish theme failed");
-        }
-
-        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
-            ApplyChrome(e.Mode);
-        else
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyChrome(e.Mode));
-    }
-
-    private static Color ChromeColor(string mode) =>
-        mode == ThemeModes.Light ? LightChrome : DarkChrome;
-
-    /// <summary>更新窗口与 WebView 的兜底底色；窗口已释放时忽略。</summary>
-    private void ApplyChrome(string mode)
-    {
-        try
-        {
-            Background = new SolidColorBrush(ChromeColor(mode));
-            _view.Background = Background;
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug(ex, "apply window chrome failed");
         }
     }
 

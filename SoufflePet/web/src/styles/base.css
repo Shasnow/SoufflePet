@@ -830,7 +830,6 @@ body.is-resizing-sidebar .sidebar {
     inset: var(--topbar-h) auto 0 0;
     width: var(--sidebar-w);
     transform: translateX(-100%);
-    box-shadow: var(--shadow-3);
   }
 
   /* 抽屉模式下不提供拖拽调宽 */
@@ -840,6 +839,8 @@ body.is-resizing-sidebar .sidebar {
 
   .app-shell[data-drawer-open='true'] .sidebar {
     transform: translateX(0);
+    /* 阴影只在抽屉打开时加，否则收起后仍会在窗口左缘投出一条阴影 */
+    box-shadow: var(--shadow-3);
   }
 
   .app-shell[data-drawer-open='true'] .sidebar-scrim {

@@ -153,9 +153,9 @@ public sealed class ThemeService : IDisposable
         var normalized = ParseMode(mode)
                          ?? throw new ArgumentException("外观模式必须是 dark / light / system", nameof(mode));
 
-        // 赋值触发的 PropertyChanged 已让 OnSettingsChanged 重同步轮询状态，这里不再重复调用
         _settings.UiThemeMode = normalized;
         _settings.Save();
+        SyncSystemTimer();
 
         var theme = GetTheme();
         Raise(theme);

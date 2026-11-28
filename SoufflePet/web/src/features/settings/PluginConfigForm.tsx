@@ -22,6 +22,14 @@ function displayValue(value: unknown): string {
   return String(value)
 }
 
+/** 数字框在编辑期间保留原始字符串（否则 "0." 会被格式化成 "0"）；空串按 0，非法返回 null。 */
+function parseNumber(raw: unknown): number | null {
+  const text = String(raw ?? '').trim()
+  if (text === '') return 0
+  const parsed = Number(text)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export function PluginConfigForm({
   pluginId,
   onSaved,
@@ -66,8 +74,14 @@ export function PluginConfigForm({
       for (const field of fields) {
         const value = values[field.key]
         if (field.kind === 'boolean') config[field.key] = value === true
-        else if (field.kind === 'number') config[field.key] = Number(value) || 0
-        else if (field.kind === 'list') {
+        else if (field.kind === 'number') {
+          const parsed = parseNumber(value)
+          if (parsed === null) {
+            setError(`「${field.label || field.key}」需要填写有效数字`)
+            return
+          }
+          config[field.key] = parsed
+        } else if (field.kind === 'list') {
           config[field.key] = Array.isArray(value)
             ? value
             : String(value ?? '')
@@ -135,14 +149,12 @@ export function PluginConfigForm({
                 <input
                   id={`plugin-${pluginId}-${field.key}`}
                   className="input"
-                  type={field.kind === 'number' ? 'number' : field.kind === 'password' ? 'password' : 'text'}
+                  // 数字走文本框而不是 type="number"：后者会在输入 "0." 时把值规整成 0，
+                  // 导致无法继续输入 0.01 这类小数。这里保留原始文本，保存时再解析。
+                  type={field.kind === 'password' ? 'password' : 'text'}
+                  inputMode={field.kind === 'number' ? 'decimal' : undefined}
                   value={displayValue(value)}
-                  onChange={(event) =>
-                    setValues({
-                      ...values,
-                      [field.key]: field.kind === 'number' ? Number(event.target.value) : event.target.value,
-                    })
-                  }
+                  onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
                 />
               )}
               {field.description ? <div className="field-hint">{field.description}</div> : null}

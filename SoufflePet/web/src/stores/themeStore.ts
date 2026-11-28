@@ -19,9 +19,7 @@ const initialAccent = params.get('accent') ?? oklchToHex(DEFAULT_ACCENT)
 const initialMode: ThemeMode = params.get('mode') === 'light' ? 'light' : 'dark'
 const preferenceParam = params.get('modePreference')
 const initialPreference: ThemeModePreference =
-  preferenceParam === 'dark' || preferenceParam === 'light' || preferenceParam === 'system'
-    ? preferenceParam
-    : initialMode
+  preferenceParam === 'light' || preferenceParam === 'system' ? preferenceParam : initialMode
 const initialOklch = hexToOklch(initialAccent) ?? DEFAULT_ACCENT
 const initialTheme: ThemeDto = {
   mode: initialMode,

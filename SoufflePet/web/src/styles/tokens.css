@@ -28,8 +28,6 @@
   --on-accent-dark: oklch(0.16 0.01 var(--accent-h));
   --on-accent-light: oklch(0.98 0.005 var(--accent-h));
   --on-accent: var(--on-accent-dark);
-  /* 强调色作为前景（链接/图标）：深色底直接用强调色 */
-  --accent-text: var(--accent);
 
   /* 表面（暗色玻璃） */
   --surface-0: oklch(0.18 0.006 var(--accent-h));
@@ -90,7 +88,7 @@
   --shiki-token-function: oklch(0.78 0.12 250);
   --shiki-token-string-expression: oklch(0.76 0.13 145);
   --shiki-token-punctuation: var(--text-2);
-  --shiki-token-link: var(--accent-text);
+  --shiki-token-link: var(--accent);
 }
 
 :root[data-mode='light'] {
@@ -121,8 +119,6 @@
   --accent-line: oklch(from var(--accent) 0.55 0.14 h / 0.5);
   --accent-glow: oklch(from var(--accent) 0.7 0.12 h / 0.18);
   --on-accent: oklch(0.98 0.005 var(--accent-h));
-  /* 浅色底上强调色当前景太淡，压暗到约 4.5:1 */
-  --accent-text: oklch(from var(--accent) 0.5 0.13 h);
 
   /* 语义色在浅色底上降低明度，保证小字号文本的对比度 */
   --danger: oklch(0.55 0.2 25);
